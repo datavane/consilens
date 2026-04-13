@@ -9,7 +9,7 @@ Consilens CLI 是一个跨数据库数据一致性校验工具，通过 YAML/JSO
   - `checksum`（默认）：基于分组校验和的递归二分对比，适合跨数据库、大数据量场景
   - `join`：基于 SQL FULL OUTER JOIN 的快速对比，适合同库或高速互联场景
 - **多种 Checksum 算法**：`concat`（拼接，默认）、`xor`（异或）
-- **本地比较自动优化**：终局小段会自动在完整行比较和主键 + 行哈希过滤之间选择
+- **本地比较可控**：终局小段默认使用完整行比较，必要时可显式启用主键 + 行哈希过滤
 - **灵活输出（result.sinks）**：支持控制台摘要、JSON/CSV 文件以及写入数据库表，可同时配置多个 sink
 - **配置文件驱动**：YAML 或 JSON 格式
 
@@ -194,6 +194,8 @@ strategy:
   bisectionThreshold: 10000
   batchSize: 1000
   enableProfiling: false
+  localCompare:
+    mode: full
 
 # ─── 并发配置 ────────────────────────────────────────────
 concurrency:
@@ -265,8 +267,8 @@ result:
 推荐组合：
 
 - 默认优先 `algorithm: xor`
-- 终局小段会自动在 `full` 和 `row-hash` 之间选择
-- 一般不需要手工指定本地比较模式
+- 终局小段默认使用 `localCompare.mode: full`
+- 只有明确配置 `localCompare.mode: row-hash` 时，才会先拉主键 + 行哈希再回查差异行
 
 ### `join` 策略
 

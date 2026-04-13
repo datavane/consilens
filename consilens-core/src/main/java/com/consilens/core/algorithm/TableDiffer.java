@@ -1,6 +1,7 @@
 package com.consilens.core.algorithm;
 
 import com.consilens.common.enums.ChecksumAlgorithm;
+import com.consilens.common.enums.LocalCompareMode;
 import com.consilens.core.segment.TableSegment;
 import com.consilens.core.diff.DiffEmitter;
 import com.consilens.core.diff.DiffResult;
@@ -245,28 +246,38 @@ public abstract class TableDiffer implements DiffEmitter {
         private final boolean enableProfiling;
         private final int maxDepth;
         private final ChecksumAlgorithm checksumAlgorithm;
+        private final LocalCompareMode localCompareMode;
         private final ConcurrencyConfig concurrencyConfig;
 
         public DifferConfig(int bisectionFactor, long bisectionThreshold,
                            boolean enableProfiling, ChecksumAlgorithm checksumAlgorithm,
+                           LocalCompareMode localCompareMode,
                            ConcurrencyConfig concurrencyConfig) {
             this.bisectionFactor = bisectionFactor;
             this.bisectionThreshold = bisectionThreshold;
             this.enableProfiling = enableProfiling;
             this.maxDepth = 10;
             this.checksumAlgorithm = checksumAlgorithm != null ? checksumAlgorithm : ChecksumAlgorithm.CONCAT;
+            this.localCompareMode = localCompareMode != null ? localCompareMode : LocalCompareMode.FULL;
             this.concurrencyConfig = concurrencyConfig != null ? concurrencyConfig : ConcurrencyConfig.defaultConfig();
         }
 
         public DifferConfig(int bisectionFactor, long bisectionThreshold,
                            boolean enableProfiling, ChecksumAlgorithm checksumAlgorithm) {
             this(bisectionFactor, bisectionThreshold, enableProfiling,
-                 checksumAlgorithm, ConcurrencyConfig.defaultConfig());
+                 checksumAlgorithm, LocalCompareMode.FULL, ConcurrencyConfig.defaultConfig());
+        }
+
+        public DifferConfig(int bisectionFactor, long bisectionThreshold,
+                           boolean enableProfiling, ChecksumAlgorithm checksumAlgorithm,
+                           ConcurrencyConfig concurrencyConfig) {
+            this(bisectionFactor, bisectionThreshold, enableProfiling,
+                 checksumAlgorithm, LocalCompareMode.FULL, concurrencyConfig);
         }
 
         public static DifferConfig defaultConfig() {
             return new DifferConfig(32, 16384, false, ChecksumAlgorithm.CONCAT,
-                    ConcurrencyConfig.defaultConfig());
+                    LocalCompareMode.FULL, ConcurrencyConfig.defaultConfig());
         }
 
     }

@@ -4,14 +4,14 @@
 source:
   type: mysql
   url: jdbc:mysql://source-host:3306/production
-  username: readonly_user
-  password: ${SOURCE_PASSWORD}
+  username: ${env.MYSQL_USER}
+  password: ${env.MYSQL_PASSWORD}
 
 target:
   type: starrocks
   url: jdbc:mysql://starrocks-host:9030/analytics
-  username: readonly_user
-  password: ${TARGET_PASSWORD}
+  username: ${env.STARROCKS_USER}
+  password: ${env.STARROCKS_PASSWORD}
 
 comparison:
   tables:
@@ -70,8 +70,8 @@ result:
       type: diff-record
       properties:
         url: jdbc:mysql://localhost:3306/diff_results
-        username: root
-        password: ${OUTPUT_DB_PASSWORD}
+        username: ${env.MYSQL_USER}
+        password: ${env.MYSQL_PASSWORD}
         driver: com.mysql.cj.jdbc.Driver
         maxPoolSize: 10
         prefix: diff_

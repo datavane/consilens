@@ -45,6 +45,10 @@ public class StrategyConfig {
     @JsonProperty("enableProfiling")
     private Boolean enableProfiling = false;
 
+    @Builder.Default
+    @JsonProperty("localCompare")
+    private LocalCompareConfig localCompare = LocalCompareConfig.builder().mode("full").build();
+
     @JsonIgnore
     public ComparisonStrategy getModeEnum() {
         return ComparisonStrategy.fromString(mode);
@@ -75,6 +79,10 @@ public class StrategyConfig {
         if (!"concat".equals(normalizedAlgorithm)
                 && !"xor".equals(normalizedAlgorithm)) {
             throw ValidationException.simple("CONFIGURATION_VALIDATION", "strategy.algorithm 必须是 concat 或 xor");
+        }
+
+        if (localCompare != null) {
+            localCompare.validate();
         }
     }
 }

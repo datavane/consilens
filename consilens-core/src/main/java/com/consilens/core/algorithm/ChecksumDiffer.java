@@ -1,6 +1,7 @@
 package com.consilens.core.algorithm;
 
 import com.consilens.common.enums.ChecksumAlgorithm;
+import com.consilens.common.enums.LocalCompareMode;
 import com.consilens.core.segment.TableSegment;
 import com.consilens.core.diff.DiffResult;
 import com.consilens.core.segment.TableSegment.ChecksumResult;
@@ -247,7 +248,7 @@ public class ChecksumDiffer extends TableDiffer implements AutoCloseable {
             // Small enough for local comparison
             infoTreeRecorder.recordDecision(segmentId, "local_compare");
             infoTreeRecorder.markLocalCompareSegment();
-            return performLocalComparison(table1, table2, infoTreeRecorder, segmentId, maxRows);
+            return performLocalComparison(table1, table2, infoTreeRecorder, segmentId);
         } else if (shouldUseAdaptiveSegmentation(totalRows, maxRows, sizeRatio, level)) {
             // Use adaptive segmentation
             infoTreeRecorder.recordDecision(segmentId, "adaptive_split");
@@ -275,7 +276,7 @@ public class ChecksumDiffer extends TableDiffer implements AutoCloseable {
         if (level > config.getMaxDepth()) {
             log.warn("Recursion depth {} exceeds maxDepth {}, forcing local comparison for segment {}",
                     level, config.getMaxDepth(), parentSegmentId);
-            return performLocalComparison(table1, table2, infoTreeRecorder, parentSegmentId, maxRows);
+            return performLocalComparison(table1, table2, infoTreeRecorder, parentSegmentId);
         }
 
         if (!table1.isBounded() || !table2.isBounded()) {
@@ -463,101 +464,20 @@ public class ChecksumDiffer extends TableDiffer implements AutoCloseable {
     /**
      * Perform local comparison of segments.
      * 
-     * If configured, use row-level hashes for efficient difference detection.
+     * If configured, use row-level hashes for difference detection.
      * This avoids pulling all column data when most rows are identical.
      */
     private CompletableFuture<Void> performLocalComparison(
-            TableSegment table1, TableSegment table2, InfoTreeRecorder infoTreeRecorder, String segmentId,
-            long maxRows) {
+            TableSegment table1, TableSegment table2, InfoTreeRecorder infoTreeRecorder, String segmentId) {
 
-        LocalComparisonStrategy strategy = chooseLocalComparisonStrategy(table1, table2, maxRows);
-        log.info("Performing local comparison for segment: {} using strategy: {}", segmentId, strategy);
-        infoTreeRecorder.recordMetric(segmentId, "localCompareStrategy", strategy.name().toLowerCase(Locale.ROOT));
+        LocalCompareMode localCompareMode = config.getLocalCompareMode();
+        log.info("Performing local comparison for segment: {} using mode: {}", segmentId, localCompareMode);
+        infoTreeRecorder.recordMetric(segmentId, "localCompareMode", localCompareMode.getCode());
 
-        if (strategy == LocalComparisonStrategy.ROW_HASH) {
+        if (localCompareMode.isRowHash()) {
             return performRowHashBasedComparison(table1, table2, infoTreeRecorder, segmentId);
         } else {
             return performFullDataComparison(table1, table2, infoTreeRecorder, segmentId);
-        }
-    }
-
-    private LocalComparisonStrategy chooseLocalComparisonStrategy(TableSegment table1, TableSegment table2, long maxRows) {
-        int columnCount = Math.max(table1.getRelevantColumns().size(), table2.getRelevantColumns().size());
-        int estimatedRowWidth = Math.max(estimateRowWidth(table1), estimateRowWidth(table2));
-
-        // Small and medium final segments rarely benefit from the extra round-trips of row-hash.
-        if (maxRows <= 5000) {
-            return LocalComparisonStrategy.FULL;
-        }
-
-        // Narrow tables are usually faster to pull directly than to compute row hashes first.
-        if (columnCount <= 10 && estimatedRowWidth <= 192) {
-            return LocalComparisonStrategy.FULL;
-        }
-
-        // Row-hash pays off mainly on large segments with genuinely wide rows.
-        if (maxRows >= 10000 && (estimatedRowWidth >= 384 || columnCount >= 16)) {
-            return LocalComparisonStrategy.ROW_HASH;
-        }
-
-        // Default to full for medium-sized/narrow segments to minimize fixed overhead.
-        return LocalComparisonStrategy.FULL;
-    }
-
-    private int estimateRowWidth(TableSegment segment) {
-        Optional<TableSchema> schemaOpt = segment.getSchema();
-        if (!schemaOpt.isPresent()) {
-            return segment.getRelevantColumns().size() * 32;
-        }
-
-        int width = 0;
-        for (String column : segment.getRelevantColumns()) {
-            DataType dataType = schemaOpt.get().getColumnType(column);
-            width += estimateColumnWidth(dataType);
-        }
-        return Math.max(width, segment.getRelevantColumns().size() * 16);
-    }
-
-    private int estimateColumnWidth(DataType dataType) {
-        if (dataType == null) {
-            return 32;
-        }
-        if (dataType.isBinary()) {
-            return 256;
-        }
-        if (dataType.isString()) {
-            switch (dataType) {
-                case CHAR:
-                    return 16;
-                case VARCHAR:
-                case LONGVARCHAR:
-                    return 64;
-                case TEXT:
-                case CLOB:
-                    return 256;
-                default:
-                    return 64;
-            }
-        }
-        if (dataType.isNumeric()) {
-            return 16;
-        }
-        if (dataType.isTemporal()) {
-            return 24;
-        }
-        switch (dataType) {
-            case BOOLEAN:
-            case BIT:
-                return 4;
-            case JSON:
-            case JSONB:
-            case ARRAY:
-            case OBJECT:
-                return 256;
-            case UUID:
-                return 36;
-            default:
-                return 32;
         }
     }
 
@@ -806,11 +726,6 @@ public class ChecksumDiffer extends TableDiffer implements AutoCloseable {
             this.rows1 = rows1;
             this.rows2 = rows2;
         }
-    }
-
-    private enum LocalComparisonStrategy {
-        FULL,
-        ROW_HASH
     }
 
     /**

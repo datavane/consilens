@@ -1,14 +1,14 @@
 source:
   type: mysql
   url: jdbc:mysql://localhost:3306/test
-  username: root
-  password: change_me_mysql_password
+  username: ${env.MYSQL_USER}
+  password: ${env.MYSQL_PASSWORD}
 
 target:
   type: starrocks
   url: jdbc:mysql://localhost:9030/test
-  username: root
-  password: change_me_starrocks_password
+  username: ${env.STARROCKS_USER}
+  password: ${env.STARROCKS_PASSWORD}
 
 comparison:
   tables:

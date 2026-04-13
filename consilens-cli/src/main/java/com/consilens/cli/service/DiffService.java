@@ -4,6 +4,7 @@ import com.consilens.cli.model.CliConfiguration;
 import com.consilens.cli.model.CliDiffResult;
 import com.consilens.cli.model.TableMetadata;
 import com.consilens.common.enums.ChecksumAlgorithm;
+import com.consilens.common.enums.LocalCompareMode;
 import com.consilens.connector.api.model.TablePath;
 import com.consilens.core.algorithm.ChecksumDiffer;
 import com.consilens.core.algorithm.JoinDiffer;
@@ -204,13 +205,17 @@ public class DiffService {
         boolean enableProfiling = config.getStrategy().getEnableProfiling() != null ? config.getStrategy().getEnableProfiling() : false;
 
         ChecksumAlgorithm checksumAlgorithm = config.getAlgorithmEnum();
+        LocalCompareMode localCompareMode = config.getStrategy().getLocalCompare() != null
+                ? config.getStrategy().getLocalCompare().getModeEnum()
+                : LocalCompareMode.FULL;
         log.info("Creating DifferConfig: bisectionFactor={}, bisectionThreshold={}, " +
-                "enableProfiling={}, checksumAlgorithm={}",
+                "enableProfiling={}, checksumAlgorithm={}, localCompareMode={}",
                 bisectionFactor, bisectionThreshold, enableProfiling,
-                checksumAlgorithm);
+                checksumAlgorithm, localCompareMode);
 
         return new TableDiffer.DifferConfig(bisectionFactor, bisectionThreshold,
                                            enableProfiling, checksumAlgorithm,
+                                           localCompareMode,
                                            config.getConcurrency());
     }
 
