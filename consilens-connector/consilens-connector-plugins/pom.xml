@@ -31,6 +31,7 @@
         <module>consilens-connector-starrocks</module>
         <module>consilens-connector-clickhouse</module>
         <module>consilens-connector-tidb</module>
+        <module>consilens-connector-sqlite</module>
         <module>consilens-connector-all</module>
     </modules>
 

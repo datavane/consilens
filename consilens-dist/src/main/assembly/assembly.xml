@@ -75,6 +75,7 @@
                 <exclude>com.clickhouse:*</exclude>
                 <exclude>io.trino:trino-jdbc</exclude>
                 <exclude>com.facebook.presto:presto-jdbc</exclude>
+                <exclude>org.xerial:sqlite-jdbc</exclude>
             </excludes>
         </dependencySet>
 
@@ -107,6 +108,7 @@
                 <exclude>org.yaml:snakeyaml</exclude>
                 <exclude>info.picocli:picocli</exclude>
                 <exclude>com.h2database:h2</exclude>
+                <exclude>org.xerial:sqlite-jdbc</exclude>
                 <exclude>io.micrometer:*</exclude>
                 <exclude>org.hdrhistogram:HdrHistogram</exclude>
                 <exclude>org.latencyutils:LatencyUtils</exclude>
@@ -144,6 +146,7 @@
                 <include>com.clickhouse:*</include>
                 <include>io.trino:trino-jdbc</include>
                 <include>com.facebook.presto:presto-jdbc</include>
+                <include>org.xerial:sqlite-jdbc</include>
             </includes>
         </dependencySet>
     </dependencySets>

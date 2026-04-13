@@ -2,8 +2,8 @@ package com.consilens.core.database.connection;
 
 import com.consilens.connector.api.ConnectionPoolOptimizer;
 import com.consilens.connector.api.DatabaseDialect;
-import com.consilens.connector.api.model.PoolConfiguration;
 import com.consilens.connector.api.enums.DatabaseType;
+import com.consilens.connector.api.model.PoolConfiguration;
 import com.consilens.core.database.dialect.DialectFactory;
 import lombok.extern.slf4j.Slf4j;
 
@@ -24,48 +24,54 @@ public class ConnectionPoolFactory {
      * Create a connection pool with default configuration.
      */
     public static ConnectionPool createPool(String jdbcUrl, String username, String password) {
-        return createPool(jdbcUrl, username, password, DatabaseType.fromJdbcUrl(jdbcUrl));
+        DatabaseType effectiveType = resolveEffectiveType(jdbcUrl, DatabaseType.UNKNOWN);
+        return createPool(jdbcUrl, username, password, effectiveType, getDefaultConfiguration(effectiveType));
     }
 
     /**
      * Create a connection pool with database type specification.
      */
     public static ConnectionPool createPool(String jdbcUrl, String username, String password, DatabaseType databaseType) {
-        return createPool(jdbcUrl, username, password, databaseType, getDefaultConfiguration(databaseType));
+        DatabaseType effectiveType = resolveEffectiveType(jdbcUrl, databaseType);
+        return createPool(jdbcUrl, username, password, effectiveType, getDefaultConfiguration(effectiveType));
     }
 
     /**
      * Create a connection pool with custom configuration.
      */
     public static ConnectionPool createPool(String jdbcUrl, String username, String password, DatabaseType databaseType, PoolConfiguration configuration) {
+        DatabaseType effectiveType = resolveEffectiveType(jdbcUrl, databaseType);
+        String normalizedUsername = normalizeUsernameForCache(effectiveType, username);
+        String normalizedPassword = effectiveType == DatabaseType.SQLITE ? null : password;
+
         // Use cache if available
-        String cacheKey = generateCacheKey(jdbcUrl, username, databaseType);
+        String cacheKey = generateCacheKey(jdbcUrl, normalizedUsername, effectiveType);
         ConnectionPool cachedPool = POOL_CACHE.get(cacheKey);
         if (cachedPool != null && !cachedPool.isClosed()) {
-            log.debug("Returning cached connection pool for {}", databaseType.getDisplayName());
+            log.debug("Returning cached connection pool for {}", effectiveType.getDisplayName());
             return cachedPool;
         }
 
         // Get default configuration from connector
-        PoolConfiguration defaultConfig = getDefaultConfiguration(databaseType);
-        
+        PoolConfiguration defaultConfig = getDefaultConfiguration(effectiveType);
+
         // Build configuration by merging with defaults
         PoolConfiguration poolConfig = configuration != null ? configuration.copy() : defaultConfig.copy();
         poolConfig.setJdbcUrl(jdbcUrl);
-        poolConfig.setUsername(username);
-        poolConfig.setPassword(password);
-        poolConfig.setDatabaseType(databaseType);
-        
+        poolConfig.setUsername(normalizedUsername);
+        poolConfig.setPassword(normalizedPassword);
+        poolConfig.setDatabaseType(effectiveType);
+
         // Preserve connectionInitSql from default config if not set in custom config
         if (poolConfig.getConnectionInitSql() == null && defaultConfig.getConnectionInitSql() != null) {
             poolConfig.setConnectionInitSql(defaultConfig.getConnectionInitSql());
-            log.info("Applied default connectionInitSql for {}: {}", 
-                     databaseType.getDisplayName(), defaultConfig.getConnectionInitSql());
+            log.info("Applied default connectionInitSql for {}: {}",
+                    effectiveType.getDisplayName(), defaultConfig.getConnectionInitSql());
         } else if (poolConfig.getConnectionInitSql() != null) {
-            log.info("Using custom connectionInitSql for {}: {}", 
-                     databaseType.getDisplayName(), poolConfig.getConnectionInitSql());
+            log.info("Using custom connectionInitSql for {}: {}",
+                    effectiveType.getDisplayName(), poolConfig.getConnectionInitSql());
         } else {
-            log.debug("No connectionInitSql configured for {}", databaseType.getDisplayName());
+            log.debug("No connectionInitSql configured for {}", effectiveType.getDisplayName());
         }
 
         // Create new pool
@@ -74,7 +80,7 @@ public class ConnectionPoolFactory {
         // Cache the pool
         POOL_CACHE.put(cacheKey, pool);
 
-        log.info("Created new connection pool for {} at {}", databaseType.getDisplayName(), jdbcUrl.replaceAll("password=[^&]*", "password=***"));
+        log.info("Created new connection pool for {} at {}", effectiveType.getDisplayName(), sanitizeJdbcUrl(jdbcUrl));
         return pool;
     }
 
@@ -86,13 +92,13 @@ public class ConnectionPoolFactory {
             DatabaseDialect dialect = DialectFactory.getDialect(databaseType);
             ConnectionPoolOptimizer optimizer = dialect.getConnectionPoolOptimizer();
             PoolConfiguration config = optimizer.getDefaultConfiguration();
-            
+
             log.debug("Retrieved default configuration from {} connector", databaseType.getDisplayName());
             return config;
         } catch (Exception e) {
-            log.warn("Failed to get default configuration from connector for {}, using generic defaults: {}", 
+            log.warn("Failed to get default configuration from connector for {}, using generic defaults: {}",
                     databaseType.getDisplayName(), e.getMessage());
-            
+
             // Fallback to generic configuration
             PoolConfiguration config = new PoolConfiguration();
             config.setMaxPoolSize(10);
@@ -142,12 +148,12 @@ public class ConnectionPoolFactory {
      * Close and remove a cached connection pool.
      */
     public static void closePool(String jdbcUrl, String username) {
-        String cacheKey = generateCacheKey(jdbcUrl, username, DatabaseType.fromJdbcUrl(jdbcUrl));
+        DatabaseType effectiveType = resolveEffectiveType(jdbcUrl, DatabaseType.UNKNOWN);
+        String cacheKey = generateCacheKey(jdbcUrl, normalizeUsernameForCache(effectiveType, username), effectiveType);
         ConnectionPool pool = POOL_CACHE.remove(cacheKey);
         if (pool != null) {
             pool.close();
-            log.info("Closed and removed cached connection pool for {}",
-                    jdbcUrl.replaceAll("password=[^&]*", "password=***"));
+            log.info("Closed and removed cached connection pool for {}", sanitizeJdbcUrl(jdbcUrl));
         }
     }
 
@@ -190,7 +196,8 @@ public class ConnectionPoolFactory {
      * Get connection pool from cache.
      */
     public static ConnectionPool getCachedPool(String jdbcUrl, String username) {
-        String cacheKey = generateCacheKey(jdbcUrl, username, DatabaseType.fromJdbcUrl(jdbcUrl));
+        DatabaseType effectiveType = resolveEffectiveType(jdbcUrl, DatabaseType.UNKNOWN);
+        String cacheKey = generateCacheKey(jdbcUrl, normalizeUsernameForCache(effectiveType, username), effectiveType);
         return POOL_CACHE.get(cacheKey);
     }
 
@@ -220,6 +227,29 @@ public class ConnectionPoolFactory {
 
     private static String generateCacheKey(String jdbcUrl, String username, DatabaseType databaseType) {
         return String.format("%s:%s@%s", username, databaseType.name(), jdbcUrl);
+    }
+
+    private static DatabaseType resolveEffectiveType(String jdbcUrl, DatabaseType databaseType) {
+        DatabaseType requestedType = databaseType == null ? DatabaseType.UNKNOWN : databaseType;
+        return requestedType == DatabaseType.UNKNOWN ? DatabaseType.fromJdbcUrl(jdbcUrl) : requestedType;
+    }
+
+    private static String normalizeUsernameForCache(DatabaseType databaseType, String username) {
+        if (databaseType == DatabaseType.SQLITE) {
+            return null;
+        }
+        if (username == null || username.trim().isEmpty()) {
+            return username;
+        }
+        return username;
+    }
+
+    private static String sanitizeJdbcUrl(String jdbcUrl) {
+        if (jdbcUrl == null) {
+            return null;
+        }
+        return jdbcUrl.replaceAll("(?i)(password|pwd|passphrase|token|access_token|authToken)=([^&;]+)", "$1=***")
+                .replaceAll("//([^/@:]+):([^@/]+)@", "//$1:***@");
     }
 
     /**

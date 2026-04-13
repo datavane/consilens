@@ -273,4 +273,109 @@ class ConfigurationManagerTest {
 
         assertEquals("Missing required environment variable: SOURCE_URL", exception.getMessage());
     }
+
+    @Test
+    void shouldLoadSqliteConfigurationWithoutUsernameOrPassword() throws Exception {
+        CliConfiguration config = loadConfiguration("sqlite-no-credentials.yaml",
+                sqliteConnectionsYaml("type: sqlite\n  url: jdbc:sqlite:/tmp/source.db\n",
+                        "type: sqlite\n  url: \"jdbc:sqlite::memory:\"\n"));
+
+        assertEquals("sqlite", config.getSource().getType());
+        assertEquals("jdbc:sqlite:/tmp/source.db", config.getSource().getUrl());
+        assertEquals("jdbc:sqlite::memory:", config.getTarget().getUrl());
+    }
+
+    @Test
+    void shouldAllowSqliteAutoDetectionWithoutExplicitType() throws Exception {
+        CliConfiguration config = loadConfiguration("sqlite-auto-detect.yaml",
+                sqliteConnectionsYaml("url: jdbc:sqlite:/tmp/source.db\n",
+                        "url: jdbc:sqlite:/tmp/target.db\n"));
+
+        assertEquals("jdbc:sqlite:/tmp/source.db", config.getSource().getUrl());
+        assertEquals("jdbc:sqlite:/tmp/target.db", config.getTarget().getUrl());
+    }
+
+    @Test
+    void shouldAllowSqliteTypeWithSqlitePrefixedUrlContainingMysqlWord() throws Exception {
+        CliConfiguration config = loadConfiguration("sqlite-explicit-type.yaml",
+                sqliteConnectionsYaml("type: sqlite\n  url: jdbc:sqlite:/tmp/mysql.db\n",
+                        "type: sqlite\n  url: jdbc:sqlite:/tmp/target.db\n"));
+
+        assertEquals("sqlite", config.getSource().getType());
+        assertEquals("jdbc:sqlite:/tmp/mysql.db", config.getSource().getUrl());
+    }
+
+    @Test
+    void shouldFailWhenSqliteTypeUsesNonSqliteJdbcUrl() throws Exception {
+        ConfigurationException exception = assertThrows(ConfigurationException.class,
+                () -> loadConfiguration("sqlite-type-non-sqlite-url.yaml",
+                        sqliteConnectionsYaml("type: sqlite\n  url: jdbc:mysql://localhost:3306/test\n",
+                                "type: sqlite\n  url: jdbc:sqlite:/tmp/target.db\n")));
+
+        assertTrue(exception.getMessage().contains("source.type requires source.url to start with jdbc:sqlite:"));
+    }
+
+    @Test
+    void shouldFailWhenExplicitTypeDoesNotMatchSqliteJdbcUrl() throws Exception {
+        ConfigurationException exception = assertThrows(ConfigurationException.class,
+                () -> loadConfiguration("sqlite-type-mismatch.yaml",
+                        sqliteConnectionsYaml("type: mysql\n  url: jdbc:sqlite:/tmp/source.db\n  username: root\n",
+                                "type: sqlite\n  url: jdbc:sqlite:/tmp/target.db\n")));
+
+        assertTrue(exception.getMessage().contains("source.type does not match source.url"));
+    }
+
+    @Test
+    void shouldAllowSqliteInMemoryUrl() throws Exception {
+        CliConfiguration config = loadConfiguration("sqlite-memory.yaml",
+                sqliteConnectionsYaml("type: sqlite\n  url: \"jdbc:sqlite::memory:\"\n",
+                        "type: sqlite\n  url: jdbc:sqlite:/tmp/target.db\n"));
+
+        assertEquals("jdbc:sqlite::memory:", config.getSource().getUrl());
+    }
+
+    @Test
+    void shouldFailWhenSqliteUrlHasNoDataSource() throws Exception {
+        ConfigurationException exception = assertThrows(ConfigurationException.class,
+                () -> loadConfiguration("sqlite-empty-datasource.yaml",
+                        sqliteConnectionsYaml("type: sqlite\n  url: \"jdbc:sqlite:\"\n",
+                                "type: sqlite\n  url: jdbc:sqlite:/tmp/target.db\n")));
+
+        assertTrue(exception.getMessage().contains("source.url must include a SQLite data source path or :memory:"));
+    }
+
+    private CliConfiguration loadConfiguration(String fileName, String content) throws Exception {
+        Path configFile = tempDir.resolve(fileName);
+        Files.writeString(configFile, content);
+        return new ConfigurationManager().loadConfiguration(configFile.toString(), false);
+    }
+
+    private String sqliteConnectionsYaml(String sourceBlock, String targetBlock) {
+        return "source:\n"
+                + indent(sourceBlock)
+                + "target:\n"
+                + indent(targetBlock)
+                + "comparison:\n"
+                + "  tables:\n"
+                + "    source: orders\n"
+                + "    target: orders\n"
+                + "  keys:\n"
+                + "    source:\n"
+                + "      - id\n"
+                + "    target:\n"
+                + "      - id\n"
+                + "strategy:\n"
+                + "  mode: checksum\n"
+                + "  algorithm: xor\n";
+    }
+
+    private String indent(String block) {
+        String normalized = block.endsWith("\n") ? block.substring(0, block.length() - 1) : block;
+        String[] lines = normalized.split("\n");
+        StringBuilder builder = new StringBuilder();
+        for (String line : lines) {
+            builder.append("  ").append(line.stripLeading()).append("\n");
+        }
+        return builder.toString();
+    }
 }

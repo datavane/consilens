@@ -377,9 +377,11 @@ public enum DatabaseType {
             return UNKNOWN;
         }
 
-        String lowerUrl = jdbcUrl.toLowerCase();
-        
-        if (lowerUrl.contains("tidb") || (lowerUrl.contains("mysql") && lowerUrl.contains(":4000"))) {
+        String lowerUrl = jdbcUrl.trim().toLowerCase();
+
+        if (lowerUrl.startsWith("jdbc:sqlite:")) {
+            return SQLITE;
+        } else if (lowerUrl.contains("tidb") || (lowerUrl.contains("mysql") && lowerUrl.contains(":4000"))) {
             return TIDB;
         } else if (lowerUrl.contains("doris")) {
             return DORIS;
@@ -393,8 +395,6 @@ public enum DatabaseType {
             return ORACLE;
         } else if (lowerUrl.contains("sqlserver")) {
             return SQL_SERVER;
-        } else if (lowerUrl.contains("sqlite")) {
-            return SQLITE;
         } else if (lowerUrl.contains("h2")) {
             return H2;
         } else if (lowerUrl.contains("snowflake")) {

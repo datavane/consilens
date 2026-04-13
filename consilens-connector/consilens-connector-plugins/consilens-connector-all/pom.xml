@@ -77,6 +77,12 @@
             <artifactId>consilens-connector-doris</artifactId>
             <version>${project.version}</version>
         </dependency>
+
+        <dependency>
+            <groupId>com.consilens</groupId>
+            <artifactId>consilens-connector-sqlite</artifactId>
+            <version>${project.version}</version>
+        </dependency>
     </dependencies>
 
 </project>

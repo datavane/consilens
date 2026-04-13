@@ -45,7 +45,12 @@ public class PoolConfiguration {
         if (jdbcUrl == null || jdbcUrl.trim().isEmpty()) {
             throw new IllegalArgumentException("JDBC URL cannot be null or empty");
         }
-        if (username == null || username.trim().isEmpty()) {
+
+        DatabaseType effectiveType = databaseType == DatabaseType.UNKNOWN
+                ? DatabaseType.fromJdbcUrl(jdbcUrl)
+                : databaseType;
+
+        if (effectiveType != DatabaseType.SQLITE && (username == null || username.trim().isEmpty())) {
             throw new IllegalArgumentException("Username cannot be null or empty");
         }
         // Password can be null or empty string
@@ -65,7 +70,7 @@ public class PoolConfiguration {
 
         // Auto-detect database type if not set
         if (databaseType == DatabaseType.UNKNOWN) {
-            databaseType = DatabaseType.fromJdbcUrl(jdbcUrl);
+            databaseType = effectiveType;
         }
     }
 
