@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>com.consilens</groupId>
+        <artifactId>consilens-sink</artifactId>
+        <version>0.1-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>consilens-sink-plugins</artifactId>
+    <packaging>pom</packaging>
+
+    <name>consilens sink plugins</name>
+    <description>Built-in sink format implementations</description>
+
+    <properties>
+        <maven.compiler.source>11</maven.compiler.source>
+        <maven.compiler.target>11</maven.compiler.target>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    </properties>
+
+    <modules>
+        <module>consilens-sink-table</module>
+        <module>consilens-sink-json</module>
+        <module>consilens-sink-csv</module>
+        <module>consilens-sink-console</module>
+        <module>consilens-sink-all</module>
+    </modules>
+</project>

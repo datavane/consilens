@@ -1,0 +1,52 @@
+# 同库比对配置 - MySQL 内部两张表比对
+# 适用于数据迁移验证、分表一致性校验等场景
+
+source:
+  type: mysql
+  url: jdbc:mysql://localhost:3306/mydb
+  username: root
+  password: ${MYSQL_PASSWORD}
+
+target:
+  type: mysql
+  url: jdbc:mysql://localhost:3306/mydb
+  username: root
+  password: ${MYSQL_PASSWORD}
+
+comparison:
+  tables:
+    source: orders
+    target: orders_backup
+
+  keys:
+    source:
+      - order_id
+    target:
+      - order_id
+
+  compareColumns:
+    source:
+      - customer_id
+      - amount
+      - status
+      - created_at
+    target:
+      - customer_id
+      - amount
+      - status
+      - created_at
+
+  where:
+    source: "created_at >= '2025-01-01'"
+    target: "created_at >= '2025-01-01'"
+
+strategy:
+  mode: checksum
+  algorithm: xor
+  bisectionFactor: 4
+  bisectionThreshold: 10000
+
+result:
+  sinks:
+    - format: console
+      type: result

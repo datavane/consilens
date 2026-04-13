@@ -1,0 +1,58 @@
+source:
+  type: mysql
+  url: jdbc:mysql://localhost:3306/test
+  username: root
+  password: change_me_mysql_password
+
+target:
+  type: starrocks
+  url: jdbc:mysql://localhost:9030/test
+  username: root
+  password: change_me_starrocks_password
+
+comparison:
+  tables:
+    source: performance_test_table
+    target: performance_test_table
+
+  keys:
+    source:
+      - record_id
+    target:
+      - record_id
+
+  compareColumns:
+    source:
+      - col_tinyint
+      - col_smallint
+      - col_mediumint
+      - col_int
+      - col_bigint
+      - col_unsigned_int
+    target:
+      - col_tinyint
+      - col_smallint
+      - col_mediumint
+      - col_int
+      - col_bigint
+      - col_unsigned_int
+
+  # where:
+  #   source: "record_id >= 'REC0000000000' AND record_id <= 'REC0000009094'"
+  #   target: "record_id >= 'REC0000000000' AND record_id <= 'REC0000009094'"
+
+strategy:
+  mode: checksum
+  algorithm: xor
+  bisectionFactor: 8
+  bisectionThreshold: 5000
+
+result:
+  sinks:
+    - format: console
+      type: result
+    - format: json
+      type: diff-record
+      properties:
+        path: ./performance_test_diff.json
+        pretty: false

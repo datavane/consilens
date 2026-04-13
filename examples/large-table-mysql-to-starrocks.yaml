@@ -1,0 +1,80 @@
+# 大表高并发比对配置 - MySQL 到 StarRocks
+# 适用于百万级以上数据量的跨库比对，优化了并发和分片参数
+
+source:
+  type: mysql
+  url: jdbc:mysql://source-host:3306/production
+  username: readonly_user
+  password: ${SOURCE_PASSWORD}
+
+target:
+  type: starrocks
+  url: jdbc:mysql://starrocks-host:9030/analytics
+  username: readonly_user
+  password: ${TARGET_PASSWORD}
+
+comparison:
+  tables:
+    source: fact_orders
+    target: fact_orders
+
+  keys:
+    source:
+      - order_id
+    target:
+      - order_id
+
+  compareColumns:
+    source:
+      - customer_id
+      - product_id
+      - quantity
+      - unit_price
+      - total_amount
+      - order_date
+      - status
+    target:
+      - customer_id
+      - product_id
+      - quantity
+      - unit_price
+      - total_amount
+      - order_date
+      - status
+
+strategy:
+  mode: checksum
+  algorithm: xor
+  bisectionFactor: 8
+  bisectionThreshold: 8000
+  batchSize: 2000
+  enableProfiling: true
+
+concurrency:
+  io:
+    core: 8
+    max: 32
+    queueSize: 10000
+    keepAliveSeconds: 60
+  cpu:
+    core: 4
+    max: 8
+    queueSize: 5000
+    keepAliveSeconds: 60
+
+result:
+  sinks:
+    - format: console
+      type: result
+    - format: table
+      type: diff-record
+      properties:
+        url: jdbc:mysql://localhost:3306/diff_results
+        username: root
+        password: ${OUTPUT_DB_PASSWORD}
+        driver: com.mysql.cj.jdbc.Driver
+        maxPoolSize: 10
+        prefix: diff_
+        suffixTimestamp: true
+        createTable: true
+        batchSize: 1000

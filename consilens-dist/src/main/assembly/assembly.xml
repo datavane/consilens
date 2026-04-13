@@ -1,0 +1,150 @@
+<assembly xmlns="http://maven.apache.org/ASSEMBLY/2.1.0"
+          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xsi:schemaLocation="http://maven.apache.org/ASSEMBLY/2.1.0 http://maven.apache.org/xsd/assembly-2.1.0.xsd">
+    <id>bin</id>
+    <formats>
+        <format>tar.gz</format>
+    </formats>
+    <includeBaseDirectory>true</includeBaseDirectory>
+
+    <fileSets>
+        <!-- Bin scripts from project root -->
+        <fileSet>
+            <directory>${project.parent.basedir}/bin</directory>
+            <outputDirectory>bin</outputDirectory>
+            <fileMode>0755</fileMode>
+            <lineEnding>unix</lineEnding>
+            <includes>
+                <include>*.sh</include>
+            </includes>
+        </fileSet>
+
+        <!-- Log4j2 configuration from consilens-core -->
+        <fileSet>
+            <directory>${project.parent.basedir}/consilens-core/src/main/resources</directory>
+            <outputDirectory>conf</outputDirectory>
+            <includes>
+                <include>log4j2.xml</include>
+            </includes>
+        </fileSet>
+
+        <!-- Example files from project root -->
+        <fileSet>
+            <directory>${project.parent.basedir}/examples</directory>
+            <outputDirectory>examples</outputDirectory>
+            <includes>
+                <include>**/*</include>
+            </includes>
+        </fileSet>
+
+        <!-- Create empty logs directory -->
+        <fileSet>
+            <directory>${project.basedir}/src/main/resources</directory>
+            <outputDirectory>logs</outputDirectory>
+            <excludes>
+                <exclude>**/*</exclude>
+            </excludes>
+        </fileSet>
+
+        <!-- VERSION file -->
+        <fileSet>
+            <directory>${project.build.directory}/version</directory>
+            <outputDirectory>/</outputDirectory>
+            <includes>
+                <include>VERSION</include>
+            </includes>
+        </fileSet>
+    </fileSets>
+
+    <dependencySets>
+        <!-- Core Libs (CLI + Core Dependencies, excluding connectors and database drivers) -->
+        <dependencySet>
+            <outputDirectory>libs</outputDirectory>
+            <useProjectArtifact>false</useProjectArtifact>
+            <scope>runtime</scope>
+            <useTransitiveDependencies>true</useTransitiveDependencies>
+            <excludes>
+                <!-- Exclude connectors -->
+                <exclude>com.consilens:consilens-connector-*</exclude>
+                
+                <!-- Exclude database drivers (they go to plugins) -->
+                <exclude>com.mysql:mysql-connector-j</exclude>
+                <exclude>org.postgresql:postgresql</exclude>
+                <exclude>com.oracle.database.jdbc:*</exclude>
+                <exclude>com.microsoft.sqlserver:*</exclude>
+                <exclude>com.clickhouse:*</exclude>
+                <exclude>io.trino:trino-jdbc</exclude>
+                <exclude>com.facebook.presto:presto-jdbc</exclude>
+            </excludes>
+        </dependencySet>
+
+        <!-- Plugins (Connectors only) -->
+        <dependencySet>
+            <outputDirectory>plugins</outputDirectory>
+            <useProjectArtifact>false</useProjectArtifact>
+            <scope>runtime</scope>
+            <useTransitiveDependencies>true</useTransitiveDependencies>
+            <useTransitiveFiltering>true</useTransitiveFiltering>
+            <includes>
+                <include>com.consilens:consilens-connector-*</include>
+            </includes>
+            <!-- Exclude dependencies that are already in libs (from CLI) -->
+            <excludes>
+                <!-- Core modules already in libs -->
+                <exclude>com.consilens:consilens-core</exclude>
+                <exclude>com.consilens:consilens-cli</exclude>
+                <exclude>com.consilens:consilens-spi</exclude>
+                
+                <!-- Common libraries already in libs -->
+                <exclude>org.slf4j:*</exclude>
+                <exclude>org.apache.logging.log4j:*</exclude>
+                <exclude>com.zaxxer:HikariCP</exclude>
+                <exclude>org.apache.commons:commons-lang3</exclude>
+                <exclude>org.apache.commons:commons-collections4</exclude>
+                <exclude>com.fasterxml.jackson.core:*</exclude>
+                <exclude>com.fasterxml.jackson.dataformat:*</exclude>
+                <exclude>com.fasterxml.jackson.datatype:*</exclude>
+                <exclude>org.yaml:snakeyaml</exclude>
+                <exclude>info.picocli:picocli</exclude>
+                <exclude>com.h2database:h2</exclude>
+                <exclude>io.micrometer:*</exclude>
+                <exclude>org.hdrhistogram:HdrHistogram</exclude>
+                <exclude>org.latencyutils:LatencyUtils</exclude>
+                <exclude>javax.xml.bind:*</exclude>
+                <exclude>javax.activation:*</exclude>
+                <exclude>org.glassfish.jaxb:*</exclude>
+                <exclude>com.sun.istack:*</exclude>
+                <exclude>org.jvnet.staxex:*</exclude>
+                <exclude>com.sun.xml.fastinfoset:*</exclude>
+                <exclude>org.projectlombok:lombok</exclude>
+                <exclude>org.checkerframework:checker-qual</exclude>
+                <exclude>com.google.protobuf:protobuf-java</exclude>
+                
+                <!-- Test dependencies -->
+                <exclude>org.junit.jupiter:*</exclude>
+                <exclude>org.junit.platform:*</exclude>
+                <exclude>org.mockito:*</exclude>
+                <exclude>org.opentest4j:*</exclude>
+                <exclude>org.apiguardian:*</exclude>
+                <exclude>net.bytebuddy:*</exclude>
+                <exclude>org.objenesis:*</exclude>
+            </excludes>
+        </dependencySet>
+
+        <!-- Database Drivers (go to plugins directory) -->
+        <dependencySet>
+            <outputDirectory>plugins</outputDirectory>
+            <useProjectArtifact>false</useProjectArtifact>
+            <scope>runtime</scope>
+            <includes>
+                <include>com.mysql:mysql-connector-j</include>
+                <include>org.postgresql:postgresql</include>
+                <include>com.oracle.database.jdbc:*</include>
+                <include>com.microsoft.sqlserver:*</include>
+                <include>com.clickhouse:*</include>
+                <include>io.trino:trino-jdbc</include>
+                <include>com.facebook.presto:presto-jdbc</include>
+            </includes>
+        </dependencySet>
+    </dependencySets>
+</assembly>

@@ -1,0 +1,46 @@
+# 快速上手配置 - MySQL 到 PostgreSQL 基本比对
+# 最小化配置示例，适合首次使用
+
+source:
+  type: mysql
+  url: jdbc:mysql://localhost:3306/mydb
+  username: root
+  password: ${MYSQL_PASSWORD}
+
+target:
+  type: postgresql
+  url: jdbc:postgresql://localhost:5432/mydb
+  username: postgres
+  password: ${PG_PASSWORD}
+
+comparison:
+  tables:
+    source: users
+    target: users
+
+  keys:
+    source:
+      - id
+    target:
+      - id
+
+  compareColumns:
+    source:
+      - name
+      - email
+      - status
+    target:
+      - name
+      - email
+      - status
+
+strategy:
+  mode: checksum
+  algorithm: xor
+  bisectionFactor: 4
+  bisectionThreshold: 5000
+
+result:
+  sinks:
+    - format: console
+      type: result

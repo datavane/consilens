@@ -1,0 +1,2 @@
+com.consilens.sink.table.TableDiffRecordSinkProvider
+com.consilens.sink.table.TableResultSinkProvider

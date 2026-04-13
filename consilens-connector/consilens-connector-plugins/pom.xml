@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>com.consilens</groupId>
+        <artifactId>consilens-connector</artifactId>
+        <version>0.1-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>consilens-connector-plugins</artifactId>
+
+    <packaging>pom</packaging>
+
+    <properties>
+        <maven.compiler.source>17</maven.compiler.source>
+        <maven.compiler.target>17</maven.compiler.target>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    </properties>
+
+    <modules>
+        <module>consilens-connector-base</module>
+        <module>consilens-connector-mysql</module>
+        <module>consilens-connector-postgresql</module>
+        <module>consilens-connector-sqlserver</module>
+        <module>consilens-connector-oracle</module>
+        <module>consilens-connector-presto</module>
+        <module>consilens-connector-trino</module>
+        <module>consilens-connector-doris</module>
+        <module>consilens-connector-starrocks</module>
+        <module>consilens-connector-clickhouse</module>
+        <module>consilens-connector-tidb</module>
+        <module>consilens-connector-all</module>
+    </modules>
+
+</project>

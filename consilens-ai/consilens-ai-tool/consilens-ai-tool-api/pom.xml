@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>com.consilens</groupId>
+        <artifactId>consilens-ai-tool</artifactId>
+        <version>0.1-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>consilens-ai-tool-api</artifactId>
+    <name>consilens-ai-tool-api</name>
+    <description>Consilens AI Tool API - Tool SPI interfaces, ToolContext and ConversationContext</description>
+
+    <dependencies>
+        <dependency>
+            <groupId>com.consilens</groupId>
+            <artifactId>consilens-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.consilens</groupId>
+            <artifactId>consilens-connector-api</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.consilens</groupId>
+            <artifactId>consilens-ai-analyzer-api</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.consilens</groupId>
+            <artifactId>consilens-ai-llm-api</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter-api</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+</project>
