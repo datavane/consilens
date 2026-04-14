@@ -2,6 +2,8 @@ package com.consilens.connector.api;
 
 import com.consilens.connector.api.model.PoolConfiguration;
 
+import java.sql.Connection;
+import java.sql.SQLException;
 import java.util.Properties;
 
 /**
@@ -58,13 +60,28 @@ public interface ConnectionPoolOptimizer {
     Properties getOptimizationProperties(boolean useSSL);
 
     /**
+     * Initialize a newly acquired JDBC connection.
+     *
+     * <p>
+     * Dialects can override this hook to register database-specific SQL functions
+     * or apply other per-connection initialization that cannot be expressed via
+     * connectionInitSql alone.
+     *
+     * @param connection the newly acquired JDBC connection
+     * @throws SQLException if initialization fails
+     */
+    default void initializeConnection(Connection connection) throws SQLException {
+        // Default no-op.
+    }
+
+    /**
      * Get default connection pool configuration for this database type.
-     * 
+     *
      * <p>
      * This method returns a PoolConfiguration with database-specific defaults
      * for pool sizing, timeouts, and validation queries. The configuration
      * is optimized for the specific characteristics of the database.
-     * 
+     *
      * @return default PoolConfiguration for this database type
      */
     PoolConfiguration getDefaultConfiguration();

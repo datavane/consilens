@@ -1,5 +1,6 @@
 package com.consilens.connector.sqlite;
 
+import com.consilens.common.enums.ChecksumAlgorithm;
 import com.consilens.connector.api.CapabilityProvider;
 import com.consilens.connector.api.ConnectionPoolOptimizer;
 import com.consilens.connector.api.DataTypeHandler;
@@ -36,8 +37,8 @@ public class SQLiteDatabaseDialect extends AbstractDatabaseDialect {
 
     public SQLiteDatabaseDialect(Map<String, ?> normalizationConfig) {
         this.capabilityProvider = new SQLiteCapabilityProvider();
-        this.dataTypeHandler = new BaseDataTypeHandler(capabilityProvider, normalizationConfig);
-        this.sqlQueryGenerator = new SQLiteSqlQueryGenerator(capabilityProvider);
+        this.dataTypeHandler = new SQLiteDataTypeHandler(capabilityProvider, normalizationConfig);
+        this.sqlQueryGenerator = new SQLiteSqlQueryGenerator(capabilityProvider, dataTypeHandler);
         this.metadataQueryGenerator = new SQLiteMetadataQueryGenerator(capabilityProvider);
         this.connectionPoolOptimizer = new SQLiteConnectionPoolOptimizer();
     }
@@ -131,6 +132,183 @@ public class SQLiteDatabaseDialect extends AbstractDatabaseDialect {
         }
     }
 
+    private static final class SQLiteDataTypeHandler extends BaseDataTypeHandler {
+
+        private SQLiteDataTypeHandler(CapabilityProvider capabilityProvider, Map<String, ?> normalizationConfig) {
+            super(capabilityProvider, normalizationConfig);
+        }
+
+        @Override
+        protected String normalizeString(String quotedCol) {
+            return "COALESCE(TRIM(CAST(" + quotedCol + " AS TEXT)), '')";
+        }
+
+        @Override
+        protected String normalizeInteger(String quotedCol) {
+            return "COALESCE(TRIM(CAST(CAST(" + quotedCol + " AS INTEGER) AS TEXT)), '0')";
+        }
+
+        @Override
+        protected String normalizeDecimal(String quotedCol) {
+            return normalizeReal(quotedCol, getPrecision("decimal", 4), getRounding("decimal", true));
+        }
+
+        @Override
+        protected String normalizeFloat(String quotedCol) {
+            return normalizeReal(quotedCol, getPrecision("float", 6), getRounding("float", true));
+        }
+
+        @Override
+        protected String normalizeDate(String quotedCol) {
+            return "COALESCE(strftime('%Y-%m-%d', " + quotedCol + "), '')";
+        }
+
+        @Override
+        protected String normalizeTime(String quotedCol) {
+            return "COALESCE(strftime('%H:%M:%S', " + quotedCol + "), '')";
+        }
+
+        @Override
+        protected String normalizeDateTime(String quotedCol) {
+            return "COALESCE(strftime('%Y-%m-%d %H:%M:%S', " + quotedCol + "), '')";
+        }
+
+        @Override
+        protected String normalizeTimestamp(String quotedCol) {
+            return normalizeDateTime(quotedCol);
+        }
+
+        @Override
+        protected String normalizeTimestampWithTimezone(String quotedCol) {
+            return normalizeDateTime(quotedCol);
+        }
+
+        @Override
+        protected String normalizeBoolean(String quotedCol) {
+            return "CASE WHEN LOWER(TRIM(CAST(" + quotedCol
+                    + " AS TEXT))) IN ('1', 'true', 't', 'y', 'yes') THEN '1' ELSE '0' END";
+        }
+
+        @Override
+        protected String normalizeBlob(String quotedCol) {
+            return "COALESCE(HEX(" + quotedCol + "), '')";
+        }
+
+        @Override
+        protected String normalizeJson(String quotedCol) {
+            return "COALESCE(CAST(" + quotedCol + " AS TEXT), '')";
+        }
+
+        @Override
+        protected String normalizeDefault(String quotedCol) {
+            return "COALESCE(TRIM(CAST(" + quotedCol + " AS TEXT)), '')";
+        }
+
+        @Override
+        public DataType convertToDataType(String sourceType) {
+            if (sourceType == null) {
+                return DataType.UNKNOWN;
+            }
+
+            String type = sourceType.toLowerCase().trim();
+            int parenIndex = type.indexOf('(');
+            if (parenIndex >= 0) {
+                type = type.substring(0, parenIndex).trim();
+            }
+
+            switch (type) {
+                case "int":
+                case "integer":
+                case "int4":
+                case "mediumint":
+                    return DataType.INTEGER;
+                case "tinyint":
+                    return DataType.TINYINT;
+                case "smallint":
+                case "int2":
+                    return DataType.SMALLINT;
+                case "bigint":
+                case "int8":
+                    return DataType.BIGINT;
+                case "decimal":
+                case "numeric":
+                case "dec":
+                    return DataType.DECIMAL;
+                case "float":
+                    return DataType.FLOAT;
+                case "real":
+                    return DataType.REAL;
+                case "double":
+                case "double precision":
+                    return DataType.DOUBLE;
+                case "char":
+                case "character":
+                case "nchar":
+                    return DataType.CHAR;
+                case "varchar":
+                case "character varying":
+                case "varying character":
+                case "nvarchar":
+                    return DataType.VARCHAR;
+                case "text":
+                case "clob":
+                    return DataType.TEXT;
+                case "date":
+                    return DataType.DATE;
+                case "time":
+                    return DataType.TIME;
+                case "timetz":
+                case "time with time zone":
+                    return DataType.TIME_WITH_TIME_ZONE;
+                case "datetime":
+                    return DataType.DATETIME;
+                case "timestamp":
+                    return DataType.TIMESTAMP;
+                case "timestamptz":
+                case "timestamp with time zone":
+                    return DataType.TIMESTAMP_WITH_TIMEZONE;
+                case "boolean":
+                case "bool":
+                    return DataType.BOOLEAN;
+                case "json":
+                    return DataType.JSON;
+                case "jsonb":
+                    return DataType.JSONB;
+                case "blob":
+                    return DataType.BLOB;
+                case "binary":
+                    return DataType.BINARY;
+                case "varbinary":
+                    return DataType.VARBINARY;
+                case "uuid":
+                    return DataType.UUID;
+                default:
+                    return super.convertToDataType(sourceType);
+            }
+        }
+
+        private String normalizeReal(String quotedCol, int precision, boolean rounding) {
+            if (precision == 0) {
+                String numericExpression = rounding
+                        ? "ROUND(CAST(" + quotedCol + " AS REAL), 0)"
+                        : "CAST(CAST(" + quotedCol + " AS REAL) AS INTEGER)";
+                return "COALESCE(TRIM(CAST(" + numericExpression + " AS TEXT)), '0')";
+            }
+
+            String scale = "1" + "0".repeat(precision);
+            String format = "% ." + precision + "f";
+            String defaultValue = "0." + "0".repeat(precision);
+            String integerSuffix = "." + "0".repeat(precision);
+            String numericExpression = rounding
+                    ? "ROUND(CAST(" + quotedCol + " AS REAL), " + precision + ")"
+                    : "(CAST((CAST(" + quotedCol + " AS REAL) * " + scale + ") AS INTEGER) / " + scale + ".0)";
+
+            return "CASE WHEN " + quotedCol + " IS NULL THEN '" + defaultValue + "' "
+                    + "WHEN typeof(" + quotedCol + ") = 'integer' THEN CAST(CAST(" + quotedCol + " AS INTEGER) AS TEXT) || '"
+                    + integerSuffix + "' ELSE printf('" + format.replace(" ", "") + "', " + numericExpression + ") END";
+        }
+    }
+
     private static final class SQLiteMetadataQueryGenerator extends BaseMetadataQueryGenerator {
         private final CapabilityProvider capabilityProvider;
 
@@ -218,8 +396,13 @@ public class SQLiteDatabaseDialect extends AbstractDatabaseDialect {
 
     private static final class SQLiteSqlQueryGenerator extends BaseSqlQueryGenerator {
 
-        private SQLiteSqlQueryGenerator(CapabilityProvider capabilityProvider) {
+        private final CapabilityProvider capabilityProvider;
+        private final DataTypeHandler dataTypeHandler;
+
+        private SQLiteSqlQueryGenerator(CapabilityProvider capabilityProvider, DataTypeHandler dataTypeHandler) {
             super(capabilityProvider);
+            this.capabilityProvider = capabilityProvider;
+            this.dataTypeHandler = dataTypeHandler;
         }
 
         @Override
@@ -228,8 +411,9 @@ public class SQLiteDatabaseDialect extends AbstractDatabaseDialect {
                                      List<String> columns,
                                      Map<String, DataType> columnDataTypes,
                                      String whereClause,
-                                     com.consilens.common.enums.ChecksumAlgorithm checksumAlgorithm) {
-            throw new UnsupportedOperationException("SQLite checksum SQL generation is not implemented");
+                                     ChecksumAlgorithm checksumAlgorithm) {
+            throw new UnsupportedOperationException(
+                    "SQLite checksum SQL generation is not supported because SQLite hashes are computed in code");
         }
 
         @Override
@@ -238,7 +422,45 @@ public class SQLiteDatabaseDialect extends AbstractDatabaseDialect {
                                     List<String> columns,
                                     Map<String, DataType> columnDataTypes,
                                     String whereClause) {
-            throw new UnsupportedOperationException("SQLite row hash SQL generation is not implemented");
+            throw new UnsupportedOperationException(
+                    "SQLite row-hash SQL generation is not supported because SQLite hashes are computed in code");
+        }
+
+        private void appendTableReference(StringBuilder sql, String schemaName, String tableName) {
+            if (schemaName != null && !schemaName.trim().isEmpty()) {
+                sql.append(capabilityProvider.quote(schemaName)).append('.');
+            }
+            sql.append(capabilityProvider.quote(tableName));
+        }
+
+        private void appendWhereClause(StringBuilder sql, String whereClause) {
+            if (whereClause != null && !whereClause.trim().isEmpty()) {
+                sql.append(" WHERE ").append(whereClause);
+            }
+        }
+
+        private String buildKeyExpression(List<String> keyColumns, Map<String, DataType> columnDataTypes) {
+            if (keyColumns == null || keyColumns.isEmpty()) {
+                return "'1'";
+            }
+            return buildDelimitedExpression(keyColumns, columnDataTypes);
+        }
+
+        private String buildDelimitedExpression(List<String> columns, Map<String, DataType> columnDataTypes) {
+            if (columns == null || columns.isEmpty()) {
+                return "''";
+            }
+
+            StringBuilder expression = new StringBuilder();
+            for (int i = 0; i < columns.size(); i++) {
+                if (i > 0) {
+                    expression.append(" || '|' || ");
+                }
+                String column = columns.get(i);
+                DataType dataType = columnDataTypes == null ? null : columnDataTypes.get(column);
+                expression.append(dataTypeHandler.normalizeColumn(column, dataType));
+            }
+            return expression.toString();
         }
     }
 
@@ -262,5 +484,6 @@ public class SQLiteDatabaseDialect extends AbstractDatabaseDialect {
             config.setValidationQuery("SELECT 1");
             return config;
         }
+
     }
 }

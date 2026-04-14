@@ -5,11 +5,16 @@ import com.consilens.connector.api.model.PoolConfiguration;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
+import java.sql.Connection;
+import java.sql.ResultSet;
+import java.sql.Statement;
+
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.fail;
 
 class ConnectionPoolFactorySQLiteTest {
 
@@ -109,6 +114,41 @@ class ConnectionPoolFactorySQLiteTest {
             assertEquals(1, ConnectionPoolFactory.getCachedPoolCount());
         } finally {
             poolWithNull.close();
+        }
+    }
+
+    @Test
+    void shouldProvideReusableSqliteConnectionsWithoutRegisteringMd5Function() throws Exception {
+        ConnectionPool pool = ConnectionPoolFactory.createPool(
+                "jdbc:sqlite::memory:",
+                null,
+                null,
+                DatabaseType.SQLITE,
+                null);
+
+        try {
+            try (Connection firstConnection = pool.getConnection();
+                 Statement statement = firstConnection.createStatement();
+                 ResultSet resultSet = statement.executeQuery("SELECT 1")) {
+                assertEquals(1, resultSet.getInt(1));
+            }
+
+            try (Connection secondConnection = pool.getConnection();
+                 Statement statement = secondConnection.createStatement();
+                 ResultSet resultSet = statement.executeQuery("SELECT 1")) {
+                assertEquals(1, resultSet.getInt(1));
+            }
+
+            try (Connection connection = pool.getConnection();
+                 Statement statement = connection.createStatement()) {
+                assertThrows(Exception.class, () -> {
+                    try (ResultSet ignored = statement.executeQuery("SELECT md5('abc')")) {
+                        fail("Expected SQLite md5 function to be unavailable");
+                    }
+                });
+            }
+        } finally {
+            pool.close();
         }
     }
 }

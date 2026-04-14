@@ -126,14 +126,6 @@
             <scope>test</scope>
         </dependency>
 
-        <!-- SQLite for testing -->
-        <dependency>
-            <groupId>org.xerial</groupId>
-            <artifactId>sqlite-jdbc</artifactId>
-            <version>3.44.1.0</version>
-            <scope>test</scope>
-        </dependency>
-
         <dependency>
             <groupId>com.consilens</groupId>
             <artifactId>consilens-connector-all</artifactId>

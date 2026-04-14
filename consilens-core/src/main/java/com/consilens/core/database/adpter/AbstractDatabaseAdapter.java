@@ -12,6 +12,9 @@ import com.consilens.core.segment.TableSegment;
 import com.consilens.core.util.ResourceManager;
 import lombok.extern.slf4j.Slf4j;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.sql.*;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -319,13 +322,15 @@ public abstract class AbstractDatabaseAdapter implements DatabaseAdapter {
     @Override
     public TableSegment.ChecksumResult countAndChecksum(TableSegment segment) {
         try {
-            // Build simple checksum query
+            if (shouldComputeHashesInCode()) {
+                return countAndChecksumInCode(segment);
+            }
+
             List<String> relevantColumns = segment.getRelevantColumns();
             String checksumQuery = buildChecksumQuery(segment, relevantColumns);
 
             log.info("Executing checksum query: {}", checksumQuery);
 
-            // Execute query using a RowMapper that returns Maps
             List<Map<String, Object>> results = query(checksumQuery, (rs, rowNum) -> {
                 Map<String, Object> row = new HashMap<>();
                 int columnCount = rs.getMetaData().getColumnCount();
@@ -345,7 +350,6 @@ public abstract class AbstractDatabaseAdapter implements DatabaseAdapter {
             long rowCount = ((Number) result.get("row_count")).longValue();
             String checksum = (String) result.get("checksum");
 
-            // Get min/max key values separately if needed
             List<Object> minKey = null;
             List<Object> maxKey = null;
             if (!segment.getKeyColumns().isEmpty()) {
@@ -355,6 +359,8 @@ public abstract class AbstractDatabaseAdapter implements DatabaseAdapter {
 
             return new TableSegment.ChecksumResult(rowCount, checksum, minKey, maxKey);
 
+        } catch (UnsupportedOperationException e) {
+            throw e;
         } catch (Exception e) {
             log.error("Error calculating checksum for segment: {}", segment.getTablePath(), e);
             throw new RuntimeException("Checksum calculation failed", e);
@@ -415,16 +421,7 @@ public abstract class AbstractDatabaseAdapter implements DatabaseAdapter {
 
         // Extract column data types from the schema
         Map<String, DataType> columnDataTypes = new HashMap<>();
-        TableSchema tableSchema;
-        // If segment doesn't have schema, fetch it from database
-        if (segment.getSchema().isPresent()) {
-            tableSchema = segment.getSchema().get();
-        } else {
-            // Fetch schema from database
-            List<String> tablePathComponents = segment.getTablePath().getComponents();
-            tableSchema = getTableSchema(tablePathComponents);
-            segment.withSchema(tableSchema);
-        }
+        TableSchema tableSchema = resolveTableSchema(segment);
         // Now extract data types for all columns
         for (String column : columns) {
             DataType dataType = tableSchema.getColumnType(column);
@@ -619,9 +616,13 @@ public abstract class AbstractDatabaseAdapter implements DatabaseAdapter {
     @Override
     public Map<List<Object>, String> querySegmentRowHashes(TableSegment segment) {
         try {
+            if (shouldComputeHashesInCode()) {
+                return querySegmentRowHashesInCode(segment);
+            }
+
             String rowHashQuery = buildRowHashQuery(segment);
 
-            log.debug("Executing row hash query for segment: {}, keys: {}", 
+            log.debug("Executing row hash query for segment: {}, keys: {}",
                     segment.getTablePath(), segment.getKeyColumns().size());
 
             Map<List<Object>, String> rowHashes = new LinkedHashMap<>();
@@ -640,13 +641,11 @@ public abstract class AbstractDatabaseAdapter implements DatabaseAdapter {
                 int rowCount = 0;
 
                 while (resultSet.next()) {
-                    // Extract primary key values
                     List<Object> primaryKey = new ArrayList<>(keyColumnCount);
                     for (int i = 1; i <= keyColumnCount; i++) {
                         primaryKey.add(resultSet.getObject(i));
                     }
 
-                    // Extract row hash (last column)
                     String rowHash = resultSet.getString(resultSet.getMetaData().getColumnCount());
                     rowHashes.put(primaryKey, rowHash);
                     rowCount++;
@@ -1085,23 +1084,14 @@ public abstract class AbstractDatabaseAdapter implements DatabaseAdapter {
         List<String> columns = segment.getRelevantColumns();
         String whereClause = segment.buildWhereClause();
 
-        // Retrieve column data types
         Map<String, DataType> columnDataTypes = new HashMap<>();
-        TableSchema tableSchema;
-        if (segment.getSchema().isPresent()) {
-            tableSchema = segment.getSchema().get();
-        } else {
-            List<String> tablePathComponents = segment.getTablePath().getComponents();
-            tableSchema = getTableSchema(tablePathComponents);
-            segment.withSchema(tableSchema);
-        }
+        TableSchema tableSchema = resolveTableSchema(segment);
 
         for (String column : columns) {
             DataType dataType = tableSchema.getColumnType(column);
             columnDataTypes.put(column, dataType);
         }
 
-        // Log only table name, key/column counts, and where clause — not the full column list
         log.debug("Building row-hash query for table: {}, primaryKeys: {} columns, dataColumns: {} columns, where: {}",
                 tableName, primaryKeys.size(), columns.size(), whereClause != null ? "present" : "none");
 
@@ -1110,6 +1100,199 @@ public abstract class AbstractDatabaseAdapter implements DatabaseAdapter {
         log.info("Generated row-hash query: {}", sql);
 
         return sql;
+    }
+
+    protected boolean shouldComputeHashesInCode() {
+        return type == DatabaseType.SQLITE;
+    }
+
+    private TableSegment.ChecksumResult countAndChecksumInCode(TableSegment segment) {
+        if (checksumAlgorithm.isXor()) {
+            throw new UnsupportedOperationException("SQLite code-side checksum only supports CONCAT algorithm");
+        }
+
+        List<CodeSideRowHash> rowHashes = queryCodeSideRowHashes(segment);
+        long rowCount = rowHashes.size();
+        String checksum = computeSegmentChecksum(rowHashes);
+        List<String> keyColumns = segment.getKeyColumns();
+
+        List<Object> minKey = null;
+        List<Object> maxKey = null;
+        if (!keyColumns.isEmpty()) {
+            minKey = getMinMaxKey(segment, true);
+            maxKey = getMinMaxKey(segment, false);
+        }
+
+        return new TableSegment.ChecksumResult(rowCount, checksum, minKey, maxKey);
+    }
+
+    private Map<List<Object>, String> querySegmentRowHashesInCode(TableSegment segment) {
+        List<CodeSideRowHash> codeSideRowHashes = queryCodeSideRowHashes(segment);
+        Map<List<Object>, String> rowHashes = new LinkedHashMap<>();
+        for (CodeSideRowHash codeSideRowHash : codeSideRowHashes) {
+            rowHashes.put(codeSideRowHash.primaryKey(), codeSideRowHash.rowHash());
+        }
+        return rowHashes;
+    }
+
+    private List<CodeSideRowHash> queryCodeSideRowHashes(TableSegment segment) {
+        TableSchema schema = resolveTableSchema(segment);
+        List<String> keyColumns = segment.getKeyColumns();
+        List<String> relevantColumns = segment.getRelevantColumns();
+        String sql = buildCodeSideRowHashQuery(segment, schema, keyColumns, relevantColumns);
+        int keyColumnCount = keyColumns.size();
+        int normalizedKeyOffset = keyColumnCount;
+        int normalizedRowOffset = keyColumnCount * 2;
+        int normalizedColumnCount = relevantColumns.size();
+        List<CodeSideRowHash> rowHashes = new ArrayList<>();
+
+        Connection connection = null;
+        PreparedStatement statement = null;
+        ResultSet resultSet = null;
+
+        try {
+            connection = getConnection();
+            statement = connection.prepareStatement(sql);
+            statement.setFetchSize(1000);
+            resultSet = statement.executeQuery();
+
+            while (resultSet.next()) {
+                List<Object> primaryKey = new ArrayList<>(keyColumnCount);
+                List<String> normalizedKey = new ArrayList<>(keyColumnCount);
+                for (int i = 0; i < keyColumnCount; i++) {
+                    primaryKey.add(resultSet.getObject(i + 1));
+                    normalizedKey.add(resultSet.getString(normalizedKeyOffset + i + 1));
+                }
+
+                List<String> normalizedRow = new ArrayList<>(normalizedColumnCount);
+                for (int i = 0; i < normalizedColumnCount; i++) {
+                    normalizedRow.add(resultSet.getString(normalizedRowOffset + i + 1));
+                }
+
+                rowHashes.add(new CodeSideRowHash(
+                        primaryKey,
+                        buildDelimitedValues(normalizedKey),
+                        computeRowHash(normalizedRow)));
+            }
+
+            return rowHashes;
+        } catch (SQLException e) {
+            throw new RuntimeException("Error computing SQLite row hashes in code", e);
+        } finally {
+            ResourceManager.closeJdbcResources(statement, resultSet);
+            releaseQuietly(connection);
+        }
+    }
+
+    private String computeSegmentChecksum(List<CodeSideRowHash> rowHashes) {
+        if (rowHashes.isEmpty()) {
+            return "";
+        }
+
+        List<CodeSideRowHash> orderedRowHashes = new ArrayList<>(rowHashes);
+        orderedRowHashes.sort(Comparator.comparing(CodeSideRowHash::normalizedKey));
+
+        StringBuilder concatenatedHashes = new StringBuilder();
+        for (int i = 0; i < orderedRowHashes.size(); i++) {
+            if (i > 0) {
+                concatenatedHashes.append('|');
+            }
+            concatenatedHashes.append(orderedRowHashes.get(i).rowHash());
+        }
+
+        return md5Hex(concatenatedHashes.toString());
+    }
+
+    private String computeRowHash(List<String> row) {
+        return md5Hex(buildDelimitedValues(row));
+    }
+
+    private String buildDelimitedValues(List<String> values) {
+        StringBuilder builder = new StringBuilder();
+        for (int i = 0; i < values.size(); i++) {
+            if (i > 0) {
+                builder.append('|');
+            }
+            String value = values.get(i);
+            builder.append(value == null ? "" : value);
+        }
+        return builder.toString();
+    }
+
+    private String buildCodeSideRowHashQuery(
+            TableSegment segment,
+            TableSchema schema,
+            List<String> keyColumns,
+            List<String> relevantColumns) {
+        Map<String, DataType> columnDataTypes = new HashMap<>();
+        for (String column : relevantColumns) {
+            columnDataTypes.put(column, schema.getColumnType(column));
+        }
+
+        List<String> selectColumns = new ArrayList<>();
+        for (String keyColumn : keyColumns) {
+            selectColumns.add(quote(keyColumn));
+        }
+        for (String keyColumn : keyColumns) {
+            DataType keyType = columnDataTypes.get(keyColumn);
+            selectColumns.add(dialect.getDataTypeHandler().normalizeColumn(keyColumn, keyType)
+                    + " AS " + quote("normalized_key_" + keyColumn));
+        }
+        for (String column : relevantColumns) {
+            DataType dataType = columnDataTypes.get(column);
+            selectColumns.add(dialect.getDataTypeHandler().normalizeColumn(column, dataType)
+                    + " AS " + quote("normalized_" + column));
+        }
+
+        String schemaName = segment.getTablePath().getSchema().orElse(null);
+        String tableName = segment.getTablePath().getTableName();
+        String whereClause = segment.buildWhereClause();
+        return dialect.getSqlQueryGenerator().getSelectSQL(schemaName, tableName, selectColumns, whereClause, keyColumns);
+    }
+
+    private TableSchema resolveTableSchema(TableSegment segment) {
+        if (segment.getSchema().isPresent()) {
+            return segment.getSchema().get();
+        }
+        return getTableSchema(segment.getTablePath().getComponents());
+    }
+
+    private String md5Hex(String value) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("MD5");
+            byte[] hash = digest.digest(value.getBytes(StandardCharsets.UTF_8));
+            StringBuilder hex = new StringBuilder(hash.length * 2);
+            for (byte b : hash) {
+                hex.append(String.format("%02x", b));
+            }
+            return hex.toString();
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("MD5 algorithm is not available", e);
+        }
+    }
+
+    private static final class CodeSideRowHash {
+        private final List<Object> primaryKey;
+        private final String normalizedKey;
+        private final String rowHash;
+
+        private CodeSideRowHash(List<Object> primaryKey, String normalizedKey, String rowHash) {
+            this.primaryKey = primaryKey;
+            this.normalizedKey = normalizedKey;
+            this.rowHash = rowHash;
+        }
+
+        private List<Object> primaryKey() {
+            return primaryKey;
+        }
+
+        private String normalizedKey() {
+            return normalizedKey;
+        }
+
+        private String rowHash() {
+            return rowHash;
+        }
     }
 
 }

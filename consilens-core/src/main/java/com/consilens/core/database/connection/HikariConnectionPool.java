@@ -56,6 +56,16 @@ public class HikariConnectionPool implements ConnectionPool {
 
         try {
             Connection connection = dataSource.getConnection();
+            try {
+                initializeConnection(connection);
+            } catch (SQLException e) {
+                try {
+                    connection.close();
+                } catch (SQLException closeException) {
+                    e.addSuppressed(closeException);
+                }
+                throw e;
+            }
 
             waitTime = System.currentTimeMillis() - startTime;
             updateWaitTimeStatistics(waitTime);
@@ -244,18 +254,28 @@ public class HikariConnectionPool implements ConnectionPool {
             DatabaseDialect dialect = DialectFactory.getDialect(config.getDatabaseType());
             ConnectionPoolOptimizer optimizer = dialect.getConnectionPoolOptimizer();
             Properties optimizations = optimizer.getOptimizationProperties(config.isUseSSL());
-            
+
             // Apply all optimization properties to HikariConfig
-            optimizations.forEach((key, value) -> 
+            optimizations.forEach((key, value) ->
                 hikariConfig.addDataSourceProperty(key.toString(), value)
             );
-            
-            log.debug("Applied {} connection pool optimization properties for database type: {}", 
+
+            log.debug("Applied {} connection pool optimization properties for database type: {}",
                     optimizations.size(), config.getDatabaseType().getDisplayName());
         } catch (Exception e) {
-            log.warn("Failed to apply database-specific optimizations for {}, using defaults: {}", 
+            log.warn("Failed to apply database-specific optimizations for {}, using defaults: {}",
                     config.getDatabaseType().getDisplayName(), e.getMessage());
         }
+    }
+
+    private void initializeConnection(Connection connection) throws SQLException {
+        if (connection == null) {
+            return;
+        }
+
+        DatabaseDialect dialect = DialectFactory.getDialect(configuration.getDatabaseType());
+        ConnectionPoolOptimizer optimizer = dialect.getConnectionPoolOptimizer();
+        optimizer.initializeConnection(connection);
     }
 
     private void updateWaitTimeStatistics(long waitTime) {
