@@ -170,17 +170,116 @@ public class SQLiteDatabaseDialect extends AbstractDatabaseDialect {
 
         @Override
         protected String normalizeDateTime(String quotedCol) {
-            return "COALESCE(strftime('%Y-%m-%d %H:%M:%S', " + quotedCol + "), '')";
+            return normalizeLiteralDateTime(quotedCol);
         }
 
         @Override
         protected String normalizeTimestamp(String quotedCol) {
-            return normalizeDateTime(quotedCol);
+            return normalizeTimestampValue(quotedCol);
         }
 
         @Override
         protected String normalizeTimestampWithTimezone(String quotedCol) {
-            return normalizeDateTime(quotedCol);
+            return normalizeTimestampValue(quotedCol);
+        }
+
+        private String normalizeLiteralDateTime(String quotedCol) {
+            String textValue = normalizeTemporalText(quotedCol);
+            String literalText = stripFraction(stripExplicitTimezone(textValue));
+            String numericTemporal = normalizeNumericTemporal(quotedCol);
+            return "CASE WHEN " + quotedCol + " IS NULL THEN '' "
+                    + "WHEN " + isNumericTemporal(quotedCol) + " THEN " + numericTemporal + " "
+                    + "ELSE " + normalizeLiteralDateTimeText(literalText) + " END";
+        }
+
+        private String normalizeTimestampValue(String quotedCol) {
+            String textValue = normalizeTemporalText(quotedCol);
+            String parseableTimestamp = normalizeParseableTimestampText(textValue);
+            String literalText = stripFraction(stripExplicitTimezone(textValue));
+            String numericTemporal = normalizeNumericTemporal(quotedCol);
+            return "CASE WHEN " + quotedCol + " IS NULL THEN '' "
+                    + "WHEN " + isNumericTemporal(quotedCol) + " THEN " + numericTemporal + " "
+                    + "WHEN " + hasExplicitTimezone(textValue) + " THEN COALESCE(strftime('%Y-%m-%d %H:%M:%S', " + parseableTimestamp + ", 'utc'), '') "
+                    + "ELSE " + normalizeLiteralDateTimeText(literalText) + " END";
+        }
+
+        private String normalizeLiteralDateTimeText(String literalText) {
+            return "CASE WHEN " + literalText + " = '' THEN '' "
+                    + "WHEN " + literalText + " GLOB '????-??-??' THEN COALESCE(strftime('%Y-%m-%d %H:%M:%S', " + literalText + " || ' 00:00:00'), '') "
+                    + "WHEN " + literalText + " GLOB '????-??-?? ??:??' THEN COALESCE(strftime('%Y-%m-%d %H:%M:%S', " + literalText + " || ':00'), '') "
+                    + "WHEN " + literalText + " GLOB '????-??-?? ??:??:??' THEN COALESCE(strftime('%Y-%m-%d %H:%M:%S', " + literalText + "), '') "
+                    + "ELSE '' END";
+        }
+
+        private String normalizeTemporalText(String quotedCol) {
+            return "REPLACE(TRIM(CAST(" + quotedCol + " AS TEXT)), 'T', ' ')";
+        }
+
+        private String normalizeNumericTemporal(String quotedCol) {
+            return "CASE WHEN typeof(" + quotedCol + ") = 'integer' THEN COALESCE(strftime('%Y-%m-%d %H:%M:%S', " + quotedCol + ", 'unixepoch'), '') "
+                    + "WHEN typeof(" + quotedCol + ") = 'real' THEN COALESCE(strftime('%Y-%m-%d %H:%M:%S', " + quotedCol + "), '') "
+                    + "ELSE '' END";
+        }
+
+        private String isNumericTemporal(String quotedCol) {
+            return "typeof(" + quotedCol + ") IN ('integer', 'real')";
+        }
+
+        private String normalizeParseableTimestampText(String textValue) {
+            return "CASE WHEN " + hasCompactTimezone(textValue) + " THEN SUBSTR(" + textValue + ", 1, LENGTH(" + textValue + ") - 2) || ':' || SUBSTR(" + textValue + ", LENGTH(" + textValue + ") - 1, 2) "
+                    + "ELSE " + textValue + " END";
+        }
+
+        private String stripExplicitTimezone(String textValue) {
+            return "CASE WHEN " + hasZuluTimezone(textValue) + " THEN SUBSTR(" + textValue + ", 1, LENGTH(" + textValue + ") - 1) "
+                    + "WHEN " + hasColonTimezone(textValue) + " THEN SUBSTR(" + textValue + ", 1, LENGTH(" + textValue + ") - 6) "
+                    + "WHEN " + hasCompactTimezone(textValue) + " THEN SUBSTR(" + textValue + ", 1, LENGTH(" + textValue + ") - 5) "
+                    + "ELSE " + textValue + " END";
+        }
+
+        private String stripFraction(String textValue) {
+            String fractionalPart = "SUBSTR(" + textValue + ", 21)";
+            return "CASE WHEN " + hasNumericFraction(textValue, fractionalPart) + " THEN SUBSTR(" + textValue + ", 1, 19) "
+                    + "ELSE " + textValue + " END";
+        }
+
+        private String hasNumericFraction(String textValue, String fractionalPart) {
+            return textValue + " GLOB '????-??-?? ??:??:??.*' "
+                    + "AND LENGTH(" + fractionalPart + ") > 0 "
+                    + "AND TRIM(" + fractionalPart + ", '0123456789') = ''";
+        }
+
+        private String hasExplicitTimezone(String textValue) {
+            return hasZuluTimezone(textValue)
+                    + " OR " + hasColonTimezone(textValue)
+                    + " OR " + hasCompactTimezone(textValue);
+        }
+
+        private String hasZuluTimezone(String textValue) {
+            return textValue + " LIKE '%Z'";
+        }
+
+        private String hasColonTimezone(String textValue) {
+            String hourPart = "SUBSTR(" + textValue + ", LENGTH(" + textValue + ") - 4, 2)";
+            String minutePart = "SUBSTR(" + textValue + ", LENGTH(" + textValue + ") - 1, 2)";
+            return "LENGTH(" + textValue + ") >= 6 "
+                    + "AND SUBSTR(" + textValue + ", LENGTH(" + textValue + ") - 5, 1) IN ('+', '-') "
+                    + "AND " + hourPart + " GLOB '[0-9][0-9]' "
+                    + "AND CAST(" + hourPart + " AS INTEGER) BETWEEN 0 AND 23 "
+                    + "AND SUBSTR(" + textValue + ", LENGTH(" + textValue + ") - 2, 1) = ':' "
+                    + "AND " + minutePart + " GLOB '[0-9][0-9]' "
+                    + "AND CAST(" + minutePart + " AS INTEGER) BETWEEN 0 AND 59";
+        }
+
+        private String hasCompactTimezone(String textValue) {
+            String hourPart = "SUBSTR(" + textValue + ", LENGTH(" + textValue + ") - 3, 2)";
+            String minutePart = "SUBSTR(" + textValue + ", LENGTH(" + textValue + ") - 1, 2)";
+            return "LENGTH(" + textValue + ") >= 5 "
+                    + "AND SUBSTR(" + textValue + ", LENGTH(" + textValue + ") - 4, 1) IN ('+', '-') "
+                    + "AND " + hourPart + " GLOB '[0-9][0-9]' "
+                    + "AND CAST(" + hourPart + " AS INTEGER) BETWEEN 0 AND 23 "
+                    + "AND " + minutePart + " GLOB '[0-9][0-9]' "
+                    + "AND CAST(" + minutePart + " AS INTEGER) BETWEEN 0 AND 59";
         }
 
         @Override
