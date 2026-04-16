@@ -3,28 +3,34 @@
 
 source:
   type: mysql
-  url: jdbc:mysql://localhost:3306/mydb
-  username: ${env.MYSQL_USER}
-  password: ${env.MYSQL_PASSWORD}
+  name: source-mysql
+  connection:
+    url: jdbc:mysql://localhost:3306/mydb
+    username: ${env.MYSQL_USER}
+    password: ${env.MYSQL_PASSWORD}
+  resource:
+    type: table
+    name: orders
 
 target:
   type: mysql
-  url: jdbc:mysql://localhost:3306/mydb
-  username: ${env.MYSQL_USER}
-  password: ${env.MYSQL_PASSWORD}
+  name: target-mysql
+  connection:
+    url: jdbc:mysql://localhost:3306/mydb
+    username: ${env.MYSQL_USER}
+    password: ${env.MYSQL_PASSWORD}
+  resource:
+    type: table
+    name: orders_backup
 
 comparison:
-  tables:
-    source: orders
-    target: orders_backup
-
   keys:
     source:
       - order_id
     target:
       - order_id
 
-  compareColumns:
+  comparisons:
     source:
       - customer_id
       - amount
@@ -36,7 +42,7 @@ comparison:
       - status
       - created_at
 
-  where:
+  filters:
     source: "created_at >= '2025-01-01'"
     target: "created_at >= '2025-01-01'"
 

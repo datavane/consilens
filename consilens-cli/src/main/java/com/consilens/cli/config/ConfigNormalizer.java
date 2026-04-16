@@ -1,7 +1,10 @@
 package com.consilens.cli.config;
 
 import com.consilens.cli.model.CliConfiguration;
+import com.consilens.cli.model.ComparisonConfig;
+import com.consilens.cli.model.ConnectionConfig;
 import com.consilens.cli.model.StrategyConfig;
+import com.consilens.cli.model.StringPairConfig;
 import com.consilens.core.thread.ConcurrencyConfig;
 import com.consilens.core.validation.ValidationException;
 
@@ -56,5 +59,44 @@ public class ConfigNormalizer {
         if (config.getConcurrency() == null) {
             config.setConcurrency(ConcurrencyConfig.defaultConfig());
         }
+
+        fillTablesFromResources(config);
+    }
+
+    private void fillTablesFromResources(CliConfiguration config) {
+        ComparisonConfig comparison = config.getComparison();
+        if (comparison == null) {
+            return;
+        }
+
+        StringPairConfig tables = comparison.getTables();
+        if (tables == null) {
+            tables = StringPairConfig.builder().build();
+            comparison.setTables(tables);
+        }
+
+        if (isBlank(tables.getSource())) {
+            tables.setSource(resolveResourceName(config.getSource()));
+        }
+        if (isBlank(tables.getTarget())) {
+            tables.setTarget(resolveResourceName(config.getTarget()));
+        }
+    }
+
+    private String resolveResourceName(ConnectionConfig connection) {
+        if (connection == null || connection.getResource() == null) {
+            return null;
+        }
+        if (!isBlank(connection.getResource().getName())) {
+            return connection.getResource().getName();
+        }
+        if (!isBlank(connection.getResource().getPath())) {
+            return connection.getResource().getPath();
+        }
+        return null;
+    }
+
+    private boolean isBlank(String value) {
+        return value == null || value.trim().isEmpty();
     }
 }

@@ -3,28 +3,34 @@
 
 source:
   type: mysql
-  url: jdbc:mysql://source-host:3306/production
-  username: ${env.MYSQL_USER}
-  password: ${env.MYSQL_PASSWORD}
+  name: source-mysql
+  connection:
+    url: jdbc:mysql://source-host:3306/production
+    username: ${env.MYSQL_USER}
+    password: ${env.MYSQL_PASSWORD}
+  resource:
+    type: table
+    name: fact_orders
 
 target:
   type: starrocks
-  url: jdbc:mysql://starrocks-host:9030/analytics
-  username: ${env.STARROCKS_USER}
-  password: ${env.STARROCKS_PASSWORD}
+  name: target-starrocks
+  connection:
+    url: jdbc:mysql://starrocks-host:9030/analytics
+    username: ${env.STARROCKS_USER}
+    password: ${env.STARROCKS_PASSWORD}
+  resource:
+    type: table
+    name: fact_orders
 
 comparison:
-  tables:
-    source: fact_orders
-    target: fact_orders
-
   keys:
     source:
       - order_id
     target:
       - order_id
 
-  compareColumns:
+  comparisons:
     source:
       - customer_id
       - product_id

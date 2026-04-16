@@ -2,6 +2,7 @@ package com.consilens.cli.model;
 
 import com.consilens.core.validation.ValidationException;
 import com.consilens.core.validation.ValidationFramework;
+import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.AllArgsConstructor;
@@ -28,14 +29,16 @@ public class ComparisonConfig {
     @JsonProperty("keys")
     private ListPairConfig keys;
 
-    @JsonProperty("compareColumns")
-    private ListPairConfig compareColumns;
+    @JsonProperty("comparisons")
+    @JsonAlias("compareColumns")
+    private ListPairConfig comparisons;
 
     @JsonProperty("extraColumns")
     private List<String> extraColumns;
 
-    @JsonProperty("where")
-    private StringPairConfig where;
+    @JsonProperty("filters")
+    @JsonAlias("where")
+    private StringPairConfig filters;
 
     @JsonProperty("updateColumn")
     private String updateColumn;
@@ -52,22 +55,38 @@ public class ComparisonConfig {
             throw ValidationException.simple("CONFIGURATION_VALIDATION", "comparison.keys 两侧数量必须一致");
         }
 
-        if (compareColumns != null) {
-            compareColumns.validate("comparison.compareColumns");
-            if (!compareColumns.isBothEmpty() && compareColumns.hasMismatchedSize()) {
-                throw ValidationException.simple("CONFIGURATION_VALIDATION", "comparison.compareColumns 两侧数量必须一致");
+        if (comparisons != null) {
+            comparisons.validate("comparison.comparisons");
+            if (!comparisons.isBothEmpty() && comparisons.hasMismatchedSize()) {
+                throw ValidationException.simple("CONFIGURATION_VALIDATION", "comparison.comparisons 两侧数量必须一致");
             }
         }
 
-        if (where != null) {
-            boolean hasSourceWhere = where.getSource() != null && !where.getSource().trim().isEmpty();
-            boolean hasTargetWhere = where.getTarget() != null && !where.getTarget().trim().isEmpty();
+        if (filters != null) {
+            boolean hasSourceWhere = filters.getSource() != null && !filters.getSource().trim().isEmpty();
+            boolean hasTargetWhere = filters.getTarget() != null && !filters.getTarget().trim().isEmpty();
             if (hasSourceWhere != hasTargetWhere) {
-                throw ValidationException.simple("CONFIGURATION_VALIDATION", "comparison.where 需要同时配置 source 和 target");
+                throw ValidationException.simple("CONFIGURATION_VALIDATION", "comparison.filters 需要同时配置 source 和 target");
             }
             if (hasSourceWhere) {
-                where.validate("comparison.where");
+                filters.validate("comparison.filters");
             }
         }
+    }
+
+    public ListPairConfig getCompareColumns() {
+        return comparisons;
+    }
+
+    public void setCompareColumns(ListPairConfig compareColumns) {
+        this.comparisons = compareColumns;
+    }
+
+    public StringPairConfig getWhere() {
+        return filters;
+    }
+
+    public void setWhere(StringPairConfig where) {
+        this.filters = where;
     }
 }

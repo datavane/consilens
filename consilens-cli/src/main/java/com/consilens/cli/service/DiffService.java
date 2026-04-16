@@ -2,33 +2,43 @@ package com.consilens.cli.service;
 
 import com.consilens.cli.model.CliConfiguration;
 import com.consilens.cli.model.CliDiffResult;
+import com.consilens.cli.model.ComparisonConfig;
 import com.consilens.cli.model.TableMetadata;
-import com.consilens.common.enums.ChecksumAlgorithm;
-import com.consilens.common.enums.LocalCompareMode;
+import com.consilens.cli.model.normalization.NormalizationConfig;
+import com.consilens.cli.model.normalization.TypeNormalizationRule;
+import com.consilens.connector.api.config.ConnectorConfig;
+import com.consilens.connector.api.config.ReadOptions;
+import com.consilens.connector.api.model.ComparisonSpec;
+import com.consilens.connector.api.model.KeySpec;
+import com.consilens.connector.api.model.PredicateSpec;
+import com.consilens.connector.api.model.ResourceLocator;
 import com.consilens.connector.api.model.TablePath;
-import com.consilens.core.algorithm.ChecksumDiffer;
-import com.consilens.core.algorithm.JoinDiffer;
-import com.consilens.core.algorithm.TableDiffer;
+import com.consilens.connector.api.normalization.MatchSpec;
+import com.consilens.connector.api.normalization.NormalizationRule;
+import com.consilens.connector.api.normalization.NormalizationSpec;
+import com.consilens.connector.api.planner.CompareExecutionOptions;
+import com.consilens.connector.api.planner.ComparePlanTypes;
+import com.consilens.connector.api.planner.CompareRequest;
+import com.consilens.connector.api.planner.CompareStrategyPreference;
+import com.consilens.core.compare.CompareRuntime;
+import com.consilens.core.compare.DefaultCompareRuntime;
 import com.consilens.core.database.adpter.DatabaseAdapter;
 import com.consilens.core.diff.DiffResult;
 import com.consilens.core.diff.DiffRow;
-import com.consilens.core.diff.DiffSink;
 import com.consilens.core.lifecycle.DiffContext;
 import com.consilens.core.lifecycle.DiffLifecycle;
 import com.consilens.core.lifecycle.NoopDiffLifecycle;
-import com.consilens.core.segment.TableSegment;
-import com.consilens.common.enums.ComparisonStrategy;
 import com.consilens.sink.api.DefaultDiffLifecycle;
-import com.consilens.sink.api.LifecycleDiffSink;
 import com.consilens.sink.api.model.ResultConfig;
 
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.CompletableFuture;
 
 /**
  * Enhanced service for performing data diff operations using core algorithms.
@@ -53,44 +63,8 @@ public class DiffService {
 
         try {
             lifecycle.onDiffStart(diffContext);
-
-            // Create database adapters
-            DatabaseAdapter sourceAdapter = DatabaseAdapterFactory.createSourceAdapter(config);
-            DatabaseAdapter targetAdapter = DatabaseAdapterFactory.createTargetAdapter(config);
-
-            // Create table segments
-            TableSegment sourceSegment = TableSegmentFactory.createSourceTableSegment(config, sourceAdapter);
-            TableSegment targetSegment = TableSegmentFactory.createTargetTableSegment(config, targetAdapter);
-
-            // Validate configurations
-            TableSegmentFactory.validateTableSegmentConfiguration(sourceSegment, config.getStrategyMode());
-            TableSegmentFactory.validateTableSegmentConfiguration(targetSegment, config.getStrategyMode());
-
-            // Create differ configuration
-            TableDiffer.DifferConfig differConfig = createDifferConfig(config);
-
-            // Create appropriate differ based on strategy
-            TableDiffer differ = createDiffer(config.getStrategyMode(), differConfig);
-
-            DiffSink diffSink = null;
-
-            // Use result.sinks framework: bridge via LifecycleDiffSink for streaming
-            if (lifecycle instanceof DefaultDiffLifecycle) {
-                LifecycleDiffSink lifecycleBridge = new LifecycleDiffSink(lifecycle, diffContext);
-                differ.setDiffSink(lifecycleBridge);
-                diffSink = lifecycleBridge;
-            }
-
-            // Perform the diff operation
-            CompletableFuture<DiffResult> future = differ.diffTables(sourceSegment, targetSegment);
-            DiffResult coreResult;
-            try {
-                coreResult = future.get();
-            } finally {
-                if (diffSink != null) {
-                    diffSink.close();
-                }
-            }
+            CompareRuntime runtime = new DefaultCompareRuntime();
+            DiffResult coreResult = runtime.execute(toCompareRequest(config));
 
             lifecycle.onDiffComplete(coreResult, diffContext);
 
@@ -105,9 +79,6 @@ public class DiffService {
             result.initializeTimestamp();
 
             log.info("Diff operation completed in {} ms with {} differences", duration, result.getTotalDifferences());
-
-            // Clean up resources
-            cleanupResources(sourceAdapter, targetAdapter, differ);
 
             return result;
 
@@ -156,9 +127,9 @@ public class DiffService {
                 if (srcKeys != null) sourceColumnNames.addAll(srcKeys);
                 if (tgtKeys != null) targetColumnNames.addAll(tgtKeys);
             }
-            if (config.getComparison().getCompareColumns() != null) {
-                List<String> srcCols = config.getComparison().getCompareColumns().getSource();
-                List<String> tgtCols = config.getComparison().getCompareColumns().getTarget();
+            if (config.getComparison().getComparisons() != null) {
+                List<String> srcCols = config.getComparison().getComparisons().getSource();
+                List<String> tgtCols = config.getComparison().getComparisons().getTarget();
                 if (srcCols != null) {
                     for (String c : srcCols) {
                         if (!sourceColumnNames.contains(c)) sourceColumnNames.add(c);
@@ -179,69 +150,6 @@ public class DiffService {
                 .sourceColumnNames(sourceColumnNames)
                 .targetColumnNames(targetColumnNames)
                 .build();
-    }
-
-    /**
-     * Create differ configuration from CLI configuration.
-     */
-    private TableDiffer.DifferConfig createDifferConfig(CliConfiguration config) {
-        int bisectionFactor;
-        if (config.getStrategy().getBisectionFactor() != null) {
-            bisectionFactor = config.getStrategy().getBisectionFactor();
-            log.debug("Using explicit bisectionFactor from config: {}", bisectionFactor);
-        } else {
-            bisectionFactor = 4;
-            log.debug("No bisectionFactor provided, using default: {}", bisectionFactor);
-        }
-        
-        // Use explicit bisectionThreshold if provided, otherwise calculate from batchSize
-        long bisectionThreshold;
-        if (config.getStrategy().getBisectionThreshold() != null) {
-            bisectionThreshold = config.getStrategy().getBisectionThreshold();
-        } else {
-            bisectionThreshold = config.getStrategy().getBatchSize() != null ? config.getStrategy().getBatchSize() * 10 : 10000;
-        }
-        
-        boolean enableProfiling = config.getStrategy().getEnableProfiling() != null ? config.getStrategy().getEnableProfiling() : false;
-
-        ChecksumAlgorithm checksumAlgorithm = config.getAlgorithmEnum();
-        LocalCompareMode localCompareMode = config.getStrategy().getLocalCompare() != null
-                ? config.getStrategy().getLocalCompare().getModeEnum()
-                : LocalCompareMode.FULL;
-        log.info("Creating DifferConfig: bisectionFactor={}, bisectionThreshold={}, " +
-                "enableProfiling={}, checksumAlgorithm={}, localCompareMode={}",
-                bisectionFactor, bisectionThreshold, enableProfiling,
-                checksumAlgorithm, localCompareMode);
-
-        return new TableDiffer.DifferConfig(bisectionFactor, bisectionThreshold,
-                                           enableProfiling, checksumAlgorithm,
-                                           localCompareMode,
-                                           config.getConcurrency());
-    }
-
-    /**
-     * Create appropriate differ based on algorithm type.
-     */
-    private TableDiffer createDiffer(String strategy, TableDiffer.DifferConfig config) {
-        ComparisonStrategy strategyEnum = ComparisonStrategy.fromString(strategy);
-        
-        switch (strategyEnum) {
-            case CHECKSUM:
-                log.info("Creating ChecksumDiffer with config: bisectionFactor={}, threshold={}",
-                        config.getBisectionFactor(), config.getBisectionThreshold());
-                return new ChecksumDiffer(config);
-
-            case JOIN:
-                log.info("Creating JoinDiffer");
-                // Create default join options
-                JoinDiffer.JoinDifferOptions joinOptions = new JoinDiffer.JoinDifferOptions(
-                        false // validateUniqueKeys
-                );
-                return new JoinDiffer(config, joinOptions);
-
-            default:
-                throw new IllegalArgumentException("Unsupported strategy: " + strategy);
-        }
     }
 
     /**
@@ -316,15 +224,15 @@ public class DiffService {
         }
 
         // Add comparison columns
-        if (config.getComparison().getCompareColumns() != null
-                && config.getComparison().getCompareColumns().getSource() != null) {
-            sourceColumns.addAll(config.getComparison().getCompareColumns().getSource());
-            log.debug("Added source compareColumns: {}", config.getComparison().getCompareColumns().getSource());
+        if (config.getComparison().getComparisons() != null
+                && config.getComparison().getComparisons().getSource() != null) {
+            sourceColumns.addAll(config.getComparison().getComparisons().getSource());
+            log.debug("Added source comparisons: {}", config.getComparison().getComparisons().getSource());
         }
-        if (config.getComparison().getCompareColumns() != null
-                && config.getComparison().getCompareColumns().getTarget() != null) {
-            targetColumns.addAll(config.getComparison().getCompareColumns().getTarget());
-            log.debug("Added target compareColumns: {}", config.getComparison().getCompareColumns().getTarget());
+        if (config.getComparison().getComparisons() != null
+                && config.getComparison().getComparisons().getTarget() != null) {
+            targetColumns.addAll(config.getComparison().getComparisons().getTarget());
+            log.debug("Added target comparisons: {}", config.getComparison().getComparisons().getTarget());
         }
 
         // Add extra columns
@@ -386,41 +294,301 @@ public class DiffService {
                 .build();
     }
 
-    /**
-     * Clean up resources after diff operation.
-     */
-    private void cleanupResources(DatabaseAdapter sourceAdapter, DatabaseAdapter targetAdapter, TableDiffer differ) {
-        try {
-            log.info(" Starting resource cleanup...");
+    private CompareRequest toCompareRequest(CliConfiguration config) {
+        ComparisonConfig comparison = config.getComparison();
+        return CompareRequest.builder()
+                .source(toConnectorConfig(config.getSource(), comparison.getTables().getSource()))
+                .target(toConnectorConfig(config.getTarget(), comparison.getTables().getTarget()))
+                .sourceKeySpec(toKeySpec(comparison.getKeys().getSource()))
+                .targetKeySpec(toKeySpec(comparison.getKeys().getTarget()))
+                .sourceComparisons(toComparisonSpec(comparison.getComparisons() != null
+                        ? comparison.getComparisons().getSource()
+                        : null))
+                .targetComparisons(toComparisonSpec(comparison.getComparisons() != null
+                        ? comparison.getComparisons().getTarget()
+                        : null))
+                .sourceFilter(toPredicateSpec(comparison.getFilters() != null
+                        ? comparison.getFilters().getSource()
+                        : null))
+                .targetFilter(toPredicateSpec(comparison.getFilters() != null
+                        ? comparison.getFilters().getTarget()
+                        : null))
+                .normalizationSpec(toNormalizationSpec(config.getNormalization()))
+                .strategyPreference(toStrategyPreference(config))
+                .executionOptions(toExecutionOptions(config))
+                .build();
+    }
 
-            // Close database connection pools
-            if (sourceAdapter != null && sourceAdapter.getConnectionPool() != null) {
-                log.info("Closing source database connection pool...");
-                sourceAdapter.getConnectionPool().close();
-            }
-            if (targetAdapter != null && targetAdapter.getConnectionPool() != null) {
-                log.info("Closing target database connection pool...");
-                targetAdapter.getConnectionPool().close();
-            }
+    private ConnectorConfig toConnectorConfig(com.consilens.cli.model.ConnectionConfig connectionConfig, String tableName) {
+        return ConnectorConfig.builder()
+                .type(connectionConfig.getType())
+                .name(connectionConfig.getName())
+                .connection(connectionConfig.toConnectionMap())
+                .resource(toResourceLocator(connectionConfig, tableName))
+                .readOptions(toReadOptions(connectionConfig.getReadOptions()))
+                .build();
+    }
 
-            // Shutdown executor services if available
-            if (differ != null) {
-                try {
-                    log.info("Shutting down TableDiffer...");
-                    differ.shutdown();
-                    log.info("TableDiffer shutdown completed");
-                } catch (Exception e) {
-                    log.warn("Error shutting down differ", e);
-                }
-            }
-
-            // Suggest garbage collection
-            System.gc();
-
-            log.info("Resources cleaned up successfully");
-        } catch (Exception e) {
-            log.warn("Error during resource cleanup", e);
+    private ResourceLocator toResourceLocator(com.consilens.cli.model.ConnectionConfig connectionConfig, String tableName) {
+        if (connectionConfig.getResource() != null) {
+            return ResourceLocator.builder()
+                    .type(connectionConfig.getResource().getType())
+                    .name(connectionConfig.getResource().getName())
+                    .path(connectionConfig.getResource().getPath())
+                    .options(connectionConfig.getResource().getOptions())
+                    .build();
         }
+        return ResourceLocator.builder()
+                .type("table")
+                .name(tableName)
+                .build();
+    }
+
+    private ReadOptions toReadOptions(Map<String, Object> readOptions) {
+        if (readOptions == null || readOptions.isEmpty()) {
+            return null;
+        }
+
+        Map<String, Object> options = new LinkedHashMap<>(readOptions);
+        String consistency = stringValue(options.remove("consistency"));
+        Integer batchSize = integerValue(options.remove("batchSize"));
+        Integer fetchSize = integerValue(options.remove("fetchSize"));
+
+        return ReadOptions.builder()
+                .consistency(consistency)
+                .batchSize(batchSize)
+                .fetchSize(fetchSize)
+                .options(options.isEmpty() ? null : options)
+                .build();
+    }
+
+    private KeySpec toKeySpec(List<String> fields) {
+        return KeySpec.builder()
+                .fields(fields != null ? List.copyOf(fields) : Collections.emptyList())
+                .build();
+    }
+
+    private ComparisonSpec toComparisonSpec(List<String> fields) {
+        return ComparisonSpec.builder()
+                .fields(fields != null ? List.copyOf(fields) : Collections.emptyList())
+                .build();
+    }
+
+    private PredicateSpec toPredicateSpec(String expression) {
+        if (expression == null || expression.trim().isEmpty()) {
+            return null;
+        }
+        return PredicateSpec.builder()
+                .type("sql")
+                .expression(expression)
+                .build();
+    }
+
+    private CompareStrategyPreference toStrategyPreference(CliConfiguration config) {
+        List<String> preferredPlans;
+        boolean allowFallback;
+        if ("join".equalsIgnoreCase(config.getStrategyMode())) {
+            preferredPlans = List.of(ComparePlanTypes.SERVER_JOIN);
+            allowFallback = false;
+        } else {
+            preferredPlans = List.of(
+                    ComparePlanTypes.PUSHDOWN_CHECKSUM,
+                    ComparePlanTypes.KEY_HASH,
+                    ComparePlanTypes.STREAMING_MERGE);
+            allowFallback = true;
+        }
+
+        return CompareStrategyPreference.builder()
+                .preferredPlans(preferredPlans)
+                .allowFallback(allowFallback)
+                .build();
+    }
+
+    private CompareExecutionOptions toExecutionOptions(CliConfiguration config) {
+        Map<String, Object> attributes = new LinkedHashMap<>();
+        if (config.getConcurrency() != null) {
+            attributes.put("concurrencyConfig", config.getConcurrency());
+        }
+
+        return CompareExecutionOptions.builder()
+                .bisectionFactor(config.getStrategy().getBisectionFactor())
+                .bisectionThreshold(resolveBisectionThreshold(config))
+                .enableProfiling(Boolean.TRUE.equals(config.getStrategy().getEnableProfiling()))
+                .checksumAlgorithm(config.getAlgorithm())
+                .localCompareMode(config.getStrategy().getLocalCompare() != null
+                        ? config.getStrategy().getLocalCompare().getMode()
+                        : null)
+                .validateUniqueKeys(false)
+                .attributes(attributes.isEmpty() ? null : attributes)
+                .build();
+    }
+
+    private NormalizationSpec toNormalizationSpec(NormalizationConfig normalizationConfig) {
+        if (normalizationConfig == null) {
+            return null;
+        }
+        return NormalizationSpec.builder()
+                .global(toNormalizationRules(normalizationConfig.getGlobal()))
+                .source(toNormalizationRules(normalizationConfig.getSource()))
+                .target(toNormalizationRules(normalizationConfig.getTarget()))
+                .build();
+    }
+
+    private List<NormalizationRule> toNormalizationRules(Map<String, TypeNormalizationRule> rules) {
+        if (rules == null || rules.isEmpty()) {
+            return null;
+        }
+        List<NormalizationRule> result = new ArrayList<>();
+        for (Map.Entry<String, TypeNormalizationRule> entry : rules.entrySet()) {
+            String canonicalType = normalizeType(entry.getKey());
+            TypeNormalizationRule rule = entry.getValue();
+            if (canonicalType == null || rule == null) {
+                continue;
+            }
+            result.addAll(toNormalizationRules(canonicalType, rule));
+        }
+        return result.isEmpty() ? null : result;
+    }
+
+    private List<NormalizationRule> toNormalizationRules(String type, TypeNormalizationRule rule) {
+        List<NormalizationRule> result = new ArrayList<>();
+
+        if (rule.getPrecision() != null || rule.getRounding() != null) {
+            Map<String, Object> params = new LinkedHashMap<>();
+            if (rule.getPrecision() != null) {
+                params.put("precision", rule.getPrecision());
+            }
+            if (rule.getRounding() != null) {
+                params.put("rounding", rule.getRounding());
+            }
+            result.add(normalizationRule(type, "format_number", params));
+        }
+
+        if (rule.getFormat() != null || rule.getTimezone() != null) {
+            Map<String, Object> params = new LinkedHashMap<>();
+            if (rule.getFormat() != null) {
+                params.put("format", rule.getFormat());
+            }
+            if (rule.getTimezone() != null) {
+                params.put("timezone", rule.getTimezone());
+            }
+            result.add(normalizationRule(type, "format_datetime", params));
+        }
+
+        if (rule.getEncoding() != null || rule.getUppercase() != null) {
+            Map<String, Object> params = new LinkedHashMap<>();
+            if (rule.getEncoding() != null) {
+                params.put("encoding", rule.getEncoding());
+            }
+            if (rule.getUppercase() != null) {
+                params.put("uppercase", rule.getUppercase());
+            }
+            result.add(normalizationRule(type, "encode", params));
+        }
+
+        if ("boolean".equals(type)
+                && (rule.getTrueValue() != null || rule.getFalseValue() != null || rule.getNullValue() != null)) {
+            Map<String, Object> params = new LinkedHashMap<>();
+            if (rule.getTrueValue() != null) {
+                params.put("trueValue", rule.getTrueValue());
+            }
+            if (rule.getFalseValue() != null) {
+                params.put("falseValue", rule.getFalseValue());
+            }
+            if (rule.getNullValue() != null) {
+                params.put("nullValue", rule.getNullValue());
+            }
+            result.add(normalizationRule(type, "map_boolean", params));
+        } else if ("string".equals(type) && rule.getNullValue() != null) {
+            Map<String, Object> params = new LinkedHashMap<>();
+            params.put("nullValue", rule.getNullValue());
+            result.add(normalizationRule(type, "normalize_string", params));
+        }
+
+        return result;
+    }
+
+    private NormalizationRule normalizationRule(String type, String operation, Map<String, Object> params) {
+        return NormalizationRule.builder()
+                .match(MatchSpec.builder().type(type).build())
+                .operation(operation)
+                .params(params)
+                .build();
+    }
+
+    private String normalizeType(String type) {
+        if (type == null || type.trim().isEmpty()) {
+            return null;
+        }
+        switch (type.trim().toLowerCase()) {
+            case "char":
+            case "varchar":
+            case "text":
+            case "clob":
+            case "longvarchar":
+            case "string":
+                return "string";
+            case "tinyint":
+            case "smallint":
+            case "integer":
+            case "int":
+            case "bigint":
+                return "integer";
+            case "decimal":
+            case "numeric":
+                return "decimal";
+            case "float":
+            case "double":
+            case "real":
+                return "float";
+            case "date":
+                return "date";
+            case "time":
+                return "time";
+            case "datetime":
+                return "datetime";
+            case "timestamp":
+                return "timestamp";
+            case "boolean":
+            case "bit":
+                return "boolean";
+            case "binary":
+            case "varbinary":
+            case "blob":
+                return "binary";
+            case "json":
+            case "jsonb":
+                return "json";
+            default:
+                return type.trim().toLowerCase();
+        }
+    }
+
+    private long resolveBisectionThreshold(CliConfiguration config) {
+        if (config.getStrategy().getBisectionThreshold() != null) {
+            return config.getStrategy().getBisectionThreshold();
+        }
+        if (config.getStrategy().getBatchSize() != null) {
+            return config.getStrategy().getBatchSize() * 10L;
+        }
+        return 10000L;
+    }
+
+    private String stringValue(Object value) {
+        return value instanceof String ? (String) value : null;
+    }
+
+    private Integer integerValue(Object value) {
+        if (value instanceof Integer) {
+            return (Integer) value;
+        }
+        if (value instanceof Number) {
+            return ((Number) value).intValue();
+        }
+        if (value instanceof String && !((String) value).trim().isEmpty()) {
+            return Integer.parseInt(((String) value).trim());
+        }
+        return null;
     }
 
     /**
@@ -429,6 +597,7 @@ public class DiffService {
     public CliDiffResult performDryRun(CliConfiguration config) throws Exception {
         log.info("Performing dry run for diff operation with strategy: {}, algorithm: {}", 
                 config.getStrategyMode(), config.getAlgorithm());
+        log.warn("Dry-run currently uses the legacy validation path for connectivity and row-count checks. Actual diff execution uses the new connector runtime.");
 
         try {
             // Validate database connections

@@ -29,6 +29,11 @@
             <artifactId>consilens-spi</artifactId>
         </dependency>
 
+        <dependency>
+            <groupId>com.consilens</groupId>
+            <artifactId>consilens-connector-api</artifactId>
+        </dependency>
+
         <!-- JSON Processing -->
         <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>
@@ -132,12 +137,6 @@
             <artifactId>sqlite-jdbc</artifactId>
             <version>3.44.1.0</version>
             <scope>test</scope>
-        </dependency>
-
-        <dependency>
-            <groupId>com.consilens</groupId>
-            <artifactId>consilens-connector-all</artifactId>
-            <version>${project.version}</version>
         </dependency>
 
         <dependency>

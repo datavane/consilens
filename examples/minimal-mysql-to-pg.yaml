@@ -3,28 +3,34 @@
 
 source:
   type: mysql
-  url: jdbc:mysql://localhost:3306/mydb
-  username: ${env.MYSQL_USER}
-  password: ${env.MYSQL_PASSWORD}
+  name: source-mysql
+  connection:
+    url: jdbc:mysql://localhost:3306/mydb
+    username: ${env.MYSQL_USER}
+    password: ${env.MYSQL_PASSWORD}
+  resource:
+    type: table
+    name: users
 
 target:
   type: postgresql
-  url: jdbc:postgresql://localhost:5432/mydb
-  username: ${env.PG_USER}
-  password: ${env.PG_PASSWORD}
+  name: target-postgresql
+  connection:
+    url: jdbc:postgresql://localhost:5432/mydb
+    username: ${env.PG_USER}
+    password: ${env.PG_PASSWORD}
+  resource:
+    type: table
+    name: users
 
 comparison:
-  tables:
-    source: users
-    target: users
-
   keys:
     source:
       - id
     target:
       - id
 
-  compareColumns:
+  comparisons:
     source:
       - name
       - email

@@ -1,27 +1,33 @@
 source:
   type: mysql
-  url: jdbc:mysql://localhost:3306/test
-  username: ${env.MYSQL_USER}
-  password: ${env.MYSQL_PASSWORD}
+  name: source-mysql
+  connection:
+    url: jdbc:mysql://localhost:3306/test
+    username: ${env.MYSQL_USER}
+    password: ${env.MYSQL_PASSWORD}
+  resource:
+    type: table
+    name: performance_test_table
 
 target:
   type: starrocks
-  url: jdbc:mysql://localhost:9030/test
-  username: ${env.STARROCKS_USER}
-  password: ${env.STARROCKS_PASSWORD}
+  name: target-starrocks
+  connection:
+    url: jdbc:mysql://localhost:9030/test
+    username: ${env.STARROCKS_USER}
+    password: ${env.STARROCKS_PASSWORD}
+  resource:
+    type: table
+    name: performance_test_table
 
 comparison:
-  tables:
-    source: performance_test_table
-    target: performance_test_table
-
   keys:
     source:
       - record_id
     target:
       - record_id
 
-  compareColumns:
+  comparisons:
     source:
       - col_tinyint
       - col_smallint
@@ -37,7 +43,7 @@ comparison:
       - col_bigint
       - col_unsigned_int
 
-  # where:
+  # filters:
   #   source: "record_id >= 'REC0000000000' AND record_id <= 'REC0000009094'"
   #   target: "record_id >= 'REC0000000000' AND record_id <= 'REC0000009094'"
 
