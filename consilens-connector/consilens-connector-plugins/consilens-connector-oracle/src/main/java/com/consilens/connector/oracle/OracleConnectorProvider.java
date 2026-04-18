@@ -6,6 +6,6 @@ import com.consilens.conncetor.base.AbstractJdbcConnectorProvider;
 public class OracleConnectorProvider extends AbstractJdbcConnectorProvider {
 
     public OracleConnectorProvider() {
-        super("oracle", DatabaseType.ORACLE);
+        super("oracle", DatabaseType.ORACLE, OracleDatabaseDialect::new);
     }
 }

@@ -104,6 +104,18 @@ class DefaultComparePlannerTest {
         assertEquals(ComparePlanTypes.PUSHDOWN_CHECKSUM, plan.getPlanType());
     }
 
+    @Test
+    void shouldSelectChecksumForNonRelationalDatasetsWithHashCapability() {
+        CompareRequest request = CompareRequest.builder().build();
+
+        DatasetHandle source = dataset("left", capabilities(ConnectorCapability.SERVER_SIDE_HASH));
+        DatasetHandle target = dataset("right", capabilities(ConnectorCapability.SERVER_SIDE_HASH));
+
+        ComparePlan plan = planner.plan(request, source, target);
+
+        assertEquals(ComparePlanTypes.PUSHDOWN_CHECKSUM, plan.getPlanType());
+    }
+
     private DatasetHandle dataset(String executionDomainId, CapabilitySet capabilities) {
         DatasetMetadata metadata = DatasetMetadata.builder()
                 .logicalName("orders")

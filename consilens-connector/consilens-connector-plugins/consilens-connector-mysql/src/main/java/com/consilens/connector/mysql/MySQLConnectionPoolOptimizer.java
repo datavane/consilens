@@ -41,6 +41,7 @@ public class MySQLConnectionPoolOptimizer implements ConnectionPoolOptimizer {
 
         // Performance optimizations
         props.setProperty("useLocalSessionState", "true");
+        props.setProperty("useCursorFetch", "true");
         props.setProperty("rewriteBatchedStatements", "true");
         props.setProperty("cacheResultSetMetadata", "true");
         props.setProperty("cacheServerConfiguration", "true");

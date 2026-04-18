@@ -1,5 +1,6 @@
 package com.consilens.conncetor.base.jdbc;
 
+import com.consilens.connector.api.DatabaseDialect;
 import com.consilens.connector.api.ConnectorException;
 import com.consilens.connector.api.config.ConnectorConfig;
 import com.consilens.connector.api.config.ReadOptions;
@@ -10,15 +11,20 @@ import com.consilens.connector.api.spi.ConnectorAdapter;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.function.Function;
 
 public class JdbcConnectorAdapter implements ConnectorAdapter {
 
     private final ConnectorConfig config;
     private final DatabaseType databaseType;
+    private final Function<Map<String, ?>, DatabaseDialect> dialectFactory;
 
-    public JdbcConnectorAdapter(ConnectorConfig config, DatabaseType databaseType) {
+    public JdbcConnectorAdapter(ConnectorConfig config,
+                                DatabaseType databaseType,
+                                Function<Map<String, ?>, DatabaseDialect> dialectFactory) {
         this.config = config;
         this.databaseType = databaseType;
+        this.dialectFactory = dialectFactory;
     }
 
     @Override
@@ -39,6 +45,7 @@ public class JdbcConnectorAdapter implements ConnectorAdapter {
         return new JdbcDatasetHandle(
                 getName(),
                 databaseType,
+                dialectFactory,
                 config.getConnection() != null ? new LinkedHashMap<>(config.getConnection()) : Map.of(),
                 resource,
                 readOptions);

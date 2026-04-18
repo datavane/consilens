@@ -7,10 +7,8 @@ import com.consilens.connector.api.dataset.DatasetMetadata;
 import com.consilens.connector.api.planner.ComparePlanTypes;
 import com.consilens.connector.api.planner.CompareRequest;
 import com.consilens.connector.api.planner.CompareStrategyPreference;
-import com.consilens.core.compare.plan.KeyHashPlan;
 import com.consilens.core.compare.plan.PushdownChecksumPlan;
 import com.consilens.core.compare.plan.ServerJoinPlan;
-import com.consilens.core.compare.plan.StreamingMergePlan;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -25,27 +23,15 @@ public class DefaultComparePlanner implements ComparePlanner {
         CapabilitySet targetCapabilities = getCapabilities(target);
         List<ComparePlan> availablePlans = new ArrayList<>();
 
-        if (sameExecutionDomain(source, target)
-                && sourceCapabilities.supports(ConnectorCapability.SERVER_SIDE_JOIN)
-                && targetCapabilities.supports(ConnectorCapability.SERVER_SIDE_JOIN)) {
-            availablePlans.add(new ServerJoinPlan(executionSettings));
-        }
-
         if (sourceCapabilities.supports(ConnectorCapability.SERVER_SIDE_HASH)
                 && targetCapabilities.supports(ConnectorCapability.SERVER_SIDE_HASH)) {
             availablePlans.add(new PushdownChecksumPlan(executionSettings));
         }
 
-        if (supportsKeyHash(source, sourceCapabilities, target, targetCapabilities)) {
-            availablePlans.add(new KeyHashPlan(executionSettings, "source"));
-        }
-
-        if (supportsKeyHash(target, targetCapabilities, source, sourceCapabilities)) {
-            availablePlans.add(new KeyHashPlan(executionSettings, "target"));
-        }
-
-        if (supportsStreamingMerge(source, sourceCapabilities, target, targetCapabilities)) {
-            availablePlans.add(new StreamingMergePlan(executionSettings));
+        if (sameExecutionDomain(source, target)
+                && sourceCapabilities.supports(ConnectorCapability.SERVER_SIDE_JOIN)
+                && targetCapabilities.supports(ConnectorCapability.SERVER_SIDE_JOIN)) {
+            availablePlans.add(new ServerJoinPlan(executionSettings));
         }
 
         if (availablePlans.isEmpty()) {
@@ -76,26 +62,6 @@ public class DefaultComparePlanner implements ComparePlanner {
         String sourceExecutionDomain = sourceMetadata.getExecutionDomainId();
         String targetExecutionDomain = targetMetadata.getExecutionDomainId();
         return sourceExecutionDomain != null && sourceExecutionDomain.equals(targetExecutionDomain);
-    }
-
-    private boolean supportsKeyHash(DatasetHandle lookupDataset,
-                                    CapabilitySet lookupCapabilities,
-                                    DatasetHandle scanDataset,
-                                    CapabilitySet scanCapabilities) {
-        return lookupCapabilities.supports(ConnectorCapability.KEY_LOOKUP)
-                && scanCapabilities.supports(ConnectorCapability.STREAM_SCAN)
-                && lookupDataset.getKeyLookupProvider().isPresent()
-                && scanDataset.getRecordScanner().isPresent();
-    }
-
-    private boolean supportsStreamingMerge(DatasetHandle source,
-                                           CapabilitySet sourceCapabilities,
-                                           DatasetHandle target,
-                                           CapabilitySet targetCapabilities) {
-        return sourceCapabilities.supports(ConnectorCapability.ORDERED_SCAN)
-                && targetCapabilities.supports(ConnectorCapability.ORDERED_SCAN)
-                && source.getRecordScanner().isPresent()
-                && target.getRecordScanner().isPresent();
     }
 
     private ComparePlan resolvePreferredPlan(CompareStrategyPreference preference, List<ComparePlan> availablePlans) {

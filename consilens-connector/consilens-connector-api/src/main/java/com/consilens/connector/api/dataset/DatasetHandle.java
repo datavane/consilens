@@ -26,6 +26,15 @@ public interface DatasetHandle extends AutoCloseable {
 
     Optional<FilterPushdownProvider> getFilterPushdownProvider();
 
+    default <T> Optional<T> getSupport(Class<T> supportType) {
+        if (supportType == null) {
+            return Optional.empty();
+        }
+        return supportType.isInstance(this)
+                ? Optional.of(supportType.cast(this))
+                : Optional.empty();
+    }
+
     @Override
     void close() throws ConnectorException;
 }

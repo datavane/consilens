@@ -19,10 +19,10 @@ import com.consilens.connector.api.normalization.NormalizationSpec;
 import com.consilens.connector.api.planner.CompareExecutionOptions;
 import com.consilens.connector.api.planner.ComparePlanTypes;
 import com.consilens.connector.api.planner.CompareRequest;
+import com.consilens.connector.api.planner.CompareSegment;
 import com.consilens.connector.api.planner.CompareStrategyPreference;
 import com.consilens.core.compare.CompareRuntime;
 import com.consilens.core.compare.DefaultCompareRuntime;
-import com.consilens.core.database.adpter.DatabaseAdapter;
 import com.consilens.core.diff.DiffResult;
 import com.consilens.core.diff.DiffRow;
 import com.consilens.core.lifecycle.DiffContext;
@@ -297,8 +297,8 @@ public class DiffService {
     private CompareRequest toCompareRequest(CliConfiguration config) {
         ComparisonConfig comparison = config.getComparison();
         return CompareRequest.builder()
-                .source(toConnectorConfig(config.getSource(), comparison.getTables().getSource()))
-                .target(toConnectorConfig(config.getTarget(), comparison.getTables().getTarget()))
+                .source(ConnectorConfigMapper.toConnectorConfig(config.getSource(), comparison.getTables().getSource()))
+                .target(ConnectorConfigMapper.toConnectorConfig(config.getTarget(), comparison.getTables().getTarget()))
                 .sourceKeySpec(toKeySpec(comparison.getKeys().getSource()))
                 .targetKeySpec(toKeySpec(comparison.getKeys().getTarget()))
                 .sourceComparisons(toComparisonSpec(comparison.getComparisons() != null
@@ -320,46 +320,15 @@ public class DiffService {
     }
 
     private ConnectorConfig toConnectorConfig(com.consilens.cli.model.ConnectionConfig connectionConfig, String tableName) {
-        return ConnectorConfig.builder()
-                .type(connectionConfig.getType())
-                .name(connectionConfig.getName())
-                .connection(connectionConfig.toConnectionMap())
-                .resource(toResourceLocator(connectionConfig, tableName))
-                .readOptions(toReadOptions(connectionConfig.getReadOptions()))
-                .build();
+        return ConnectorConfigMapper.toConnectorConfig(connectionConfig, tableName);
     }
 
     private ResourceLocator toResourceLocator(com.consilens.cli.model.ConnectionConfig connectionConfig, String tableName) {
-        if (connectionConfig.getResource() != null) {
-            return ResourceLocator.builder()
-                    .type(connectionConfig.getResource().getType())
-                    .name(connectionConfig.getResource().getName())
-                    .path(connectionConfig.getResource().getPath())
-                    .options(connectionConfig.getResource().getOptions())
-                    .build();
-        }
-        return ResourceLocator.builder()
-                .type("table")
-                .name(tableName)
-                .build();
+        return ConnectorConfigMapper.toResourceLocator(connectionConfig, tableName);
     }
 
     private ReadOptions toReadOptions(Map<String, Object> readOptions) {
-        if (readOptions == null || readOptions.isEmpty()) {
-            return null;
-        }
-
-        Map<String, Object> options = new LinkedHashMap<>(readOptions);
-        String consistency = stringValue(options.remove("consistency"));
-        Integer batchSize = integerValue(options.remove("batchSize"));
-        Integer fetchSize = integerValue(options.remove("fetchSize"));
-
-        return ReadOptions.builder()
-                .consistency(consistency)
-                .batchSize(batchSize)
-                .fetchSize(fetchSize)
-                .options(options.isEmpty() ? null : options)
-                .build();
+        return ConnectorConfigMapper.toReadOptions(readOptions);
     }
 
     private KeySpec toKeySpec(List<String> fields) {
@@ -597,20 +566,26 @@ public class DiffService {
     public CliDiffResult performDryRun(CliConfiguration config) throws Exception {
         log.info("Performing dry run for diff operation with strategy: {}, algorithm: {}", 
                 config.getStrategyMode(), config.getAlgorithm());
-        log.warn("Dry-run currently uses the legacy validation path for connectivity and row-count checks. Actual diff execution uses the new connector runtime.");
+        ConnectorProbeService probeService = new ConnectorProbeService();
+        ComparisonConfig comparison = config.getComparison();
+
+        ConnectorConfig sourceConfig = ConnectorConfigMapper.toConnectorConfig(config.getSource(), comparison.getTables().getSource());
+        ConnectorConfig targetConfig = ConnectorConfigMapper.toConnectorConfig(config.getTarget(), comparison.getTables().getTarget());
 
         try {
-            // Validate database connections
-            DatabaseAdapter sourceAdapter = DatabaseAdapterFactory.createSourceAdapter(config);
-            DatabaseAdapter targetAdapter = DatabaseAdapterFactory.createTargetAdapter(config);
-
-            // Test basic connectivity
-            long sourceRowCount = sourceAdapter.count(TableSegmentFactory.createSourceTableSegment(config, sourceAdapter));
-            long targetRowCount = targetAdapter.count(TableSegmentFactory.createTargetTableSegment(config, targetAdapter));
+            long sourceRowCount = probeService.countRows(
+                    sourceConfig,
+                    toKeySpec(comparison.getKeys().getSource()),
+                    toComparisonSpec(comparison.getComparisons() != null ? comparison.getComparisons().getSource() : null),
+                    toPredicateSpec(comparison.getFilters() != null ? comparison.getFilters().getSource() : null));
+            long targetRowCount = probeService.countRows(
+                    targetConfig,
+                    toKeySpec(comparison.getKeys().getTarget()),
+                    toComparisonSpec(comparison.getComparisons() != null ? comparison.getComparisons().getTarget() : null),
+                    toPredicateSpec(comparison.getFilters() != null ? comparison.getFilters().getTarget() : null));
 
             log.info("Dry run completed - Source rows: {}, Target rows: {}", sourceRowCount, targetRowCount);
 
-            // Create a dry run result
             TableMetadata tableMetadata = createTableMetadata(config);
             return CliDiffResult.builder()
                     .strategy(config.getStrategyMode())
@@ -623,7 +598,6 @@ public class DiffService {
                     .differences(new java.util.ArrayList<>())
                     .tableMetadata(tableMetadata)
                     .build();
-
         } catch (Exception e) {
             log.error("Dry run failed", e);
             throw new Exception("Dry run failed: " + e.getMessage(), e);

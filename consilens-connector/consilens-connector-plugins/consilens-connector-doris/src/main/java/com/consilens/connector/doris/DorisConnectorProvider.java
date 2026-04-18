@@ -6,6 +6,6 @@ import com.consilens.conncetor.base.AbstractJdbcConnectorProvider;
 public class DorisConnectorProvider extends AbstractJdbcConnectorProvider {
 
     public DorisConnectorProvider() {
-        super("doris", DatabaseType.DORIS);
+        super("doris", DatabaseType.DORIS, DorisDatabaseDialect::new);
     }
 }

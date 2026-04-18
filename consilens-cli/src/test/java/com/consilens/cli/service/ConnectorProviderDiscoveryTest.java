@@ -1,6 +1,7 @@
 package com.consilens.cli.service;
 
 import com.consilens.connector.api.config.ConnectorConfig;
+import com.consilens.connector.api.ConnectorException;
 import com.consilens.connector.api.model.ResourceLocator;
 import com.consilens.connector.api.spi.ConnectorAdapter;
 import com.consilens.core.compare.registry.DefaultConnectorRegistry;
@@ -9,6 +10,7 @@ import org.junit.jupiter.api.Test;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -31,8 +33,27 @@ class ConnectorProviderDiscoveryTest {
     }
 
     @Test
-    void shouldResolveJdbcProviderFromPluginsWithoutHardcodedRegistryMapping() {
+    void shouldRequireExplicitConnectorType() {
         ConnectorConfig config = ConnectorConfig.builder()
+                .connection(Map.of(
+                        "url", "jdbc:mysql://localhost:3306/orders",
+                        "username", "root",
+                        "password", "secret"))
+                .resource(ResourceLocator.builder()
+                        .type("table")
+                        .name("orders")
+                        .build())
+                .build();
+
+        ConnectorException exception = assertThrows(ConnectorException.class, () -> registry.create(config));
+
+        assertEquals("Connector type is required", exception.getMessage());
+    }
+
+    @Test
+    void shouldCreateAdapterWhenExplicitTypeIsProvided() {
+        ConnectorConfig config = ConnectorConfig.builder()
+                .type("mysql")
                 .connection(Map.of(
                         "url", "jdbc:mysql://localhost:3306/orders",
                         "username", "root",

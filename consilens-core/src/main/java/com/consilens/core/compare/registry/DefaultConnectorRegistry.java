@@ -16,9 +16,13 @@ public class DefaultConnectorRegistry implements ConnectorRegistry {
 
     @Override
     public ConnectorAdapter create(ConnectorConfig config) throws ConnectorException {
-        ConnectorProvider provider = resolveProvider(config)
-                .orElseThrow(() -> new ConnectorException("Unsupported connector configuration: " + describe(config)));
-        return provider.create(withResolvedType(config, provider.getType()));
+        String connectorType = config != null ? normalizeType(config.getType()) : null;
+        if (connectorType == null || connectorType.isEmpty()) {
+            throw new ConnectorException("Connector type is required");
+        }
+        ConnectorProvider provider = findProvider(connectorType)
+                .orElseThrow(() -> new ConnectorException("Unsupported connector type: " + connectorType));
+        return provider.create(config);
     }
 
     @Override
@@ -41,50 +45,6 @@ public class DefaultConnectorRegistry implements ConnectorRegistry {
                 }
             }
         }
-    }
-
-    private Optional<ConnectorProvider> resolveProvider(ConnectorConfig config) {
-        ensureInitialized();
-
-        String explicitType = config != null ? normalizeType(config.getType()) : null;
-        if (explicitType != null && !explicitType.isEmpty()) {
-            ConnectorProvider provider = registry.find(explicitType);
-            if (provider != null) {
-                return Optional.of(provider);
-            }
-        }
-
-        for (ConnectorProvider provider : registry.providers()) {
-            if (provider.supports(config)) {
-                return Optional.of(provider);
-            }
-        }
-        return Optional.empty();
-    }
-
-    private String describe(ConnectorConfig config) {
-        if (config == null) {
-            return "<null>";
-        }
-        String type = config.getType();
-        Object url = config.getConnection() != null ? config.getConnection().get("url") : null;
-        return "type=" + type + ", url=" + url;
-    }
-
-    private ConnectorConfig withResolvedType(ConnectorConfig config, String resolvedType) {
-        if (config == null) {
-            return null;
-        }
-        if (config.getType() != null && !config.getType().trim().isEmpty()) {
-            return config;
-        }
-        return ConnectorConfig.builder()
-                .type(resolvedType)
-                .name(config.getName())
-                .connection(config.getConnection())
-                .resource(config.getResource())
-                .readOptions(config.getReadOptions())
-                .build();
     }
 
     private static String normalizeType(String type) {

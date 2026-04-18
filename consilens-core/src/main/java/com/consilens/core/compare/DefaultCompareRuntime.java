@@ -17,6 +17,7 @@ import com.consilens.core.compare.executor.ChecksumPlanExecutor;
 import com.consilens.core.compare.executor.JoinPlanExecutor;
 import com.consilens.core.compare.registry.DefaultConnectorRegistry;
 import com.consilens.core.diff.DiffResult;
+import lombok.extern.slf4j.Slf4j;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -24,6 +25,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
+@Slf4j
 public class DefaultCompareRuntime implements CompareRuntime {
 
     private final ConnectorRegistry connectorRegistry;
@@ -75,6 +77,7 @@ public class DefaultCompareRuntime implements CompareRuntime {
                     request.getTargetFilter());
 
             ComparePlan plan = comparePlanner.plan(request, sourceDataset, targetDataset);
+            log.info("Selected compare plan: {}", plan.getPlanType());
             PlanExecutor<ComparePlan> executor = resolveExecutor(plan);
             return executor.execute(plan, request, sourceSegment, targetSegment);
         } finally {
@@ -106,6 +109,7 @@ public class DefaultCompareRuntime implements CompareRuntime {
                 .keySpec(keySpec)
                 .comparisons(comparisons)
                 .filter(filter)
+                .schema(dataset.getSchema())
                 .build();
     }
 

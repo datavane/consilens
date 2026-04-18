@@ -148,6 +148,18 @@ public class TableResultSink implements Sink {
         if (dataSource == null) {
             return;
         }
+        try {
+            if (sinkConfig.hasCustomColumns()) {
+                insertCustomErrorFields(context, error);
+            } else {
+                insertDefaultError(context);
+            }
+        } catch (SQLException e) {
+            log.error("Failed to write error result for task {}", context.getTaskId(), e);
+        }
+    }
+
+    private void insertDefaultError(DiffContext context) throws SQLException {
         String sql = "INSERT INTO " + tableName
                 + " (nl_dq_execution_id, run_status, completed_at) VALUES (?,?,?)";
         try (Connection conn = dataSource.getConnection();
@@ -156,8 +168,56 @@ public class TableResultSink implements Sink {
             ps.setString(2, "ERROR");
             ps.setTimestamp(3, Timestamp.from(Instant.now()));
             ps.executeUpdate();
-        } catch (SQLException e) {
-            log.error("Failed to write error result for task {}", context.getTaskId(), e);
+        }
+    }
+
+    private void insertCustomErrorFields(DiffContext context, Throwable error) throws SQLException {
+        List<ColumnMapping> fields = sinkConfig.getColumns();
+        StringBuilder cols = new StringBuilder("INSERT INTO ").append(tableName).append(" (");
+        StringBuilder placeholders = new StringBuilder("VALUES (");
+        for (int i = 0; i < fields.size(); i++) {
+            if (i > 0) {
+                cols.append(", ");
+                placeholders.append(",");
+            }
+            cols.append(sanitize(fields.get(i).getName()));
+            placeholders.append("?");
+        }
+        cols.append(") ");
+        placeholders.append(")");
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(cols.toString() + placeholders.toString())) {
+            for (int i = 0; i < fields.size(); i++) {
+                ps.setString(i + 1, resolveErrorField(fields.get(i), context, error));
+            }
+            ps.executeUpdate();
+        }
+    }
+
+    private String resolveErrorField(ColumnMapping field, DiffContext context, Throwable error) {
+        String resolved = ColumnValueInterpolator.resolveField(field, context, (DiffResult) null);
+        if (resolved != null && !resolved.isEmpty()) {
+            return resolved;
+        }
+        String normalizedName = field.getName() != null ? sanitize(field.getName()).toLowerCase() : "";
+        switch (normalizedName) {
+            case "run_status":
+            case "status":
+            case "execution_status":
+                return "ERROR";
+            case "error_message":
+            case "message":
+            case "error":
+                return error != null ? error.getMessage() : null;
+            case "task_id":
+            case "execution_id":
+            case "nl_dq_execution_id":
+                return context.getTaskId();
+            case "completed_at":
+            case "timestamp":
+                return Instant.now().toString();
+            default:
+                return null;
         }
     }
 

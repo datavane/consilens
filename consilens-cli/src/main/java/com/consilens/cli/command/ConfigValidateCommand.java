@@ -2,8 +2,8 @@ package com.consilens.cli.command;
 
 import com.consilens.cli.config.ConfigurationManager;
 import com.consilens.cli.model.CliConfiguration;
-import com.consilens.cli.service.DatabaseAdapterFactory;
-import com.consilens.core.database.adpter.DatabaseAdapter;
+import com.consilens.cli.service.ConnectorConfigMapper;
+import com.consilens.cli.service.ConnectorProbeService;
 
 import lombok.extern.slf4j.Slf4j;
 import picocli.CommandLine.Command;
@@ -162,16 +162,11 @@ public class ConfigValidateCommand implements Runnable {
         boolean allPassed = true;
 
         // Test source connection
-        DatabaseAdapter sourceAdapter = null;
         try {
             System.out.print("  Testing source connection (" + config.getSource().getUrl() + ") ... ");
-            sourceAdapter = DatabaseAdapterFactory.createSourceAdapter(config);
-            if (sourceAdapter.isHealthy()) {
-                System.out.println("✓ OK");
-            } else {
-                System.out.println("✗ FAILED (unhealthy pool)");
-                allPassed = false;
-            }
+            new ConnectorProbeService().verifyAccessible(
+                    ConnectorConfigMapper.toConnectorConfig(config.getSource(), config.getComparison().getTables().getSource()));
+            System.out.println("✓ OK");
         } catch (Exception e) {
             System.out.println("✗ FAILED");
             System.err.println("    Error: " + e.getMessage());
@@ -179,21 +174,14 @@ public class ConfigValidateCommand implements Runnable {
                 log.debug("Source connection test failed", e);
             }
             allPassed = false;
-        } finally {
-            closeAdapter(sourceAdapter, "source");
         }
 
         // Test target connection
-        DatabaseAdapter targetAdapter = null;
         try {
             System.out.print("  Testing target connection (" + config.getTarget().getUrl() + ") ... ");
-            targetAdapter = DatabaseAdapterFactory.createTargetAdapter(config);
-            if (targetAdapter.isHealthy()) {
-                System.out.println("✓ OK");
-            } else {
-                System.out.println("✗ FAILED (unhealthy pool)");
-                allPassed = false;
-            }
+            new ConnectorProbeService().verifyAccessible(
+                    ConnectorConfigMapper.toConnectorConfig(config.getTarget(), config.getComparison().getTables().getTarget()));
+            System.out.println("✓ OK");
         } catch (Exception e) {
             System.out.println("✗ FAILED");
             System.err.println("    Error: " + e.getMessage());
@@ -201,8 +189,6 @@ public class ConfigValidateCommand implements Runnable {
                 log.debug("Target connection test failed", e);
             }
             allPassed = false;
-        } finally {
-            closeAdapter(targetAdapter, "target");
         }
 
         System.out.println("───────────────────────────────────────────────────────");
@@ -212,18 +198,6 @@ public class ConfigValidateCommand implements Runnable {
             System.exit(1);
         } else {
             System.out.println("✓ All connections OK");
-        }
-    }
-
-    private void closeAdapter(DatabaseAdapter adapter, String name) {
-        if (adapter != null) {
-            try {
-                if (adapter.getConnectionPool() != null) {
-                    adapter.getConnectionPool().close();
-                }
-            } catch (Exception e) {
-                log.warn("Failed to close {} adapter: {}", name, e.getMessage());
-            }
         }
     }
 

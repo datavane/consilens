@@ -4,7 +4,6 @@ import com.consilens.common.enums.ChecksumAlgorithm;
 import com.consilens.common.enums.LocalCompareMode;
 import com.consilens.connector.api.planner.CompareExecutionOptions;
 import com.consilens.connector.api.planner.CompareRequest;
-import com.consilens.core.algorithm.JoinDiffer;
 import com.consilens.core.algorithm.TableDiffer;
 import com.consilens.core.thread.ConcurrencyConfig;
 import lombok.Builder;
@@ -51,21 +50,13 @@ public class CompareExecutionSettings {
     }
 
     public TableDiffer.DifferConfig toDifferConfig() {
-        return toDifferConfig(null);
-    }
-
-    public TableDiffer.DifferConfig toDifferConfig(LocalCompareMode localCompareOverride) {
         return new TableDiffer.DifferConfig(
                 bisectionFactor,
                 bisectionThreshold,
                 enableProfiling,
                 checksumAlgorithm,
-                localCompareOverride != null ? localCompareOverride : localCompareMode,
+                localCompareMode,
                 concurrencyConfig);
-    }
-
-    public JoinDiffer.JoinDifferOptions toJoinOptions() {
-        return new JoinDiffer.JoinDifferOptions(validateUniqueKeys);
     }
 
     private static ConcurrencyConfig resolveConcurrencyConfig(Map<String, Object> attributes) {

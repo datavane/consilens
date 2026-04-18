@@ -6,6 +6,6 @@ import com.consilens.conncetor.base.AbstractJdbcConnectorProvider;
 public class ClickHouseConnectorProvider extends AbstractJdbcConnectorProvider {
 
     public ClickHouseConnectorProvider() {
-        super("clickhouse", DatabaseType.CLICKHOUSE);
+        super("clickhouse", DatabaseType.CLICKHOUSE, ClickHouseDatabaseDialect::new);
     }
 }

@@ -6,6 +6,6 @@ import com.consilens.conncetor.base.AbstractJdbcConnectorProvider;
 public class PrestoConnectorProvider extends AbstractJdbcConnectorProvider {
 
     public PrestoConnectorProvider() {
-        super("presto", DatabaseType.PRESTO);
+        super("presto", DatabaseType.PRESTO, PrestoDatabaseDialect::new);
     }
 }

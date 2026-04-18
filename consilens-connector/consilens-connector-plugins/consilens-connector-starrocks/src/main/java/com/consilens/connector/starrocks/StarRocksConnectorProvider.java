@@ -6,6 +6,6 @@ import com.consilens.conncetor.base.AbstractJdbcConnectorProvider;
 public class StarRocksConnectorProvider extends AbstractJdbcConnectorProvider {
 
     public StarRocksConnectorProvider() {
-        super("starrocks", DatabaseType.STARROCKS);
+        super("starrocks", DatabaseType.STARROCKS, StarRocksDatabaseDialect::new);
     }
 }

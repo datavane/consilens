@@ -1,4 +1,4 @@
-package com.consilens.core.compare.jdbc.support;
+package com.consilens.core.compare.relational;
 
 import com.consilens.connector.api.model.ColumnInfo;
 import com.consilens.connector.api.model.DataType;
@@ -7,36 +7,13 @@ import com.consilens.connector.api.model.SchemaDescriptor;
 import com.consilens.connector.api.model.TablePath;
 import com.consilens.connector.api.model.TableSchema;
 
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
-public final class JdbcSchemaAdapter {
+public final class RelationalSchemaAdapter {
 
-    private JdbcSchemaAdapter() {
-    }
-
-    public static SchemaDescriptor adapt(TableSchema tableSchema) {
-        List<FieldDescriptor> fields = new ArrayList<>();
-        Map<String, FieldDescriptor> fieldMap = new LinkedHashMap<>();
-
-        tableSchema.getColumns().forEach((name, columnInfo) -> {
-            FieldDescriptor fieldDescriptor = FieldDescriptor.builder()
-                    .name(name)
-                    .canonicalType(columnInfo.getType() != null ? columnInfo.getType().name().toLowerCase() : null)
-                    .nullable(columnInfo.isNullable())
-                    .ordinal(columnInfo.getOrdinalPosition())
-                    .attributes(new LinkedHashMap<>())
-                    .build();
-            fields.add(fieldDescriptor);
-            fieldMap.put(name, fieldDescriptor);
-        });
-
-        return SchemaDescriptor.builder()
-                .fields(fields)
-                .fieldMap(fieldMap)
-                .build();
+    private RelationalSchemaAdapter() {
     }
 
     public static TableSchema toLegacySchema(SchemaDescriptor schemaDescriptor, TablePath tablePath) {
@@ -55,19 +32,19 @@ public final class JdbcSchemaAdapter {
                         .name(field.getName())
                         .type(resolveDataType(field.getCanonicalType()))
                         .nullable(field.isNullable())
-                        .precision(java.util.Optional.empty())
-                        .scale(java.util.Optional.empty())
-                        .maxLength(java.util.Optional.empty())
-                        .defaultValue(java.util.Optional.empty())
+                        .precision(Optional.empty())
+                        .scale(Optional.empty())
+                        .maxLength(Optional.empty())
+                        .defaultValue(Optional.empty())
                         .ordinalPosition(ordinal++)
-                        .collation(java.util.Optional.empty())
-                        .comment(java.util.Optional.empty())
+                        .collation(Optional.empty())
+                        .comment(Optional.empty())
                         .primaryKey(false)
                         .uniqueKey(false)
                         .build());
             }
         }
-        return new TableSchema(tablePath, columns);
+        return columns.isEmpty() ? null : new TableSchema(tablePath, columns);
     }
 
     private static DataType resolveDataType(String canonicalType) {

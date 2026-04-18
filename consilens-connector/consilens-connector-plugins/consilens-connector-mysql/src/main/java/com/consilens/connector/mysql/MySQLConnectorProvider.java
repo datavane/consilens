@@ -6,6 +6,6 @@ import com.consilens.conncetor.base.AbstractJdbcConnectorProvider;
 public class MySQLConnectorProvider extends AbstractJdbcConnectorProvider {
 
     public MySQLConnectorProvider() {
-        super("mysql", DatabaseType.MYSQL);
+        super("mysql", DatabaseType.MYSQL, MySQLDatabaseDialect::new);
     }
 }

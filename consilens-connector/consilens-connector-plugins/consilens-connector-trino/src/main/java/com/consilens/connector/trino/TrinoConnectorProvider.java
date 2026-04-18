@@ -6,6 +6,6 @@ import com.consilens.conncetor.base.AbstractJdbcConnectorProvider;
 public class TrinoConnectorProvider extends AbstractJdbcConnectorProvider {
 
     public TrinoConnectorProvider() {
-        super("trino", DatabaseType.TRINO);
+        super("trino", DatabaseType.TRINO, TrinoDatabaseDialect::new);
     }
 }

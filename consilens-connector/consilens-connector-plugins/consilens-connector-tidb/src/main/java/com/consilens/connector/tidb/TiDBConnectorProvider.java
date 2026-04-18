@@ -6,6 +6,6 @@ import com.consilens.conncetor.base.AbstractJdbcConnectorProvider;
 public class TiDBConnectorProvider extends AbstractJdbcConnectorProvider {
 
     public TiDBConnectorProvider() {
-        super("tidb", DatabaseType.TIDB);
+        super("tidb", DatabaseType.TIDB, TiDBDatabaseDialect::new);
     }
 }

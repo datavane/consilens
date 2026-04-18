@@ -6,6 +6,6 @@ import com.consilens.conncetor.base.AbstractJdbcConnectorProvider;
 public class SQLServerConnectorProvider extends AbstractJdbcConnectorProvider {
 
     public SQLServerConnectorProvider() {
-        super("sqlserver", DatabaseType.SQL_SERVER);
+        super("sqlserver", DatabaseType.SQL_SERVER, SQLServerDatabaseDialect::new);
     }
 }

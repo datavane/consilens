@@ -6,6 +6,6 @@ import com.consilens.conncetor.base.AbstractJdbcConnectorProvider;
 public class PostgreSQLConnectorProvider extends AbstractJdbcConnectorProvider {
 
     public PostgreSQLConnectorProvider() {
-        super("postgresql", DatabaseType.POSTGRESQL);
+        super("postgresql", DatabaseType.POSTGRESQL, PostgreSQLDatabaseDialect::new);
     }
 }
