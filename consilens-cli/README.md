@@ -172,7 +172,7 @@ comparison:
     target:
       - id
       - email
-  compareColumns:
+  fields:
     source:
       - name
       - phone

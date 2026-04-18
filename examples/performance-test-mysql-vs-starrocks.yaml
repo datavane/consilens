@@ -27,7 +27,7 @@ comparison:
     target:
       - record_id
 
-  comparisons:
+  fields:
     source:
       - col_tinyint
       - col_smallint

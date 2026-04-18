@@ -96,9 +96,9 @@ public class ConfigValidateCommand implements Runnable {
                     System.out.println("    Source keys  : " + nvl(config.getComparison().getKeys().getSource()));
                     System.out.println("    Target keys  : " + nvl(config.getComparison().getKeys().getTarget()));
                 }
-                if (config.getComparison().getCompareColumns() != null) {
-                    System.out.println("    Source cols  : " + nvl(config.getComparison().getCompareColumns().getSource()));
-                    System.out.println("    Target cols  : " + nvl(config.getComparison().getCompareColumns().getTarget()));
+                if (config.getComparison().getFields() != null) {
+                    System.out.println("    Source fields: " + nvl(config.getComparison().getFields().getSource()));
+                    System.out.println("    Target fields: " + nvl(config.getComparison().getFields().getTarget()));
                 }
                 if (config.getComparison().getWhere() != null) {
                     System.out.println("    Source where : " + nvl(config.getComparison().getWhere().getSource()));

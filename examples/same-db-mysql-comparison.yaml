@@ -30,7 +30,7 @@ comparison:
     target:
       - order_id
 
-  comparisons:
+  fields:
     source:
       - customer_id
       - amount

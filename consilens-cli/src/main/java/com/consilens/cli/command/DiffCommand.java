@@ -47,15 +47,15 @@ public class DiffCommand implements Runnable {
                 log.info("  Target Table: {}", config.getComparison().getTables().getTarget());
                 log.info("  Source Key Columns: {}", config.getComparison().getKeys().getSource());
                 log.info("  Target Key Columns: {}", config.getComparison().getKeys().getTarget());
-                if (config.getComparison().getCompareColumns() != null
-                        && config.getComparison().getCompareColumns().getSource() != null
-                        && !config.getComparison().getCompareColumns().getSource().isEmpty()) {
-                    log.info("  Source Compare Columns: {}", config.getComparison().getCompareColumns().getSource());
+                if (config.getComparison().getFields() != null
+                        && config.getComparison().getFields().getSource() != null
+                        && !config.getComparison().getFields().getSource().isEmpty()) {
+                    log.info("  Source Fields: {}", config.getComparison().getFields().getSource());
                 }
-                if (config.getComparison().getCompareColumns() != null
-                        && config.getComparison().getCompareColumns().getTarget() != null
-                        && !config.getComparison().getCompareColumns().getTarget().isEmpty()) {
-                    log.info("  Target Compare Columns: {}", config.getComparison().getCompareColumns().getTarget());
+                if (config.getComparison().getFields() != null
+                        && config.getComparison().getFields().getTarget() != null
+                        && !config.getComparison().getFields().getTarget().isEmpty()) {
+                    log.info("  Target Fields: {}", config.getComparison().getFields().getTarget());
                 }
                 log.info("  Concurrency: {}", config.getConcurrency());
                 log.info("  Batch Size: {}", config.getStrategy().getBatchSize());

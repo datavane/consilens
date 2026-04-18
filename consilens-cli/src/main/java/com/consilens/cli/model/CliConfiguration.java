@@ -215,7 +215,7 @@ public class CliConfiguration {
                                 .source(List.of("id", "email"))
                                 .target(List.of("id", "email"))
                                 .build())
-                        .comparisons(ListPairConfig.builder()
+                        .fields(ListPairConfig.builder()
                                 .source(List.of("name", "email", "phone", "created_at"))
                                 .target(List.of("name", "email", "phone", "created_at"))
                                 .build())

@@ -14,7 +14,7 @@ import java.util.List;
 import java.util.Objects;
 
 /**
- * Comparison target and column configuration.
+ * Comparison target and field configuration.
  */
 @Data
 @Builder
@@ -29,9 +29,8 @@ public class ComparisonConfig {
     @JsonProperty("keys")
     private ListPairConfig keys;
 
-    @JsonProperty("comparisons")
-    @JsonAlias("compareColumns")
-    private ListPairConfig comparisons;
+    @JsonProperty("fields")
+    private ListPairConfig fields;
 
     @JsonProperty("extraColumns")
     private List<String> extraColumns;
@@ -55,10 +54,10 @@ public class ComparisonConfig {
             throw ValidationException.simple("CONFIGURATION_VALIDATION", "comparison.keys 两侧数量必须一致");
         }
 
-        if (comparisons != null) {
-            comparisons.validate("comparison.comparisons");
-            if (!comparisons.isBothEmpty() && comparisons.hasMismatchedSize()) {
-                throw ValidationException.simple("CONFIGURATION_VALIDATION", "comparison.comparisons 两侧数量必须一致");
+        if (fields != null) {
+            fields.validate("comparison.fields");
+            if (!fields.isBothEmpty() && fields.hasMismatchedSize()) {
+                throw ValidationException.simple("CONFIGURATION_VALIDATION", "comparison.fields 两侧数量必须一致");
             }
         }
 
@@ -72,14 +71,6 @@ public class ComparisonConfig {
                 filters.validate("comparison.filters");
             }
         }
-    }
-
-    public ListPairConfig getCompareColumns() {
-        return comparisons;
-    }
-
-    public void setCompareColumns(ListPairConfig compareColumns) {
-        this.comparisons = compareColumns;
     }
 
     public StringPairConfig getWhere() {

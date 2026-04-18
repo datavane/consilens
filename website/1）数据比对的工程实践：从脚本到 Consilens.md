@@ -117,7 +117,7 @@ comparison:
       - id
     target:
       - id
-  comparisons:
+  fields:
     source:
       - name
       - email

@@ -120,16 +120,16 @@ public class DiffService {
                 if (sourceTable != null) sourcePath = TablePath.of(sourceTable);
                 if (targetTable != null) targetPath = TablePath.of(targetTable);
             }
-            // Merge key columns + compare columns to form the full column list for DDL
+            // Merge key columns + configured fields to form the full column list for DDL
             if (config.getComparison().getKeys() != null) {
                 List<String> srcKeys = config.getComparison().getKeys().getSource();
                 List<String> tgtKeys = config.getComparison().getKeys().getTarget();
                 if (srcKeys != null) sourceColumnNames.addAll(srcKeys);
                 if (tgtKeys != null) targetColumnNames.addAll(tgtKeys);
             }
-            if (config.getComparison().getComparisons() != null) {
-                List<String> srcCols = config.getComparison().getComparisons().getSource();
-                List<String> tgtCols = config.getComparison().getComparisons().getTarget();
+            if (config.getComparison().getFields() != null) {
+                List<String> srcCols = config.getComparison().getFields().getSource();
+                List<String> tgtCols = config.getComparison().getFields().getTarget();
                 if (srcCols != null) {
                     for (String c : srcCols) {
                         if (!sourceColumnNames.contains(c)) sourceColumnNames.add(c);
@@ -223,16 +223,16 @@ public class DiffService {
             log.debug("Added target keyColumns: {}", config.getComparison().getKeys().getTarget());
         }
 
-        // Add comparison columns
-        if (config.getComparison().getComparisons() != null
-                && config.getComparison().getComparisons().getSource() != null) {
-            sourceColumns.addAll(config.getComparison().getComparisons().getSource());
-            log.debug("Added source comparisons: {}", config.getComparison().getComparisons().getSource());
+        // Add configured comparison fields
+        if (config.getComparison().getFields() != null
+                && config.getComparison().getFields().getSource() != null) {
+            sourceColumns.addAll(config.getComparison().getFields().getSource());
+            log.debug("Added source fields: {}", config.getComparison().getFields().getSource());
         }
-        if (config.getComparison().getComparisons() != null
-                && config.getComparison().getComparisons().getTarget() != null) {
-            targetColumns.addAll(config.getComparison().getComparisons().getTarget());
-            log.debug("Added target comparisons: {}", config.getComparison().getComparisons().getTarget());
+        if (config.getComparison().getFields() != null
+                && config.getComparison().getFields().getTarget() != null) {
+            targetColumns.addAll(config.getComparison().getFields().getTarget());
+            log.debug("Added target fields: {}", config.getComparison().getFields().getTarget());
         }
 
         // Add extra columns
@@ -301,11 +301,11 @@ public class DiffService {
                 .target(ConnectorConfigMapper.toConnectorConfig(config.getTarget(), comparison.getTables().getTarget()))
                 .sourceKeySpec(toKeySpec(comparison.getKeys().getSource()))
                 .targetKeySpec(toKeySpec(comparison.getKeys().getTarget()))
-                .sourceComparisons(toComparisonSpec(comparison.getComparisons() != null
-                        ? comparison.getComparisons().getSource()
+                .sourceComparisons(toComparisonSpec(comparison.getFields() != null
+                        ? comparison.getFields().getSource()
                         : null))
-                .targetComparisons(toComparisonSpec(comparison.getComparisons() != null
-                        ? comparison.getComparisons().getTarget()
+                .targetComparisons(toComparisonSpec(comparison.getFields() != null
+                        ? comparison.getFields().getTarget()
                         : null))
                 .sourceFilter(toPredicateSpec(comparison.getFilters() != null
                         ? comparison.getFilters().getSource()
@@ -576,12 +576,12 @@ public class DiffService {
             long sourceRowCount = probeService.countRows(
                     sourceConfig,
                     toKeySpec(comparison.getKeys().getSource()),
-                    toComparisonSpec(comparison.getComparisons() != null ? comparison.getComparisons().getSource() : null),
+                    toComparisonSpec(comparison.getFields() != null ? comparison.getFields().getSource() : null),
                     toPredicateSpec(comparison.getFilters() != null ? comparison.getFilters().getSource() : null));
             long targetRowCount = probeService.countRows(
                     targetConfig,
                     toKeySpec(comparison.getKeys().getTarget()),
-                    toComparisonSpec(comparison.getComparisons() != null ? comparison.getComparisons().getTarget() : null),
+                    toComparisonSpec(comparison.getFields() != null ? comparison.getFields().getTarget() : null),
                     toPredicateSpec(comparison.getFilters() != null ? comparison.getFilters().getTarget() : null));
 
             log.info("Dry run completed - Source rows: {}, Target rows: {}", sourceRowCount, targetRowCount);
