@@ -12,7 +12,7 @@
 
 ```bash
 # 克隆仓库
-git clone https://github.com/consilens/consilens.git
+git clone https://github.com/NoeticLens/consilens.git
 cd consilens
 
 # 构建项目
@@ -21,6 +21,17 @@ mvn clean package -DskipTests
 # 运行测试
 mvn test
 ```
+
+## 项目结构
+
+- `consilens-cli`：CLI 入口，配置解析与执行编排
+- `consilens-core`：比对规划（DefaultComparePlanner）、算法（ChecksumDiffer / JoinDiffer）、差异模型
+- `consilens-connector`：连接器抽象（ConnectorProvider / DatasetHandle / CapabilitySet）、数据库方言插件
+- `consilens-sink`：输出 SPI（console / json / csv / table）
+- `consilens-spi`：通用插件加载运行时
+- `consilens-dist`：发行包组装
+
+核心设计原则：规划器（`DefaultComparePlanner`）只基于能力集合（`CapabilitySet`）选择执行计划，不区分数据源类型。
 
 ## 代码规范
 
