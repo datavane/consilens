@@ -2,7 +2,6 @@ package com.consilens.connector.starrocks;
 
 import com.consilens.connector.api.CapabilityProvider;
 import com.consilens.connector.api.enums.DatabaseFeature;
-import com.consilens.connector.api.enums.DatabaseType;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -21,8 +20,8 @@ class StarRocksDatabaseDialectTest {
     }
 
     @Test
-    void testGetDatabaseType() {
-        assertEquals(DatabaseType.STARROCKS, dialect.getDatabaseType());
+    void testGetConnectorType() {
+        assertEquals("starrocks", dialect.getConnectorType());
     }
 
     @Test

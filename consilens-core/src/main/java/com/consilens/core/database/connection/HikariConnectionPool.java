@@ -3,7 +3,6 @@ package com.consilens.core.database.connection;
 import com.consilens.connector.api.ConnectionPoolOptimizer;
 import com.consilens.connector.api.DatabaseDialect;
 import com.consilens.connector.api.model.PoolConfiguration;
-import com.consilens.connector.api.enums.DatabaseType;
 import com.consilens.core.database.dialect.DialectFactory;
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
@@ -43,7 +42,7 @@ public class HikariConnectionPool implements ConnectionPool {
         this.dataSource = createDataSource(this.configuration);
 
         log.info("Created connection pool for {} with max size: {}, min idle: {}",
-                this.configuration.getDatabaseType().getDisplayName(),
+                this.configuration.getConnectorType(),
                 this.configuration.getMaxPoolSize(),
                 this.configuration.getMinIdle());
     }
@@ -90,7 +89,7 @@ public class HikariConnectionPool implements ConnectionPool {
         if (dataSource != null && !dataSource.isClosed()) {
             dataSource.close();
             log.info("Connection pool closed for database: {}",
-                    configuration.getDatabaseType().getDisplayName());
+                    configuration.getConnectorType());
         }
     }
 
@@ -140,8 +139,8 @@ public class HikariConnectionPool implements ConnectionPool {
     }
 
     @Override
-    public DatabaseType getDatabaseType() {
-        return configuration.getDatabaseType();
+    public String getConnectorType() {
+        return configuration.getConnectorType();
     }
 
     @Override
@@ -171,7 +170,7 @@ public class HikariConnectionPool implements ConnectionPool {
         Map<String, Object> metrics = new ConcurrentHashMap<>();
         PoolStatistics stats = getStatistics();
 
-        metrics.put("databaseType", getDatabaseType().name());
+        metrics.put("connectorType", getConnectorType());
         metrics.put("totalConnections", stats.getTotalConnections());
         metrics.put("activeConnections", stats.getActiveConnections());
         metrics.put("idleConnections", stats.getIdleConnections());
@@ -197,8 +196,7 @@ public class HikariConnectionPool implements ConnectionPool {
     private HikariDataSource createDataSource(PoolConfiguration config) {
         HikariConfig hikariConfig = new HikariConfig();
 
-        // Basic configuration
-        hikariConfig.setDriverClassName(config.getDatabaseType().getDriverClassName());
+        // Basic configuration — driver class is auto-detected by HikariCP from the JDBC URL (JDBC 4+)
         hikariConfig.setJdbcUrl(config.getJdbcUrl());
         hikariConfig.setUsername(config.getUsername());
         hikariConfig.setPassword(config.getPassword());
@@ -221,14 +219,14 @@ public class HikariConnectionPool implements ConnectionPool {
         // Connection initialization SQL (for timezone and other settings)
         if (config.getConnectionInitSql() != null) {
             hikariConfig.setConnectionInitSql(config.getConnectionInitSql());
-            log.info("Set connectionInitSql for {}: {}", 
-                    config.getDatabaseType().getDisplayName(), 
+            log.info("Set connectionInitSql for {}: {}",
+                    config.getConnectorType(),
                     config.getConnectionInitSql());
         }
 
         // Pool naming for monitoring
         hikariConfig.setPoolName(String.format("HikariPool-%s-%d",
-                config.getDatabaseType().name(), System.identityHashCode(this)));
+                config.getConnectorType(), System.identityHashCode(this)));
 
         // Database-specific optimizations using connector API
         applyDatabaseSpecificOptimizations(hikariConfig, config);
@@ -241,20 +239,19 @@ public class HikariConnectionPool implements ConnectionPool {
 
     private void applyDatabaseSpecificOptimizations(HikariConfig hikariConfig, PoolConfiguration config) {
         try {
-            DatabaseDialect dialect = DialectFactory.getDialect(config.getDatabaseType());
+            DatabaseDialect dialect = DialectFactory.getDialect(config.getConnectorType());
             ConnectionPoolOptimizer optimizer = dialect.getConnectionPoolOptimizer();
             Properties optimizations = optimizer.getOptimizationProperties(config.isUseSSL());
             
-            // Apply all optimization properties to HikariConfig
             optimizations.forEach((key, value) -> 
                 hikariConfig.addDataSourceProperty(key.toString(), value)
             );
             
-            log.debug("Applied {} connection pool optimization properties for database type: {}", 
-                    optimizations.size(), config.getDatabaseType().getDisplayName());
+            log.debug("Applied {} connection pool optimization properties for connector type: {}",
+                    optimizations.size(), config.getConnectorType());
         } catch (Exception e) {
-            log.warn("Failed to apply database-specific optimizations for {}, using defaults: {}", 
-                    config.getDatabaseType().getDisplayName(), e.getMessage());
+            log.warn("Failed to apply database-specific optimizations for {}, using defaults: {}",
+                    config.getConnectorType(), e.getMessage());
         }
     }
 

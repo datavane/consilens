@@ -1,7 +1,6 @@
 package com.consilens.connector.trino;
 
 import com.consilens.connector.api.*;
-import com.consilens.connector.api.enums.DatabaseType;
 import com.consilens.conncetor.base.AbstractDatabaseDialect;
 
 import java.util.Map;
@@ -33,8 +32,8 @@ public class TrinoDatabaseDialect extends AbstractDatabaseDialect {
     }
 
     @Override
-    public DatabaseType getDatabaseType() {
-        return DatabaseType.TRINO;
+    public String getConnectorType() {
+        return "trino";
     }
 
     @Override

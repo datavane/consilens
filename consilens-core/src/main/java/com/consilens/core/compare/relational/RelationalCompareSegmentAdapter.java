@@ -2,7 +2,6 @@ package com.consilens.core.compare.relational;
 
 import com.consilens.connector.api.ConnectorException;
 import com.consilens.connector.api.dataset.RelationalDatasetSupport;
-import com.consilens.connector.api.enums.DatabaseType;
 import com.consilens.connector.api.model.ComparisonSpec;
 import com.consilens.connector.api.model.FieldDescriptor;
 import com.consilens.connector.api.model.KeySpec;
@@ -160,7 +159,7 @@ public final class RelationalCompareSegmentAdapter {
             this.support = support;
             PoolConfiguration config = new PoolConfiguration();
             config.setJdbcUrl(support.getJdbcUrl());
-            config.setDatabaseType(support.getDatabaseType());
+            config.setConnectorType(support.getConnectorType());
             String username = support.getUsername();
             config.setUsername(username != null && !username.trim().isEmpty() ? username : support.getName());
             this.configuration = config;
@@ -220,8 +219,8 @@ public final class RelationalCompareSegmentAdapter {
         }
 
         @Override
-        public DatabaseType getDatabaseType() {
-            return support.getDatabaseType();
+        public String getConnectorType() {
+            return support.getConnectorType();
         }
 
         @Override
@@ -239,7 +238,7 @@ public final class RelationalCompareSegmentAdapter {
             Map<String, Object> metrics = new LinkedHashMap<>();
             metrics.put("mode", "support-backed");
             metrics.put("name", support.getName());
-            metrics.put("databaseType", support.getDatabaseType().name());
+            metrics.put("databaseType", support.getConnectorType());
             return metrics;
         }
     }

@@ -1,7 +1,6 @@
 package com.consilens.connector.doris;
 
 import com.consilens.connector.api.*;
-import com.consilens.connector.api.enums.DatabaseType;
 import com.consilens.conncetor.base.AbstractDatabaseDialect;
 
 import java.util.Map;
@@ -24,7 +23,7 @@ import java.util.Map;
  * and discovered via JDK {@code ServiceLoader}.
  * 
  * <pre>{@code
- * DatabaseDialect dialect = DialectFactory.getDialect(DatabaseType.DORIS);
+ * DatabaseDialect dialect = DialectFactory.getDialect("LDORIS");
  * }</pre>
  * 
  * @since 1.0.0
@@ -58,8 +57,8 @@ public class DorisDatabaseDialect extends AbstractDatabaseDialect {
     }
 
     @Override
-    public DatabaseType getDatabaseType() {
-        return DatabaseType.DORIS;
+    public String getConnectorType() {
+        return "doris";
     }
 
     @Override

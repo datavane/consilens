@@ -1,7 +1,7 @@
 package com.consilens.core.integration;
 
 import com.consilens.common.enums.ChecksumAlgorithm;
-import com.consilens.connector.api.enums.DatabaseType;
+
 import com.consilens.connector.api.model.TablePath;
 import com.consilens.connector.api.model.TableSchema;
 import com.consilens.core.database.adpter.DatabaseAdapter;
@@ -55,10 +55,10 @@ class DatabaseAdapterITest {
     static void setUp() throws Exception {
         mysqlAdapter = TestDatabaseHelper.createAdapter(
                 "mysql-adapter", MYSQL.getJdbcUrl(), MYSQL.getUsername(),
-                MYSQL.getPassword(), DatabaseType.MYSQL, ChecksumAlgorithm.CONCAT);
+                MYSQL.getPassword(), "mysql", ChecksumAlgorithm.CONCAT);
         pgAdapter = TestDatabaseHelper.createAdapter(
                 "pg-adapter", POSTGRES.getJdbcUrl(), POSTGRES.getUsername(),
-                POSTGRES.getPassword(), DatabaseType.POSTGRESQL, ChecksumAlgorithm.CONCAT);
+                POSTGRES.getPassword(), "postgresql", ChecksumAlgorithm.CONCAT);
 
         // Prepare test data
         TestDatabaseHelper.createTestTable(mysqlAdapter, "adapter_data");
@@ -177,7 +177,7 @@ class DatabaseAdapterITest {
         @Test
         @DisplayName("MySQL 数据库类型正确")
         void mysqlTypeShouldBeCorrect() {
-            assertThat(mysqlAdapter.getType()).isEqualTo(DatabaseType.MYSQL);
+            assertThat(mysqlAdapter.getConnectorType()).isEqualTo("mysql");
         }
 
         @Test
@@ -261,7 +261,7 @@ class DatabaseAdapterITest {
         @Test
         @DisplayName("PostgreSQL 数据库类型正确")
         void pgTypeShouldBeCorrect() {
-            assertThat(pgAdapter.getType()).isEqualTo(DatabaseType.POSTGRESQL);
+            assertThat(pgAdapter.getConnectorType()).isEqualTo("postgresql");
         }
 
         @Test

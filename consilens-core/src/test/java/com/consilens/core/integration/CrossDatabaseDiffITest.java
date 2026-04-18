@@ -1,7 +1,7 @@
 package com.consilens.core.integration;
 
 import com.consilens.common.enums.ChecksumAlgorithm;
-import com.consilens.connector.api.enums.DatabaseType;
+
 import com.consilens.connector.api.model.TablePath;
 import com.consilens.core.algorithm.ChecksumDiffer;
 import com.consilens.core.algorithm.TableDiffer.DifferConfig;
@@ -58,10 +58,10 @@ class CrossDatabaseDiffITest {
     static void setUp() throws Exception {
         mysqlAdapter = TestDatabaseHelper.createAdapter(
                 "mysql-source", MYSQL.getJdbcUrl(), MYSQL.getUsername(),
-                MYSQL.getPassword(), DatabaseType.MYSQL, ChecksumAlgorithm.CONCAT);
+                MYSQL.getPassword(), "mysql", ChecksumAlgorithm.CONCAT);
         pgAdapter = TestDatabaseHelper.createAdapter(
                 "pg-target", POSTGRES.getJdbcUrl(), POSTGRES.getUsername(),
-                POSTGRES.getPassword(), DatabaseType.POSTGRESQL, ChecksumAlgorithm.CONCAT);
+                POSTGRES.getPassword(), "postgresql", ChecksumAlgorithm.CONCAT);
     }
 
     @AfterAll

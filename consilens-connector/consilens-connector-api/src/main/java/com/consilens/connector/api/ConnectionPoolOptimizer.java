@@ -22,7 +22,7 @@ import java.util.Properties;
  * <p>
  * <b>Usage Example:</b>
  * <pre>{@code
- * DatabaseDialect dialect = DialectFactory.getDialect(DatabaseType.MYSQL);
+ * DatabaseDialect dialect = DialectFactory.getDialect("LMYSQL");
  * ConnectionPoolOptimizer optimizer = dialect.getConnectionPoolOptimizer();
  * 
  * // Get default configuration

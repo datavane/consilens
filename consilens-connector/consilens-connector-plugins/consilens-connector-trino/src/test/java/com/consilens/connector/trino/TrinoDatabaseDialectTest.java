@@ -2,7 +2,6 @@ package com.consilens.connector.trino;
 
 import com.consilens.connector.api.CapabilityProvider;
 import com.consilens.connector.api.enums.DatabaseFeature;
-import com.consilens.connector.api.enums.DatabaseType;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -18,8 +17,8 @@ class TrinoDatabaseDialectTest {
     }
 
     @Test
-    void testGetDatabaseType() {
-        assertEquals(DatabaseType.TRINO, dialect.getDatabaseType());
+    void testGetConnectorType() {
+        assertEquals("trino", dialect.getConnectorType());
     }
 
     @Test

@@ -1,7 +1,6 @@
 package com.consilens.conncetor.base;
 
 import com.consilens.connector.api.*;
-import com.consilens.connector.api.enums.DatabaseType;
 
 /**
  * Abstract base class for database dialect implementations.
@@ -29,8 +28,8 @@ public abstract class AbstractDatabaseDialect
         implements DatabaseDialect {
 
     @Override
-    public DatabaseType getDatabaseType() {
-        return DatabaseType.UNKNOWN;
+    public String getConnectorType() {
+        return "unknown";
     }
 
 

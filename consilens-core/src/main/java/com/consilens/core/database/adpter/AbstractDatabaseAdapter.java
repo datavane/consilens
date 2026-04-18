@@ -3,7 +3,6 @@ package com.consilens.core.database.adpter;
 import com.consilens.common.enums.ChecksumAlgorithm;
 import com.consilens.connector.api.DatabaseDialect;
 import com.consilens.connector.api.SqlQueryGenerator;
-import com.consilens.connector.api.enums.DatabaseType;
 import com.consilens.connector.api.model.PoolConfiguration;
 import com.consilens.core.database.connection.ConnectionPool;
 import com.consilens.connector.api.model.TableSchema;
@@ -26,14 +25,14 @@ public abstract class AbstractDatabaseAdapter implements DatabaseAdapter {
     protected final ConnectionPool connectionPool;
     protected final DatabaseDialect dialect;
     protected final String name;
-    protected final DatabaseType type;
+    protected final String connectorType;
     protected final ChecksumAlgorithm checksumAlgorithm;
 
     protected AbstractDatabaseAdapter(String name, ConnectionPool connectionPool, DatabaseDialect dialect, ChecksumAlgorithm checksumAlgorithm) {
         this.name = name;
         this.connectionPool = connectionPool;
         this.dialect = dialect;
-        this.type = connectionPool.getDatabaseType();
+        this.connectorType = connectionPool.getConnectorType();
         this.checksumAlgorithm = checksumAlgorithm != null ? checksumAlgorithm : ChecksumAlgorithm.CONCAT;
     }
 
@@ -43,8 +42,8 @@ public abstract class AbstractDatabaseAdapter implements DatabaseAdapter {
     }
 
     @Override
-    public DatabaseType getType() {
-        return type;
+    public String getConnectorType() {
+        return connectorType;
     }
 
     @Override
@@ -263,7 +262,7 @@ public abstract class AbstractDatabaseAdapter implements DatabaseAdapter {
         Map<String, Object> metadata = new HashMap<>();
 
         try {
-            metadata.put("databaseType", type.name());
+            metadata.put("databaseType", connectorType);
             metadata.put("databaseName", name);
             metadata.put("healthy", isHealthy());
             metadata.put("supportsFeatures", dialect.getCapabilityProvider().getSupportedFeatures());
@@ -450,7 +449,7 @@ public abstract class AbstractDatabaseAdapter implements DatabaseAdapter {
             return "''";
         }
 
-        String databaseType = getType().name().toLowerCase();
+        String databaseType = getConnectorType();
 
         switch (databaseType) {
             case "postgresql":

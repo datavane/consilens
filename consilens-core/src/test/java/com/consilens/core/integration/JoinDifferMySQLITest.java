@@ -1,7 +1,7 @@
 package com.consilens.core.integration;
 
 import com.consilens.common.enums.ChecksumAlgorithm;
-import com.consilens.connector.api.enums.DatabaseType;
+
 import com.consilens.connector.api.model.TablePath;
 import com.consilens.core.algorithm.JoinDiffer;
 import com.consilens.core.algorithm.JoinDiffer.JoinDifferOptions;
@@ -50,7 +50,7 @@ class JoinDifferMySQLITest {
     static void setUp() throws Exception {
         adapter = TestDatabaseHelper.createAdapter(
                 "join-test", MYSQL.getJdbcUrl(), MYSQL.getUsername(),
-                MYSQL.getPassword(), DatabaseType.MYSQL, ChecksumAlgorithm.CONCAT);
+                MYSQL.getPassword(), "mysql", ChecksumAlgorithm.CONCAT);
     }
 
     @AfterAll

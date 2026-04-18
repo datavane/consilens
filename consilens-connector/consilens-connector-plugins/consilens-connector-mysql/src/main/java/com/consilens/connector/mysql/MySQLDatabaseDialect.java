@@ -1,7 +1,6 @@
 package com.consilens.connector.mysql;
 
 import com.consilens.connector.api.*;
-import com.consilens.connector.api.enums.DatabaseType;
 import com.consilens.conncetor.base.AbstractDatabaseDialect;
 
 import java.util.Map;
@@ -24,7 +23,7 @@ import java.util.Map;
  * and discovered via JDK {@code ServiceLoader}.
  * 
  * <pre>{@code
- * DatabaseDialect dialect = DialectFactory.getDialect(DatabaseType.MYSQL);
+ * DatabaseDialect dialect = DialectFactory.getDialect("LMYSQL");
  * }</pre>
  * 
  * @since 1.0.0
@@ -60,8 +59,8 @@ public class MySQLDatabaseDialect extends AbstractDatabaseDialect {
     }
 
     @Override
-    public DatabaseType getDatabaseType() {
-        return DatabaseType.MYSQL;
+    public String getConnectorType() {
+        return "mysql";
     }
 
     @Override

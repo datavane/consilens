@@ -1,7 +1,6 @@
 package com.consilens.core.database.connection;
 
 import com.consilens.connector.api.model.PoolConfiguration;
-import com.consilens.connector.api.enums.DatabaseType;
 import lombok.Data;
 
 import java.sql.Connection;
@@ -60,9 +59,9 @@ public interface ConnectionPool {
     boolean isClosed();
 
     /**
-     * Get the database type this pool is configured for.
+     * Get the connector type identifier this pool is configured for (e.g. "mysql").
      */
-    DatabaseType getDatabaseType();
+    String getConnectorType();
 
     /**
      * Get pool configuration.

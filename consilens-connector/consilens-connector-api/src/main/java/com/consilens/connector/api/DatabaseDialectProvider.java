@@ -1,12 +1,15 @@
 package com.consilens.connector.api;
 
-import com.consilens.connector.api.enums.DatabaseType;
-
 import java.util.Map;
 
 public interface DatabaseDialectProvider {
 
-    DatabaseType getDatabaseType();
+    /**
+     * Get the connector type identifier this provider handles (e.g. "mysql", "postgresql").
+     *
+     * @return lowercase connector type string
+     */
+    String getConnectorType();
 
     DatabaseDialect create();
 

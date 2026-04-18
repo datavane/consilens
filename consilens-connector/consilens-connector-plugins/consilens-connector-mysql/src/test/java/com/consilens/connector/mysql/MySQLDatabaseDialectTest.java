@@ -2,7 +2,6 @@ package com.consilens.connector.mysql;
 
 import com.consilens.connector.api.CapabilityProvider;
 import com.consilens.connector.api.enums.DatabaseFeature;
-import com.consilens.connector.api.enums.DatabaseType;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -21,8 +20,8 @@ class MySQLDatabaseDialectTest {
     }
 
     @Test
-    void testGetDatabaseType() {
-        assertEquals(DatabaseType.MYSQL, dialect.getDatabaseType());
+    void testGetConnectorType() {
+        assertEquals("mysql", dialect.getConnectorType());
     }
 
     @Test

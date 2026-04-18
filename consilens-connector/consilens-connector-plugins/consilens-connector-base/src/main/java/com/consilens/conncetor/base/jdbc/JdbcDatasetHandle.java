@@ -18,7 +18,7 @@ import com.consilens.connector.api.dataset.SegmentDigest;
 import com.consilens.connector.api.dataset.RecordScanner;
 import com.consilens.connector.api.dataset.SnapshotProvider;
 import com.consilens.connector.api.dataset.SplitPlanner;
-import com.consilens.connector.api.enums.DatabaseType;
+
 import com.consilens.connector.api.model.ComparisonSpec;
 import com.consilens.connector.api.model.DataType;
 import com.consilens.connector.api.model.FieldDescriptor;
@@ -67,7 +67,7 @@ public class JdbcDatasetHandle implements DatasetHandle, RelationalDatasetSuppor
     private final String connectorName;
     private final ResourceLocator resource;
     private final DatasetMetadata metadata;
-    private final DatabaseType databaseType;
+    private final String connectorType;
     private final Map<String, Object> connection;
     private final ReadOptions readOptions;
     private final DatabaseDialect dialect;
@@ -79,14 +79,14 @@ public class JdbcDatasetHandle implements DatasetHandle, RelationalDatasetSuppor
     private volatile boolean closed;
 
     public JdbcDatasetHandle(String connectorName,
-                             DatabaseType databaseType,
+                             String connectorType,
                              Function<Map<String, ?>, DatabaseDialect> dialectFactory,
                              Map<String, Object> connection,
                              ResourceLocator resource,
                              ReadOptions readOptions) {
         this.resource = resource;
         this.connectorName = connectorName;
-        this.databaseType = databaseType;
+        this.connectorType = connectorType;
         this.connection = connection != null ? new LinkedHashMap<>(connection) : Map.of();
         this.readOptions = readOptions;
         this.dialect = dialectFactory.apply(toLegacyNormalization(readOptions));
@@ -96,7 +96,7 @@ public class JdbcDatasetHandle implements DatasetHandle, RelationalDatasetSuppor
                 .pushedPredicate(predicate)
                 .residualPredicate(null)
                 .build();
-        this.metadata = createMetadata(connectorName, databaseType, this.connection, resource, readOptions);
+        this.metadata = createMetadata(connectorName, connectorType, this.connection, resource, readOptions);
     }
 
     @Override
@@ -168,8 +168,8 @@ public class JdbcDatasetHandle implements DatasetHandle, RelationalDatasetSuppor
     }
 
     @Override
-    public DatabaseType getDatabaseType() {
-        return databaseType;
+    public String getConnectorType() {
+        return connectorType;
     }
 
     @Override
@@ -198,18 +198,18 @@ public class JdbcDatasetHandle implements DatasetHandle, RelationalDatasetSuppor
     }
 
     private DatasetMetadata createMetadata(String connectorName,
-                                           DatabaseType databaseType,
+                                           String connectorType,
                                            Map<String, Object> connection,
                                            ResourceLocator resource,
                                            ReadOptions readOptions) {
         Map<String, Object> attributes = new LinkedHashMap<>();
-        attributes.put("databaseType", databaseType.name());
+        attributes.put("databaseType", connectorType);
         attributes.put("resourceType", resource != null ? resource.getType() : null);
         attributes.put("connectorName", connectorName);
 
         return DatasetMetadata.builder()
                 .logicalName(resource != null ? (resource.getName() != null ? resource.getName() : resource.getPath()) : null)
-                .executionDomainId(buildExecutionDomainId(databaseType, connection))
+                .executionDomainId(buildExecutionDomainId(connectorType, connection))
                 .capabilities(new CapabilitySet(EnumSet.of(
                         ConnectorCapability.SCHEMA_DISCOVERY,
                         ConnectorCapability.FILTER_PUSHDOWN,
@@ -223,9 +223,9 @@ public class JdbcDatasetHandle implements DatasetHandle, RelationalDatasetSuppor
                 .build();
     }
 
-    private String buildExecutionDomainId(DatabaseType databaseType, Map<String, Object> connection) {
+    private String buildExecutionDomainId(String connectorType, Map<String, Object> connection) {
         Object jdbcUrl = connection != null ? connection.get("url") : null;
-        return databaseType.name() + ":" + String.valueOf(jdbcUrl);
+        return connectorType + ":" + String.valueOf(jdbcUrl);
     }
 
     private HikariDataSource getOrCreateDataSource() {
@@ -530,7 +530,7 @@ public class JdbcDatasetHandle implements DatasetHandle, RelationalDatasetSuppor
     }
 
     private void configureStreamingConnection(Connection jdbcConnection) throws SQLException {
-        if (databaseType == DatabaseType.POSTGRESQL && jdbcConnection.getAutoCommit()) {
+        if ("postgresql".equals(connectorType) && jdbcConnection.getAutoCommit()) {
             jdbcConnection.setAutoCommit(false);
         }
     }

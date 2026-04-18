@@ -2,7 +2,6 @@ package com.consilens.core.integration;
 
 import com.consilens.common.enums.ChecksumAlgorithm;
 import com.consilens.connector.api.DatabaseDialect;
-import com.consilens.connector.api.enums.DatabaseType;
 import com.consilens.connector.api.model.PoolConfiguration;
 import com.consilens.core.database.adpter.DatabaseAdapter;
 import com.consilens.core.database.adpter.DefaultDatabaseAdapter;
@@ -26,21 +25,21 @@ public final class TestDatabaseHelper {
      * Creates a DatabaseAdapter instance.
      */
     public static DatabaseAdapter createAdapter(String name, String jdbcUrl, String username,
-                                                String password, DatabaseType dbType,
+                                                String password, String connectorType,
                                                 ChecksumAlgorithm algorithm) {
         PoolConfiguration poolConfig = new PoolConfiguration();
         poolConfig.setJdbcUrl(jdbcUrl);
         poolConfig.setUsername(username);
         poolConfig.setPassword(password);
-        poolConfig.setDatabaseType(dbType);
+        poolConfig.setConnectorType(connectorType);
         poolConfig.setMaxPoolSize(5);
         poolConfig.setMinIdle(1);
         poolConfig.setConnectionTimeout(10000);
         poolConfig.setValidationQuery("SELECT 1");
 
         ConnectionPool pool = ConnectionPoolFactory.createPool(
-                jdbcUrl, username, password, dbType, poolConfig);
-        DatabaseDialect dialect = DialectFactory.getDialect(dbType);
+                jdbcUrl, username, password, connectorType, poolConfig);
+        DatabaseDialect dialect = DialectFactory.getDialect(connectorType);
         return new DefaultDatabaseAdapter(name, pool, dialect, jdbcUrl, algorithm);
     }
 

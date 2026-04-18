@@ -2,7 +2,6 @@ package com.consilens.connector.clickhouse;
 
 import com.consilens.connector.api.CapabilityProvider;
 import com.consilens.connector.api.enums.DatabaseFeature;
-import com.consilens.connector.api.enums.DatabaseType;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -21,8 +20,8 @@ class ClickHouseDatabaseDialectTest {
     }
 
     @Test
-    void testGetDatabaseType() {
-        assertEquals(DatabaseType.CLICKHOUSE, dialect.getDatabaseType());
+    void testGetConnectorType() {
+        assertEquals("clickhouse", dialect.getConnectorType());
     }
 
     @Test

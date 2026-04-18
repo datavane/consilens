@@ -2,7 +2,6 @@ package com.consilens.connector.oracle;
 
 import com.consilens.connector.api.CapabilityProvider;
 import com.consilens.connector.api.enums.DatabaseFeature;
-import com.consilens.connector.api.enums.DatabaseType;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -18,8 +17,8 @@ class OracleDatabaseDialectTest {
     }
 
     @Test
-    void testGetDatabaseType() {
-        assertEquals(DatabaseType.ORACLE, dialect.getDatabaseType());
+    void testGetConnectorType() {
+        assertEquals("oracle", dialect.getConnectorType());
     }
 
     @Test

@@ -1,7 +1,6 @@
 package com.consilens.connector.clickhouse;
 
 import com.consilens.connector.api.*;
-import com.consilens.connector.api.enums.DatabaseType;
 import com.consilens.conncetor.base.AbstractDatabaseDialect;
 
 import java.util.Map;
@@ -27,7 +26,7 @@ import java.util.Map;
  * and discovered via JDK {@code ServiceLoader}.
  * 
  * <pre>{@code
- * DatabaseDialect dialect = DialectFactory.getDialect(DatabaseType.CLICKHOUSE);
+ * DatabaseDialect dialect = DialectFactory.getDialect("LCLICKHOUSE");
  * }</pre>
  * 
  * @since 1.0.0
@@ -61,8 +60,8 @@ public class ClickHouseDatabaseDialect extends AbstractDatabaseDialect {
     }
 
     @Override
-    public DatabaseType getDatabaseType() {
-        return DatabaseType.CLICKHOUSE;
+    public String getConnectorType() {
+        return "clickhouse";
     }
 
     @Override

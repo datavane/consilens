@@ -1,7 +1,6 @@
 package com.consilens.connector.postgresql;
 
 import com.consilens.connector.api.*;
-import com.consilens.connector.api.enums.DatabaseType;
 import com.consilens.conncetor.base.AbstractDatabaseDialect;
 
 import java.util.Map;
@@ -27,7 +26,7 @@ import java.util.Map;
  * and discovered via JDK {@code ServiceLoader}.
  * 
  * <pre>{@code
- * DatabaseDialect dialect = DialectFactory.getDialect(DatabaseType.POSTGRESQL);
+ * DatabaseDialect dialect = DialectFactory.getDialect("LPOSTGRESQL");
  * }</pre>
  * 
  * @since 1.0.0
@@ -63,8 +62,8 @@ public class PostgreSQLDatabaseDialect extends AbstractDatabaseDialect {
     }
 
     @Override
-    public DatabaseType getDatabaseType() {
-        return DatabaseType.POSTGRESQL;
+    public String getConnectorType() {
+        return "postgresql";
     }
 
     @Override

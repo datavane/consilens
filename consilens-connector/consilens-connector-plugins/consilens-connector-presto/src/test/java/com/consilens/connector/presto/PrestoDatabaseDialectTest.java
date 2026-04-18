@@ -2,7 +2,6 @@ package com.consilens.connector.presto;
 
 import com.consilens.connector.api.CapabilityProvider;
 import com.consilens.connector.api.enums.DatabaseFeature;
-import com.consilens.connector.api.enums.DatabaseType;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -18,8 +17,8 @@ class PrestoDatabaseDialectTest {
     }
 
     @Test
-    void testGetDatabaseType() {
-        assertEquals(DatabaseType.PRESTO, dialect.getDatabaseType());
+    void testGetConnectorType() {
+        assertEquals("presto", dialect.getConnectorType());
     }
 
     @Test

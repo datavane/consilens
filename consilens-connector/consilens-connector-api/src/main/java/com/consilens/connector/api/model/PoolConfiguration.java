@@ -1,6 +1,5 @@
 package com.consilens.connector.api.model;
 
-import com.consilens.connector.api.enums.DatabaseType;
 import lombok.Data;
 
 import java.time.Duration;
@@ -21,7 +20,8 @@ public class PoolConfiguration {
     private String jdbcUrl;
     private String username;
     private String password;
-    private DatabaseType databaseType = DatabaseType.UNKNOWN;
+    /** Connector type identifier (e.g. "mysql", "postgresql"). Auto-detected from jdbcUrl if empty. */
+    private String connectorType = "";
     private int maxPoolSize = 10;
     private int minIdle = 2;
     private long connectionTimeout = 30000;
@@ -48,8 +48,6 @@ public class PoolConfiguration {
         if (username == null || username.trim().isEmpty()) {
             throw new IllegalArgumentException("Username cannot be null or empty");
         }
-        // Password can be null or empty string
-        // Some databases allow connections without password
         if (maxPoolSize < 1) {
             throw new IllegalArgumentException("Max pool size must be at least 1");
         }
@@ -61,11 +59,6 @@ public class PoolConfiguration {
         }
         if (connectionTimeout <= 0) {
             throw new IllegalArgumentException("Connection timeout must be positive");
-        }
-
-        // Auto-detect database type if not set
-        if (databaseType == DatabaseType.UNKNOWN) {
-            databaseType = DatabaseType.fromJdbcUrl(jdbcUrl);
         }
     }
 
@@ -79,7 +72,7 @@ public class PoolConfiguration {
         copy.setJdbcUrl(this.jdbcUrl);
         copy.setUsername(this.username);
         copy.setPassword(this.password);
-        copy.setDatabaseType(this.databaseType);
+        copy.setConnectorType(this.connectorType);
         copy.setMaxPoolSize(this.maxPoolSize);
         copy.setMinIdle(this.minIdle);
         copy.setConnectionTimeout(this.connectionTimeout);

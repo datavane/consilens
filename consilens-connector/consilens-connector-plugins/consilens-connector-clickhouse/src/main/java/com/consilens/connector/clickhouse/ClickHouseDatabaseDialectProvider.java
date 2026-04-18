@@ -2,15 +2,14 @@ package com.consilens.connector.clickhouse;
 
 import com.consilens.connector.api.DatabaseDialect;
 import com.consilens.connector.api.DatabaseDialectProvider;
-import com.consilens.connector.api.enums.DatabaseType;
 
 import java.util.Map;
 
 public class ClickHouseDatabaseDialectProvider implements DatabaseDialectProvider {
 
     @Override
-    public DatabaseType getDatabaseType() {
-        return DatabaseType.CLICKHOUSE;
+    public String getConnectorType() {
+        return "clickhouse";
     }
 
     @Override

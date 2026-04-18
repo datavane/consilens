@@ -1,7 +1,6 @@
 package com.consilens.connector.sqlserver;
 
 import com.consilens.connector.api.*;
-import com.consilens.connector.api.enums.DatabaseType;
 import com.consilens.conncetor.base.AbstractDatabaseDialect;
 
 import java.util.Map;
@@ -35,8 +34,8 @@ public class SQLServerDatabaseDialect extends AbstractDatabaseDialect {
     }
 
     @Override
-    public DatabaseType getDatabaseType() {
-        return DatabaseType.SQL_SERVER;
+    public String getConnectorType() {
+        return "sqlserver";
     }
 
     @Override

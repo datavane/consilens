@@ -5,7 +5,6 @@ import com.consilens.connector.api.ConnectorException;
 import com.consilens.connector.api.config.ConnectorConfig;
 import com.consilens.connector.api.config.ReadOptions;
 import com.consilens.connector.api.dataset.DatasetHandle;
-import com.consilens.connector.api.enums.DatabaseType;
 import com.consilens.connector.api.model.ResourceLocator;
 import com.consilens.connector.api.spi.ConnectorAdapter;
 
@@ -16,14 +15,14 @@ import java.util.function.Function;
 public class JdbcConnectorAdapter implements ConnectorAdapter {
 
     private final ConnectorConfig config;
-    private final DatabaseType databaseType;
+    private final String connectorType;
     private final Function<Map<String, ?>, DatabaseDialect> dialectFactory;
 
     public JdbcConnectorAdapter(ConnectorConfig config,
-                                DatabaseType databaseType,
+                                String connectorType,
                                 Function<Map<String, ?>, DatabaseDialect> dialectFactory) {
         this.config = config;
-        this.databaseType = databaseType;
+        this.connectorType = connectorType;
         this.dialectFactory = dialectFactory;
     }
 
@@ -34,7 +33,7 @@ public class JdbcConnectorAdapter implements ConnectorAdapter {
 
     @Override
     public String getName() {
-        return config.getName() != null ? config.getName() : databaseType.name().toLowerCase();
+        return config.getName() != null ? config.getName() : connectorType;
     }
 
     @Override
@@ -44,7 +43,7 @@ public class JdbcConnectorAdapter implements ConnectorAdapter {
         }
         return new JdbcDatasetHandle(
                 getName(),
-                databaseType,
+                connectorType,
                 dialectFactory,
                 config.getConnection() != null ? new LinkedHashMap<>(config.getConnection()) : Map.of(),
                 resource,

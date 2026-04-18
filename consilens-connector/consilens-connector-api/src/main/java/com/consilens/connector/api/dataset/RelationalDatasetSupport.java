@@ -1,7 +1,6 @@
 package com.consilens.connector.api.dataset;
 
 import com.consilens.connector.api.DatabaseDialect;
-import com.consilens.connector.api.enums.DatabaseType;
 import com.consilens.connector.api.model.TablePath;
 
 import java.sql.Connection;
@@ -11,7 +10,8 @@ public interface RelationalDatasetSupport {
 
     String getName();
 
-    DatabaseType getDatabaseType();
+    /** Returns the connector type identifier (e.g. "mysql", "postgresql"). */
+    String getConnectorType();
 
     String getJdbcUrl();
 

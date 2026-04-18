@@ -3,7 +3,6 @@ package com.consilens.core.database.adpter;
 import com.consilens.connector.api.DatabaseDialect;
 import com.consilens.connector.api.SqlQueryGenerator;
 import com.consilens.connector.api.enums.DatabaseFeature;
-import com.consilens.connector.api.enums.DatabaseType;
 import com.consilens.connector.api.model.TableSchema;
 import com.consilens.core.database.connection.ConnectionPool;
 import com.consilens.core.segment.TableSegment;
@@ -28,9 +27,9 @@ public interface DatabaseAdapter {
     String getName();
 
     /**
-     * Get the database type.
+     * Get the connector type identifier (e.g. "mysql", "postgresql").
      */
-    DatabaseType getType();
+    String getConnectorType();
 
     /**
      * Get the connection pool for this adapter.
@@ -197,7 +196,7 @@ public interface DatabaseAdapter {
      * Check if the database supports a specific feature.
      */
     default boolean supportsFeature(DatabaseFeature feature) {
-        return getType().supportsFeature(feature);
+        return getDialect().getCapabilityProvider().supportsFeature(feature);
     }
 
     /**

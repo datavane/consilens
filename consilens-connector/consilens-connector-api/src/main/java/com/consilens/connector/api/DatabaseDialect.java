@@ -1,7 +1,5 @@
 package com.consilens.connector.api;
 
-import com.consilens.connector.api.enums.DatabaseType;
-
 /**
  * Database dialect interface - main entry point for database-specific
  * operations.
@@ -22,7 +20,7 @@ import com.consilens.connector.api.enums.DatabaseType;
  * <b>Usage Example:</b>
  * 
  * <pre>{@code
- * DatabaseDialect dialect = DialectFactory.getDialect(DatabaseType.MYSQL);
+ * DatabaseDialect dialect = DialectFactory.getDialect("mysql");
  * 
  * // Get SQL query component
  * SqlQueryGenerator queryGen = dialect.getSqlQueryGenerator();
@@ -40,11 +38,11 @@ public interface DatabaseDialect {
     // ========== Core Properties ==========
 
     /**
-     * Get the database type this dialect supports.
-     * 
-     * @return the database type
+     * Get the connector type identifier this dialect supports (e.g. "mysql", "postgresql").
+     *
+     * @return lowercase connector type string
      */
-    DatabaseType getDatabaseType();
+    String getConnectorType();
 
     // ========== Component Access Methods ==========
 

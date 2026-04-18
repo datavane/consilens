@@ -4,7 +4,6 @@ import com.consilens.connector.api.DatabaseDialect;
 import com.consilens.connector.api.capability.ConnectorCapability;
 import com.consilens.connector.api.config.ReadOptions;
 import com.consilens.connector.api.dataset.RelationalDatasetSupport;
-import com.consilens.connector.api.enums.DatabaseType;
 import com.consilens.connector.api.model.ResourceLocator;
 import org.junit.jupiter.api.Test;
 
@@ -60,7 +59,7 @@ class JdbcDatasetHandleTest {
 
         JdbcDatasetHandle handle = new JdbcDatasetHandle(
                 "mysql",
-                DatabaseType.MYSQL,
+                "mysql",
                 ignored -> stubDialect(),
                 Map.of("url", "jdbc:mysql://localhost:3306/test"),
                 ResourceLocator.builder().type("table").name("orders").build(),
@@ -77,8 +76,8 @@ class JdbcDatasetHandleTest {
                 DatabaseDialect.class.getClassLoader(),
                 new Class<?>[]{DatabaseDialect.class},
                 (proxy, method, args) -> {
-                    if ("getDatabaseType".equals(method.getName())) {
-                        return DatabaseType.MYSQL;
+                    if ("getConnectorType".equals(method.getName())) {
+                        return "mysql";
                     }
                     return null;
                 });
