@@ -6,13 +6,10 @@
 >https://github.com/NoeticLens/consilens
 >欢迎关注、Star、Fork，参与贡献
 
-## Consilens是什么
+## Consilens 是什么
 Consilens 是一个开源的跨数据源数据一致性校验工具，用来验证数据库迁移、数据同步、ETL、回填、双写或灰度切换后的结果是否一致，并在发现差异后继续定位到可处理的范围。
 
 它不是为了替代所有临时脚本，而是希望把“数据一致性校验”这件反复发生、又容易写散的工作，做成一项可以复用的工程能力。
-
-**Gtihub 地址：**
-https://github.com/NoeticLens/consilens.git
 
 ## 解决什么问题
 

@@ -73,8 +73,8 @@ source:
   type: mysql
   connection:
     url: jdbc:mysql://localhost:3306/source_db
-    username: source_user
-    password: change_me_source_password
+    username: ${env.MYSQL_USER}
+    password: ${env.MYSQL_PASSWORD}
   resource:
     type: table
     name: orders
@@ -83,8 +83,8 @@ target:
   type: postgresql
   connection:
     url: jdbc:postgresql://localhost:5432/target_db?currentSchema=public
-    username: target_user
-    password: change_me_target_password
+    username: ${env.PG_USER}
+    password: ${env.PG_PASSWORD}
   resource:
     type: table
     name: orders
@@ -144,3 +144,15 @@ result:
 - [连接器与数据源支持](./docs/03-插件与数据库支持.md)
 - [架构设计](./docs/04-架构设计.md)
 - [开发指南](./docs/05-开发指南.md)
+
+## 社交媒体
+
+- 微信公众号，扫描二维码关注
+
+![微信二维码](docs/img/wechat-qrcode.png)
+
+## 联系作者
+
+- 添加时备注：Consilens
+
+![wechat-author-qrcode](docs/img/wechat-author-qrcode.png)
