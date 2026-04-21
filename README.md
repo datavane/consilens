@@ -95,7 +95,7 @@ comparison:
       - order_id
     target:
       - order_id
-  comparisons:
+  fields:
     source:
       - order_id
       - customer_id
