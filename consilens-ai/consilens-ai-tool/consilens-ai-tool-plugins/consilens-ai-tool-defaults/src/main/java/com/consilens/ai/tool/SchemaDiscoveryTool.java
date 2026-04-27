@@ -37,7 +37,7 @@ public class SchemaDiscoveryTool implements Tool {
         ObjectNode props = schema.putObject("properties");
         props.putObject("url").put("type", "string").put("description", "JDBC connection URL");
         props.putObject("username").put("type", "string").put("description", "Database username");
-        props.putObject("password").put("type", "string").put("description", "Database password");
+        props.putObject("password").put("type", "string").put("description", "Database password (never logged or exposed)");
         props.putObject("schema").put("type", "string").put("description", "Schema/database name (optional)");
         props.putObject("table").put("type", "string").put("description", "Table name");
         schema.putArray("required").add("url").add("username").add("table");
@@ -61,40 +61,55 @@ public class SchemaDiscoveryTool implements Tool {
             return ToolResult.failure("Required parameters missing: url and table are required");
         }
 
-        try (Connection conn = DriverManager.getConnection(url, username, password)) {
-            DatabaseMetaData meta = conn.getMetaData();
-            StringBuilder result = new StringBuilder();
-            result.append("## Schema for table: ").append(tableName).append("\n\n");
-            result.append("### Columns\n");
-            result.append("| Column | Type | Nullable | Size |\n");
-            result.append("|--------|------|----------|------|\n");
+        try {
+            log.debug("Discovering schema: url={}, table={}, schema={}", url, tableName, schemaName);
+            
+            try (Connection conn = DriverManager.getConnection(url, username, password)) {
+                DatabaseMetaData meta = conn.getMetaData();
+                StringBuilder result = new StringBuilder();
+                result.append("## Schema for table: ").append(tableName).append("\n\n");
+                result.append("### Columns\n");
+                result.append("| Column | Type | Nullable | Size |\n");
+                result.append("|--------|------|----------|------|\n");
 
-            List<String> pkColumns = new ArrayList<>();
-            try (ResultSet pkRs = meta.getPrimaryKeys(null, schemaName, tableName)) {
-                while (pkRs.next()) {
-                    pkColumns.add(pkRs.getString("COLUMN_NAME"));
+                List<String> pkColumns = new ArrayList<>();
+                try (ResultSet pkRs = meta.getPrimaryKeys(null, schemaName, tableName)) {
+                    while (pkRs.next()) {
+                        pkColumns.add(pkRs.getString("COLUMN_NAME"));
+                    }
                 }
-            }
 
-            try (ResultSet cols = meta.getColumns(null, schemaName, tableName, "%")) {
-                while (cols.next()) {
-                    String colName = cols.getString("COLUMN_NAME");
-                    String typeName = cols.getString("TYPE_NAME");
-                    int colSize = cols.getInt("COLUMN_SIZE");
-                    String nullable = "YES".equals(cols.getString("IS_NULLABLE")) ? "YES" : "NO";
-                    String pkMark = pkColumns.contains(colName) ? " (PK)" : "";
-                    result.append(String.format("| %s%s | %s(%d) | %s | %d |\n",
-                            colName, pkMark, typeName, colSize, nullable, colSize));
+                int columnCount = 0;
+                try (ResultSet cols = meta.getColumns(null, schemaName, tableName, "%")) {
+                    while (cols.next()) {
+                        columnCount++;
+                        String colName = cols.getString("COLUMN_NAME");
+                        String typeName = cols.getString("TYPE_NAME");
+                        int colSize = cols.getInt("COLUMN_SIZE");
+                        String nullable = "YES".equals(cols.getString("IS_NULLABLE")) ? "YES" : "NO";
+                        String pkMark = pkColumns.contains(colName) ? " (PK)" : "";
+                        result.append(String.format("| %s%s | %s(%d) | %s | %d |\n",
+                                colName, pkMark, typeName, colSize, nullable, colSize));
+                    }
                 }
-            }
 
-            if (!pkColumns.isEmpty()) {
-                result.append("\n**Primary Key(s):** ").append(String.join(", ", pkColumns));
-            }
+                if (columnCount == 0) {
+                    log.warn("No columns found for table: {}", tableName);
+                    return ToolResult.failure("Table not found or has no accessible columns: " + tableName);
+                }
 
-            return ToolResult.success(result.toString());
+                if (!pkColumns.isEmpty()) {
+                    result.append("\n**Primary Key(s):** ").append(String.join(", ", pkColumns));
+                } else {
+                    result.append("\n**Note:** No primary key defined for this table.");
+                }
+
+                log.info("Schema discovery completed: table={}, columns={}, pks={}", 
+                        tableName, columnCount, pkColumns.size());
+                return ToolResult.success(result.toString());
+            }
         } catch (Exception e) {
-            log.error("Schema discovery failed: {}", e.getMessage(), e);
+            log.error("Schema discovery failed for table {}: {}", tableName, e.getMessage(), e);
             return ToolResult.failure("Schema discovery failed: " + e.getMessage());
         }
     }

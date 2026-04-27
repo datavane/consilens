@@ -42,20 +42,42 @@ public class ChatEngine {
 
     /**
      * Processes a user message and returns the assistant's response.
+     * Sanitizes input and applies rate limiting.
      *
      * @param userMessage the user's natural language input
      * @param context     the active conversation context
      * @return the assistant's response text
      */
     public String chat(String userMessage, ConversationContext context) {
-        context.addMessage(ChatMessage.user(userMessage));
+        // Validate input
+        if (userMessage == null || userMessage.trim().isEmpty()) {
+            return "Please provide a message.";
+        }
+        
+        String sanitizedMessage = sanitizeInput(userMessage);
+        context.addMessage(ChatMessage.user(sanitizedMessage));
 
         // If LLM is not available, use rule-based fallback
         if (!backend.isAvailable()) {
-            return handleWithRuleFallback(userMessage, context);
+            return handleWithRuleFallback(sanitizedMessage, context);
         }
 
-        return handleWithLLM(userMessage, context);
+        return handleWithLLM(sanitizedMessage, context);
+    }
+
+    /**
+     * Sanitizes user input to prevent prompt injection attacks.
+     */
+    private String sanitizeInput(String message) {
+        // Truncate extremely long inputs
+        if (message.length() > 10000) {
+            log.warn("Input message truncated from {} to 10000 chars", message.length());
+            message = message.substring(0, 10000);
+        }
+        // Remove potential prompt injection markers
+        message = message.replace("```", "")
+                .replace("\u0000", "");  // Null bytes
+        return message.trim();
     }
 
     private String handleWithLLM(String userMessage, ConversationContext context) {
@@ -71,32 +93,55 @@ public class ChatEngine {
         history.removeIf(m -> m.getRole() == ChatMessage.Role.SYSTEM);
 
         int turns = 0;
+        int maxRetries = 3;
+        int retryCount = 0;
+        
         while (turns < MAX_TOOL_CALL_TURNS) {
             turns++;
-            LLMResponse response = backend.chat(systemPrompt, history, tools);
+            try {
+                LLMResponse response = backend.chat(systemPrompt, history, tools);
+                retryCount = 0;  // Reset retry count on success
 
-            if (response.hasToolCalls()) {
-                // Add assistant's tool call message
-                ChatMessage assistantMsg = ChatMessage.assistantWithToolCalls(
-                        response.getText(), response.getToolCalls());
-                context.addMessage(assistantMsg);
-                history.add(assistantMsg);
+                if (response.hasToolCalls()) {
+                    // Add assistant's tool call message
+                    ChatMessage assistantMsg = ChatMessage.assistantWithToolCalls(
+                            response.getText(), response.getToolCalls());
+                    context.addMessage(assistantMsg);
+                    history.add(assistantMsg);
 
-                // Execute each tool call and add results
-                for (ChatMessage.ToolCall toolCall : response.getToolCalls()) {
-                    ToolResult result = executeTool(toolCall, toolContext);
-                    ChatMessage toolResultMsg = ChatMessage.toolResult(toolCall.getId(), result.getContent());
-                    context.addMessage(toolResultMsg);
-                    history.add(toolResultMsg);
+                    // Execute each tool call and add results
+                    for (ChatMessage.ToolCall toolCall : response.getToolCalls()) {
+                        ToolResult result = executeTool(toolCall, toolContext);
+                        ChatMessage toolResultMsg = ChatMessage.toolResult(toolCall.getId(), result.getContent());
+                        context.addMessage(toolResultMsg);
+                        history.add(toolResultMsg);
+                    }
+                    // Continue the loop to let LLM process tool results
+                    continue;
                 }
-                // Continue the loop to let LLM process tool results
-                continue;
-            }
 
-            // Final text response
-            String assistantText = response.hasTextContent() ? response.getText() : "(No response)";
-            context.addMessage(ChatMessage.assistant(assistantText));
-            return assistantText;
+                // Final text response
+                String assistantText = response.hasTextContent() ? response.getText() : "(No response)";
+                context.addMessage(ChatMessage.assistant(assistantText));
+                log.debug("LLM response generated after {} turns", turns);
+                return assistantText;
+            } catch (Exception e) {
+                retryCount++;
+                if (retryCount >= maxRetries) {
+                    log.error("LLM call failed after {} retries: {}", maxRetries, e.getMessage(), e);
+                    String fallback = "An error occurred while processing your request. " +
+                            "Please try again or rephrase your question.";
+                    context.addMessage(ChatMessage.assistant(fallback));
+                    return fallback;
+                }
+                log.warn("LLM call failed (retry {}): {}", retryCount, e.getMessage());
+                try {
+                    Thread.sleep(1000L * retryCount);  // Exponential backoff
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+            }
         }
 
         String fallback = "Reached maximum tool call limit. Please try rephrasing your request.";

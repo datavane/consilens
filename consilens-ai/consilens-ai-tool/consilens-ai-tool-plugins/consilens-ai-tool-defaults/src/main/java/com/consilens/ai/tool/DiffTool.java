@@ -46,11 +46,11 @@ public class DiffTool implements Tool {
         ObjectNode props = schema.putObject("properties");
         props.putObject("source_url").put("type", "string").put("description", "Source JDBC URL");
         props.putObject("source_username").put("type", "string").put("description", "Source DB username");
-        props.putObject("source_password").put("type", "string").put("description", "Source DB password");
+        props.putObject("source_password").put("type", "string").put("description", "Source DB password (never logged or exposed)");
         props.putObject("source_table").put("type", "string").put("description", "Source table (schema.table)");
         props.putObject("target_url").put("type", "string").put("description", "Target JDBC URL");
         props.putObject("target_username").put("type", "string").put("description", "Target DB username");
-        props.putObject("target_password").put("type", "string").put("description", "Target DB password");
+        props.putObject("target_password").put("type", "string").put("description", "Target DB password (never logged or exposed)");
         props.putObject("target_table").put("type", "string").put("description", "Target table (schema.table)");
         props.putObject("primary_keys").put("type", "string").put("description", "Comma-separated primary key columns");
         props.putObject("limit").put("type", "integer").put("description", "Max rows to fetch per table (default 10000)");
@@ -87,6 +87,9 @@ public class DiffTool implements Tool {
         }
 
         try {
+            log.debug("Executing diff: source={} table={}, target={} table={}, pk_count={}, limit={}",
+                    sourceUrl, sourceTable, targetUrl, targetTable, pkColumns.size(), limit);
+            
             TableData sourceData = fetchTable(sourceUrl, sourceUser, sourcePass, sourceTable, limit);
             TableData targetData = fetchTable(targetUrl, targetUser, targetPass, targetTable, limit);
 
@@ -119,6 +122,7 @@ public class DiffTool implements Tool {
             summary.append("  - Missing in target: ").append(targetMissing).append("\n");
             summary.append("  - Missing in source: ").append(sourceMissing).append("\n");
 
+            log.info("Diff completed: resultId={}, differences={}", resultId, differences.size());
             return ToolResult.success(summary.toString(), diffResult);
         } catch (Exception e) {
             log.error("Diff failed: {}", e.getMessage(), e);

@@ -146,15 +146,30 @@ public class RepairGenerateTool implements Tool {
         String setClauses = IntStream.range(0, Math.min(columns.size(), values.size()))
                 .mapToObj(i -> columns.get(i) + " = " + formatValue(values.get(i)))
                 .collect(Collectors.joining(", "));
-        String whereClause = row.getPrimaryKey().isEmpty() ? "1=1 /* no PK */" :
-                "id = " + formatValue(row.getPrimaryKey().get(0));
+        
+        String whereClause = buildWhereClause(row);
         return String.format("UPDATE %s SET %s WHERE %s", tableName, setClauses, whereClause);
     }
 
     private String buildDelete(String tableName, DiffRow row) {
-        String whereClause = row.getPrimaryKey().isEmpty() ? "1=1 /* no PK */" :
-                "id = " + formatValue(row.getPrimaryKey().get(0));
+        String whereClause = buildWhereClause(row);
         return String.format("DELETE FROM %s WHERE %s", tableName, whereClause);
+    }
+
+    private String buildWhereClause(DiffRow row) {
+        List<Object> pkValues = row.getPrimaryKey();
+        if (pkValues.isEmpty()) {
+            return "1=1 /* no PK available */";
+        }
+        // For single PK, use generic approach
+        if (pkValues.size() == 1) {
+            return "id = " + formatValue(pkValues.get(0));
+        }
+        // For composite keys, generate id1=val1 AND id2=val2, etc
+        // Note: This is a limitation - we don't know the actual PK column names
+        return IntStream.range(0, pkValues.size())
+                .mapToObj(i -> "id" + (i + 1) + " = " + formatValue(pkValues.get(i)))
+                .collect(Collectors.joining(" AND "));
     }
 
     private String formatValue(Object val) {
