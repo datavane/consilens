@@ -65,7 +65,18 @@
             <useTransitiveDependencies>true</useTransitiveDependencies>
             <excludes>
                 <!-- Exclude connectors -->
-                <exclude>com.consilens:consilens-connector-*</exclude>
+                <exclude>com.consilens:consilens-connector-all</exclude>
+                <exclude>com.consilens:consilens-connector-base</exclude>
+                <exclude>com.consilens:consilens-connector-clickhouse</exclude>
+                <exclude>com.consilens:consilens-connector-doris</exclude>
+                <exclude>com.consilens:consilens-connector-mysql</exclude>
+                <exclude>com.consilens:consilens-connector-oracle</exclude>
+                <exclude>com.consilens:consilens-connector-postgresql</exclude>
+                <exclude>com.consilens:consilens-connector-presto</exclude>
+                <exclude>com.consilens:consilens-connector-sqlserver</exclude>
+                <exclude>com.consilens:consilens-connector-starrocks</exclude>
+                <exclude>com.consilens:consilens-connector-tidb</exclude>
+                <exclude>com.consilens:consilens-connector-trino</exclude>
                 
                 <!-- Exclude database drivers (they go to plugins) -->
                 <exclude>com.mysql:mysql-connector-j</exclude>
