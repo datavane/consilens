@@ -63,9 +63,10 @@ public class DiffService {
 
         try {
             lifecycle.onDiffStart(diffContext);
-            CompareRuntime runtime = new DefaultCompareRuntime();
+            CompareRuntime runtime = createCompareRuntime();
             DiffResult coreResult = runtime.execute(toCompareRequest(config));
 
+            publishDifferences(coreResult, lifecycle, diffContext);
             lifecycle.onDiffComplete(coreResult, diffContext);
 
             // Convert core result to CLI result
@@ -99,7 +100,11 @@ public class DiffService {
         }
     }
 
-    private DiffLifecycle buildLifecycle(CliConfiguration config) {
+    protected CompareRuntime createCompareRuntime() {
+        return new DefaultCompareRuntime();
+    }
+
+    protected DiffLifecycle buildLifecycle(CliConfiguration config) {
         ResultConfig resultConfig = config.getResult();
         if (resultConfig == null || resultConfig.getSinks() == null || resultConfig.getSinks().isEmpty()) {
             return new NoopDiffLifecycle();
@@ -107,7 +112,7 @@ public class DiffService {
         return new DefaultDiffLifecycle(resultConfig);
     }
 
-    private DiffContext buildDiffContext(CliConfiguration config) {
+    protected DiffContext buildDiffContext(CliConfiguration config) {
         TablePath sourcePath = null;
         TablePath targetPath = null;
         List<String> sourceColumnNames = new ArrayList<>();
@@ -150,6 +155,13 @@ public class DiffService {
                 .sourceColumnNames(sourceColumnNames)
                 .targetColumnNames(targetColumnNames)
                 .build();
+    }
+
+    private void publishDifferences(DiffResult coreResult, DiffLifecycle lifecycle, DiffContext diffContext) throws Exception {
+        if (coreResult == null || coreResult.getDifferences() == null || coreResult.getDifferences().isEmpty()) {
+            return;
+        }
+        lifecycle.onDifferencesFound(coreResult.getDifferences(), diffContext);
     }
 
     /**
