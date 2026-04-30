@@ -28,11 +28,21 @@ public abstract class TableDiffer implements DiffEmitter {
 
     protected final ExecutorProvider executorProvider;
     protected final DifferConfig config;
+    protected final boolean ownsExecutorProvider;
     private DiffSink diffSink;
 
     protected TableDiffer(DifferConfig config) {
+        this(config, new ExecutorProvider(config.getConcurrencyConfig()), true);
+    }
+
+    protected TableDiffer(DifferConfig config, ExecutorProvider executorProvider) {
+        this(config, executorProvider, false);
+    }
+
+    protected TableDiffer(DifferConfig config, ExecutorProvider executorProvider, boolean ownsExecutorProvider) {
         this.config = config;
-        this.executorProvider = new ExecutorProvider(config.getConcurrencyConfig());
+        this.executorProvider = executorProvider;
+        this.ownsExecutorProvider = ownsExecutorProvider;
         this.diffSink = new InMemoryDiffSink();
     }
 
@@ -144,6 +154,10 @@ public abstract class TableDiffer implements DiffEmitter {
     public void shutdown() {
         try {
             log.info("Shutting down TableDiffer...");
+            if (!ownsExecutorProvider) {
+                log.debug("Skipping ExecutorProvider shutdown because TableDiffer does not own it");
+                return;
+            }
             if (executorProvider != null) {
                 executorProvider.shutdown();
                 log.info("ExecutorProvider shutdown completed");

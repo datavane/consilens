@@ -8,9 +8,12 @@ import lombok.extern.slf4j.Slf4j;
 import java.lang.reflect.Method;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 @Slf4j
 public class BaseDataTypeHandler implements DataTypeHandler {
+
+    private static final Set<String> DATE_ONLY_COMPARISON_MODES = Set.of("DATE_ONLY", "TRUNCATE_TO_DAY");
 
     private static final Map<String, DataType> DATA_TYPE_ALIASES = Map.ofEntries(
             Map.entry("BOOL", DataType.BOOLEAN),
@@ -52,25 +55,8 @@ public class BaseDataTypeHandler implements DataTypeHandler {
      * @return configured precision, or defaultPrecision if not set
      */
     protected int getPrecision(String dataTypeName, int defaultPrecision) {
-        if (normalizationConfig == null) {
-            return defaultPrecision;
-        }
-        
-        try {
-            Object rule = normalizationConfig.get(dataTypeName);
-            if (rule != null) {
-                // Get precision field via reflection
-                java.lang.reflect.Method getPrecisionMethod = rule.getClass().getMethod("getPrecision");
-                Integer precision = (Integer) getPrecisionMethod.invoke(rule);
-                if (precision != null) {
-                    return precision;
-                }
-            }
-        } catch (Exception e) {
-            log.debug("Failed to get precision config for type '{}': {}", dataTypeName, e.getMessage());
-        }
-        
-        return defaultPrecision;
+        Integer precision = getRuleValue(dataTypeName, "getPrecision", Integer.class);
+        return precision != null ? precision : defaultPrecision;
     }
 
     /**
@@ -81,25 +67,50 @@ public class BaseDataTypeHandler implements DataTypeHandler {
      * @return configured rounding flag, or defaultRounding if not set
      */
     protected boolean getRounding(String dataTypeName, boolean defaultRounding) {
+        Boolean rounding = getRuleValue(dataTypeName, "getRounding", Boolean.class);
+        return rounding != null ? rounding : defaultRounding;
+    }
+
+    protected String getFormat(String dataTypeName, String defaultFormat) {
+        String format = getRuleValue(dataTypeName, "getFormat", String.class);
+        return format != null ? format : defaultFormat;
+    }
+
+    protected String getTimezone(String dataTypeName, String defaultTimezone) {
+        String timezone = getRuleValue(dataTypeName, "getTimezone", String.class);
+        return timezone != null ? timezone : defaultTimezone;
+    }
+
+    protected String getComparisonMode(String dataTypeName, String defaultMode) {
+        String comparisonMode = getRuleValue(dataTypeName, "getComparisonMode", String.class);
+        return comparisonMode != null ? comparisonMode.trim().toUpperCase(Locale.ROOT) : defaultMode;
+    }
+
+    protected boolean isDateOnlyComparison(String dataTypeName) {
+        return DATE_ONLY_COMPARISON_MODES.contains(getComparisonMode(dataTypeName, "EXACT"));
+    }
+
+    protected String escapeSqlLiteral(String value) {
+        return value == null ? null : value.replace("'", "''");
+    }
+
+    private <T> T getRuleValue(String dataTypeName, String getterName, Class<T> valueType) {
         if (normalizationConfig == null) {
-            return defaultRounding;
+            return null;
         }
-        
+
         try {
             Object rule = normalizationConfig.get(dataTypeName);
-            if (rule != null) {
-                // Get rounding field via reflection
-                Method getRoundingMethod = rule.getClass().getMethod("getRounding");
-                Boolean rounding = (Boolean) getRoundingMethod.invoke(rule);
-                if (rounding != null) {
-                    return rounding;
-                }
+            if (rule == null) {
+                return null;
             }
+            Method getter = rule.getClass().getMethod(getterName);
+            Object value = getter.invoke(rule);
+            return valueType.isInstance(value) ? valueType.cast(value) : null;
         } catch (Exception e) {
-            log.debug("Failed to get rounding config for type '{}': {}", dataTypeName, e.getMessage());
+            log.debug("Failed to get normalization config '{}' for type '{}': {}", getterName, dataTypeName, e.getMessage());
+            return null;
         }
-        
-        return defaultRounding;
     }
 
     @Override

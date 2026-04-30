@@ -456,13 +456,16 @@ public class DiffService {
             result.add(normalizationRule(type, "format_number", params));
         }
 
-        if (rule.getFormat() != null || rule.getTimezone() != null) {
+        if (rule.getFormat() != null || rule.getTimezone() != null || rule.getComparisonMode() != null) {
             Map<String, Object> params = new LinkedHashMap<>();
             if (rule.getFormat() != null) {
                 params.put("format", rule.getFormat());
             }
             if (rule.getTimezone() != null) {
                 params.put("timezone", rule.getTimezone());
+            }
+            if (rule.getComparisonMode() != null) {
+                params.put("comparisonMode", rule.getComparisonMode());
             }
             result.add(normalizationRule(type, "format_datetime", params));
         }

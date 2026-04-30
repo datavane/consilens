@@ -9,6 +9,7 @@ import com.consilens.core.segment.TableSegmenter;
 import com.consilens.core.diff.DiffRow;
 import com.consilens.core.diff.DiffOperation;
 import com.consilens.core.diff.InfoTreeRecorder;
+import com.consilens.core.thread.ExecutorProvider;
 import com.consilens.connector.api.model.DataType;
 import com.consilens.connector.api.model.TableSchema;
 import com.github.benmanes.caffeine.cache.Cache;
@@ -50,7 +51,13 @@ public class ChecksumDiffer extends TableDiffer implements AutoCloseable {
      * @throws IllegalArgumentException if bisectionFactor &gt;= bisectionThreshold or bisectionFactor &lt; 2
      */
     public ChecksumDiffer(DifferConfig config) {
-        super(config);
+        this(config, null);
+    }
+
+    public ChecksumDiffer(DifferConfig config, ExecutorProvider executorProvider) {
+        super(config,
+                executorProvider != null ? executorProvider : new ExecutorProvider(config.getConcurrencyConfig()),
+                executorProvider == null);
 
         // Prevent degenerate recursion settings that would explode tasks or never split
         if (config.getBisectionThreshold() <= 0) {

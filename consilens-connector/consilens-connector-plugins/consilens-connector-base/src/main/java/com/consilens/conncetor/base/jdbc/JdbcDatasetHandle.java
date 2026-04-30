@@ -725,6 +725,7 @@ public class JdbcDatasetHandle implements DatasetHandle, RelationalDatasetSuppor
         } else if ("format_datetime".equals(operation)) {
             mapped.setFormat(stringValue(params.get("format")));
             mapped.setTimezone(stringValue(params.get("timezone")));
+            mapped.setComparisonMode(stringValue(params.get("comparisonMode")));
         } else if ("encode".equals(operation)) {
             mapped.setEncoding(firstString(params.get("encoding"), params.get("format")));
             mapped.setUppercase(booleanValue(params.get("uppercase")));
@@ -864,6 +865,7 @@ public class JdbcDatasetHandle implements DatasetHandle, RelationalDatasetSuppor
         private Boolean rounding;
         private String format;
         private String timezone;
+        private String comparisonMode;
         private String encoding;
         private Boolean uppercase;
         private String trueValue;
@@ -900,6 +902,14 @@ public class JdbcDatasetHandle implements DatasetHandle, RelationalDatasetSuppor
 
         public void setTimezone(String timezone) {
             this.timezone = timezone;
+        }
+
+        public String getComparisonMode() {
+            return comparisonMode;
+        }
+
+        public void setComparisonMode(String comparisonMode) {
+            this.comparisonMode = comparisonMode;
         }
 
         public String getEncoding() {

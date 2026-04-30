@@ -7,6 +7,8 @@ import com.consilens.cli.model.ListPairConfig;
 import com.consilens.cli.model.LocalCompareConfig;
 import com.consilens.cli.model.StrategyConfig;
 import com.consilens.cli.model.StringPairConfig;
+import com.consilens.cli.model.normalization.TypeNormalizationRule;
+import com.consilens.connector.api.normalization.NormalizationRule;
 import com.consilens.core.compare.CompareRuntime;
 import com.consilens.core.diff.DiffResult;
 import com.consilens.core.diff.DiffRow;
@@ -15,8 +17,10 @@ import com.consilens.core.lifecycle.DiffLifecycle;
 import com.consilens.core.lifecycle.SegmentResult;
 import org.junit.jupiter.api.Test;
 
+import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -52,6 +56,24 @@ class DiffServiceTest {
         Exception exception = assertThrows(Exception.class, () -> service.performDiff(createConfig()));
         assertTrue(exception.getMessage().contains("Lifecycle close failed"));
         assertEquals(List.of("start", "differences", "complete", "close"), lifecycle.events);
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void shouldConvertTemporalComparisonModeToNormalizationRule() throws Exception {
+        DiffService service = new DiffService();
+        TypeNormalizationRule rule = new TypeNormalizationRule();
+        rule.setTimezone("UTC");
+        rule.setComparisonMode("DATE_ONLY");
+
+        Method method = DiffService.class.getDeclaredMethod("toNormalizationRules", String.class, TypeNormalizationRule.class);
+        method.setAccessible(true);
+
+        List<NormalizationRule> rules = (List<NormalizationRule>) method.invoke(service, "timestamp", rule);
+
+        assertEquals(1, rules.size());
+        assertEquals("format_datetime", rules.get(0).getOperation());
+        assertEquals(Map.of("timezone", "UTC", "comparisonMode", "DATE_ONLY"), rules.get(0).getParams());
     }
 
     private CliConfiguration createConfig() {

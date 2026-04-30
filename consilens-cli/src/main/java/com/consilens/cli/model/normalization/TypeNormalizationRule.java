@@ -29,6 +29,12 @@ public class TypeNormalizationRule {
      */
     @JsonProperty("timezone")
     private String timezone;
+
+    /**
+     * Temporal comparison mode for date/datetime/timestamp values.
+     */
+    @JsonProperty("comparisonMode")
+    private String comparisonMode;
     
     /**
      * Encoding method (hex/base64).

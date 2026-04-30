@@ -124,7 +124,8 @@ public class PostgreSQLDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeDate(String quotedCol) {
-        return "COALESCE(TO_CHAR(" + quotedCol + ", 'YYYY-MM-DD'), '')";
+        return "COALESCE(TO_CHAR(" + quotedCol + ", '" + resolvePostgreSqlTemporalFormat("date",
+                "YYYY-MM-DD", "YYYY-MM-DD") + "'), '')";
     }
 
     /**
@@ -140,7 +141,8 @@ public class PostgreSQLDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeTime(String quotedCol) {
-        return "COALESCE(TO_CHAR(" + quotedCol + ", 'HH24:MI:SS'), '')";
+        return "COALESCE(TO_CHAR(" + quotedCol + ", '" + resolvePostgreSqlTemporalFormat("time",
+                "HH24:MI:SS", "HH24:MI:SS") + "'), '')";
     }
 
     /**
@@ -152,8 +154,14 @@ public class PostgreSQLDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeDateTime(String quotedCol) {
-        // DATETIME: No timezone conversion, format directly
-        return "COALESCE(TO_CHAR(" + quotedCol + ", 'YYYY-MM-DD HH24:MI:SS'), '')";
+        String expression = quotedCol;
+        String targetTimezone = getTimezone("datetime", null);
+        if (targetTimezone != null && !targetTimezone.isBlank()) {
+            expression = quotedCol + " AT TIME ZONE current_setting('TIMEZONE') AT TIME ZONE '"
+                    + escapeSqlLiteral(targetTimezone) + "'";
+        }
+        return "COALESCE(TO_CHAR(" + expression + ", '" + resolvePostgreSqlTemporalFormat("datetime",
+                "YYYY-MM-DD HH24:MI:SS", "YYYY-MM-DD") + "'), '')";
     }
 
     /**
@@ -171,10 +179,10 @@ public class PostgreSQLDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeTimestamp(String quotedCol) {
-        // TIMESTAMP: Two-step timezone conversion using session timezone
-        // Step 1: AT TIME ZONE current_setting('TIMEZONE') - interpret in session timezone, returns TIMESTAMPTZ
-        // Step 2: AT TIME ZONE 'UTC' - convert to UTC, returns TIMESTAMP
-        return "COALESCE(TO_CHAR(" + quotedCol + " AT TIME ZONE current_setting('TIMEZONE') AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'), '')";
+        String targetTimezone = escapeSqlLiteral(getTimezone("timestamp", "UTC"));
+        return "COALESCE(TO_CHAR(" + quotedCol + " AT TIME ZONE current_setting('TIMEZONE') AT TIME ZONE '"
+                + targetTimezone + "', '" + resolvePostgreSqlTemporalFormat("timestamp",
+                "YYYY-MM-DD HH24:MI:SS", "YYYY-MM-DD") + "'), '')";
     }
 
     /**
@@ -188,9 +196,9 @@ public class PostgreSQLDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeTimestampWithTimezone(String quotedCol) {
-        // TIMESTAMPTZ: Direct conversion to UTC
-        // AT TIME ZONE 'UTC' converts TIMESTAMPTZ to TIMESTAMP in UTC
-        return "COALESCE(TO_CHAR(" + quotedCol + " AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'), '')";
+        String targetTimezone = escapeSqlLiteral(getTimezone("timestamp", "UTC"));
+        return "COALESCE(TO_CHAR(" + quotedCol + " AT TIME ZONE '" + targetTimezone + "', '"
+                + resolvePostgreSqlTemporalFormat("timestamp", "YYYY-MM-DD HH24:MI:SS", "YYYY-MM-DD") + "'), '')";
     }
 
     /**
@@ -208,6 +216,45 @@ public class PostgreSQLDataTypeHandler extends BaseDataTypeHandler {
     @Override
     protected String normalizeBoolean(String quotedCol) {
         return "CASE WHEN " + quotedCol + " = TRUE THEN '1' ELSE '0' END";
+    }
+
+    private String resolvePostgreSqlTemporalFormat(String dataTypeName, String defaultFormat, String dateOnlyDefaultFormat) {
+        String configuredFormat = getFormat(dataTypeName, null);
+        String effectiveDefault = isDateOnlyComparison(dataTypeName) ? dateOnlyDefaultFormat : defaultFormat;
+        if (configuredFormat == null || configuredFormat.isBlank()) {
+            return effectiveDefault;
+        }
+        return toPostgreSqlDateFormat(configuredFormat, effectiveDefault);
+    }
+
+    private String toPostgreSqlDateFormat(String javaFormat, String fallbackFormat) {
+        if (!isSupportedJavaTemporalFormat(javaFormat)) {
+            log.warn("Unsupported PostgreSQL temporal format '{}', falling back to '{}'", javaFormat, fallbackFormat);
+            return fallbackFormat;
+        }
+        return javaFormat
+                .replace("yyyy", "YYYY")
+                .replace("MM", "MM")
+                .replace("dd", "DD")
+                .replace("HH", "HH24")
+                .replace("mm", "MI")
+                .replace("ss", "SS");
+    }
+
+    private boolean isSupportedJavaTemporalFormat(String format) {
+        String residual = format
+                .replace("yyyy", "")
+                .replace("MM", "")
+                .replace("dd", "")
+                .replace("HH", "")
+                .replace("mm", "")
+                .replace("ss", "")
+                .replace("-", "")
+                .replace(":", "")
+                .replace(" ", "")
+                .replace("/", "")
+                .replace("T", "");
+        return residual.isEmpty();
     }
 
     @Override

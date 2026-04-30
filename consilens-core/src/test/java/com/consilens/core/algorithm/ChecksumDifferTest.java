@@ -6,6 +6,7 @@ import com.consilens.core.database.adpter.DatabaseAdapter.RowMapper;
 import com.consilens.core.database.connection.ConnectionPool;
 import com.consilens.core.diff.DiffResult;
 import com.consilens.core.diff.DiffResult.InfoTreeNode;
+import com.consilens.core.thread.ExecutorProvider;
 import com.consilens.connector.api.model.TablePath;
 import com.consilens.connector.api.model.PoolConfiguration;
 import com.consilens.core.segment.TableSegment;
@@ -35,6 +36,9 @@ class ChecksumDifferTest {
 
         @Mock
         private DatabaseAdapter mockAdapter2;
+
+        @Mock
+        private ExecutorProvider mockExecutorProvider;
 
         private TableDiffer.DifferConfig config;
         private ChecksumDiffer differ;
@@ -103,6 +107,22 @@ class ChecksumDifferTest {
                         assertDoesNotThrow(() -> new ChecksumDiffer(
                                         new TableDiffer.DifferConfig(100, 1000, false,
                                                 ChecksumAlgorithm.CONCAT)));
+                }
+        }
+
+        @Nested
+        @DisplayName("线程池所有权测试")
+        class ExecutorOwnershipTests {
+
+                @Test
+                @DisplayName("外部注入的 ExecutorProvider 不应被自动关闭")
+                void shouldNotShutdownInjectedExecutorProvider() {
+                        ChecksumDiffer externalDiffer = new ChecksumDiffer(config, mockExecutorProvider);
+
+                        externalDiffer.close();
+
+                        verify(mockExecutorProvider, never()).shutdown();
+                        verify(mockExecutorProvider, never()).shutdownNow();
                 }
         }
 

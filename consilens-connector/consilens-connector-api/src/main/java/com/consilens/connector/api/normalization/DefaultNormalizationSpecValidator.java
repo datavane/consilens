@@ -17,6 +17,8 @@ public class DefaultNormalizationSpecValidator implements NormalizationSpecValid
             "datetime", "timestamp", "boolean", "binary", "json"));
 
     private static final Set<String> SUPPORTED_BINARY_FORMATS = new HashSet<>(Arrays.asList("hex", "base64"));
+    private static final Set<String> SUPPORTED_TEMPORAL_COMPARISON_MODES = new HashSet<>(
+            Arrays.asList("EXACT", "DATE_ONLY", "TRUNCATE_TO_SECOND", "TRUNCATE_TO_DAY"));
 
     private final NormalizationOperationRegistry operationRegistry;
 
@@ -102,6 +104,7 @@ public class DefaultNormalizationSpecValidator implements NormalizationSpecValid
         } else if ("format_datetime".equals(operation)) {
             validateString(params.get("format"), "format", scope, operation, false);
             validateTimezone(params.get("timezone"), scope, operation);
+            validateTemporalComparisonMode(params.get("comparisonMode"), scope, operation);
         } else if ("encode".equals(operation)) {
             Object encoding = params.get("encoding") != null ? params.get("encoding") : params.get("format");
             validateBinaryFormat(encoding, scope, operation);
@@ -158,6 +161,18 @@ public class DefaultNormalizationSpecValidator implements NormalizationSpecValid
             ZoneId.of((String) value);
         } catch (Exception e) {
             throw new ConnectorException("Invalid timezone '" + value + "' for operation '" + operation + "' in " + scope, e);
+        }
+    }
+
+    private void validateTemporalComparisonMode(Object value, String scope, String operation) {
+        if (value == null) {
+            return;
+        }
+        validateString(value, "comparisonMode", scope, operation, false);
+        String normalized = ((String) value).trim().toUpperCase();
+        if (!SUPPORTED_TEMPORAL_COMPARISON_MODES.contains(normalized)) {
+            throw new ConnectorException("Parameter 'comparisonMode' for operation '" + operation + "' in " + scope
+                    + " must be one of " + SUPPORTED_TEMPORAL_COMPARISON_MODES);
         }
     }
 

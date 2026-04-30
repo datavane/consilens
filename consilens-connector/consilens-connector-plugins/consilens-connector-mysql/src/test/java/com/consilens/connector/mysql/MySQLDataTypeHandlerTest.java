@@ -1,8 +1,11 @@
 package com.consilens.connector.mysql;
 
 import com.consilens.connector.api.model.DataType;
+import com.consilens.conncetor.base.jdbc.JdbcDatasetHandle;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -31,6 +34,19 @@ class MySQLDataTypeHandlerTest {
         String result = handler.normalizeColumn("created_at", DataType.TIMESTAMP);
         assertEquals(
                 "COALESCE(DATE_FORMAT(CONVERT_TZ(`created_at`, @@session.time_zone, '+00:00'), '%Y-%m-%d %H:%i:%s'), '')",
+                result);
+    }
+
+    @Test
+    void testNormalizeColumn_TimestampDateOnlyMode() {
+        JdbcDatasetHandle.JdbcTypeNormalizationRule rule = new JdbcDatasetHandle.JdbcTypeNormalizationRule();
+        rule.setComparisonMode("DATE_ONLY");
+        handler = new MySQLDataTypeHandler(capabilityProvider, Map.of("timestamp", rule));
+
+        String result = handler.normalizeColumn("created_at", DataType.TIMESTAMP);
+
+        assertEquals(
+                "COALESCE(DATE_FORMAT(CONVERT_TZ(`created_at`, @@session.time_zone, '+00:00'), '%Y-%m-%d'), '')",
                 result);
     }
 

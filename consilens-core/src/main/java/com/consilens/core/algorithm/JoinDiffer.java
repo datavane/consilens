@@ -6,6 +6,7 @@ import com.consilens.core.diff.DiffRow;
 import com.consilens.core.diff.DiffOperation;
 import com.consilens.core.diff.InfoTreeRecorder;
 import com.consilens.core.database.adpter.DatabaseAdapter;
+import com.consilens.core.thread.ExecutorProvider;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 
@@ -29,7 +30,13 @@ public class JoinDiffer extends TableDiffer implements AutoCloseable {
     private final AtomicLong segmentSequence = new AtomicLong(0);
 
     public JoinDiffer(DifferConfig config, JoinDifferOptions options) {
-        super(config);
+        this(config, options, null);
+    }
+
+    public JoinDiffer(DifferConfig config, JoinDifferOptions options, ExecutorProvider executorProvider) {
+        super(config,
+                executorProvider != null ? executorProvider : new ExecutorProvider(config.getConcurrencyConfig()),
+                executorProvider == null);
         this.validateUniqueKeys = options.isValidateUniqueKeys();
         this.performanceMonitor = new JoinPerformanceMonitor();
     }

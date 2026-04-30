@@ -19,19 +19,39 @@ public class ExecutorProvider {
 
     private final ExecutorService ioExecutor;
     private final ExecutorService cpuExecutor;
+    private final boolean managesExecutors;
 
     public ExecutorProvider(ConcurrencyConfig config) {
         ConcurrencyConfig effective = config != null ? config : ConcurrencyConfig.defaultConfig();
         this.ioExecutor = createExecutor(effective.getIo(), "io");
         this.cpuExecutor = createExecutor(effective.getCpu(), "cpu");
+        this.managesExecutors = true;
+    }
+
+    public ExecutorProvider(ExecutorService ioExecutor, ExecutorService cpuExecutor) {
+        this(ioExecutor, cpuExecutor, false);
+    }
+
+    public ExecutorProvider(ExecutorService ioExecutor, ExecutorService cpuExecutor, boolean managesExecutors) {
+        this.ioExecutor = ioExecutor;
+        this.cpuExecutor = cpuExecutor;
+        this.managesExecutors = managesExecutors;
     }
 
     public void shutdown() {
+        if (!managesExecutors) {
+            log.debug("Skipping executor shutdown because ExecutorProvider does not own the executors");
+            return;
+        }
         shutdownExecutor("io", ioExecutor);
         shutdownExecutor("cpu", cpuExecutor);
     }
 
     public void shutdownNow() {
+        if (!managesExecutors) {
+            log.debug("Skipping immediate executor shutdown because ExecutorProvider does not own the executors");
+            return;
+        }
         shutdownExecutorNow("io", ioExecutor);
         shutdownExecutorNow("cpu", cpuExecutor);
     }
