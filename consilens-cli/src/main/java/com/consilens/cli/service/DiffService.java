@@ -60,6 +60,8 @@ public class DiffService {
 
         DiffLifecycle lifecycle = buildLifecycle(config);
         DiffContext diffContext = buildDiffContext(config);
+        CliDiffResult result = null;
+        Exception failure = null;
 
         try {
             lifecycle.onDiffStart(diffContext);
@@ -70,7 +72,7 @@ public class DiffService {
             lifecycle.onDiffComplete(coreResult, diffContext);
 
             // Convert core result to CLI result
-            CliDiffResult result = convertToCLIResult(coreResult, config.getStrategyMode(), config);
+            result = convertToCLIResult(coreResult, config.getStrategyMode(), config);
             if (result.getInfoTree() != null) {
                 log.info(formatInfoTree(result.getInfoTree()));
             }
@@ -81,23 +83,30 @@ public class DiffService {
 
             log.info("Diff operation completed in {} ms with {} differences", duration, result.getTotalDifferences());
 
-            return result;
-
         } catch (Exception e) {
             log.error("Diff operation failed", e);
+            failure = new Exception("Diff operation failed: " + e.getMessage(), e);
             try {
                 lifecycle.onDiffError(diffContext, e);
             } catch (Exception lifecycleEx) {
-                log.warn("Lifecycle onDiffError failed", lifecycleEx);
+                failure.addSuppressed(lifecycleEx);
             }
-            throw new Exception("Diff operation failed: " + e.getMessage(), e);
         } finally {
             try {
                 lifecycle.close();
-            } catch (Exception e) {
-                log.warn("Lifecycle close failed", e);
+            } catch (Exception closeEx) {
+                if (failure != null) {
+                    failure.addSuppressed(closeEx);
+                } else {
+                    failure = new Exception("Lifecycle close failed: " + closeEx.getMessage(), closeEx);
+                }
             }
         }
+
+        if (failure != null) {
+            throw failure;
+        }
+        return result;
     }
 
     protected CompareRuntime createCompareRuntime() {
@@ -190,7 +199,9 @@ public class DiffService {
                 .targetRowCount((int) stats.getTargetRowCount())
                 .differences(convertDiffRows(coreResult.getDifferences()))
                 .tableMetadata(tableMetadata)
-                .infoTree(coreResult.getInfoTree().isPresent() ? coreResult.getInfoTree().orElse(null) : null)
+                .infoTree(coreResult.getInfoTree() != null && coreResult.getInfoTree().isPresent()
+                        ? coreResult.getInfoTree().orElse(null)
+                        : null)
                 .build()
                 .withSortKeyColumns(sortKeyColumns);
     }

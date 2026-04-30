@@ -86,6 +86,16 @@ class ChecksumDifferTest {
                 }
 
                 @Test
+                @DisplayName("测试二分阈值必须大于0")
+                void testBisectionThresholdMustBePositive() {
+                        IllegalArgumentException exception = assertThrows(
+                                        IllegalArgumentException.class,
+                                        () -> new ChecksumDiffer(new TableDiffer.DifferConfig(4, 0, false,
+                                                ChecksumAlgorithm.CONCAT)));
+                        assertTrue(exception.getMessage().contains("Bisection threshold must be greater than 0"));
+                }
+
+                @Test
                 @DisplayName("测试有效配置创建成功")
                 void testValidConfiguration() {
                         // Given: bisectionFactor=4 < bisectionThreshold=100 (valid)

@@ -111,10 +111,16 @@ public class JdbcDatasetHandle implements DatasetHandle, RelationalDatasetSuppor
 
     @Override
     public SchemaDescriptor getSchema() throws ConnectorException {
-        if (schema == null) {
-            schema = discoverSchema();
+        SchemaDescriptor local = schema;
+        if (local != null) {
+            return local;
         }
-        return schema;
+        synchronized (this) {
+            if (schema == null) {
+                schema = discoverSchema();
+            }
+            return schema;
+        }
     }
 
     @Override

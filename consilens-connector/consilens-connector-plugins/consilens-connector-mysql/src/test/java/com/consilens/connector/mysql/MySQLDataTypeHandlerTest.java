@@ -43,6 +43,14 @@ class MySQLDataTypeHandlerTest {
     }
 
     @Test
+    void testNormalizeColumn_Bit() {
+        String result = handler.normalizeColumn("is_active", DataType.BIT);
+        assertTrue(result.contains("CASE"));
+        assertTrue(result.contains("'1'"));
+        assertTrue(result.contains("'0'"));
+    }
+
+    @Test
     void testGetDataTypeMappingVarchar() {
         assertEquals("VARCHAR(100)", handler.getDataTypeMapping("varchar", 100, 0, 0));
         assertEquals("VARCHAR(255)", handler.getDataTypeMapping("varchar", 0, 0, 0));

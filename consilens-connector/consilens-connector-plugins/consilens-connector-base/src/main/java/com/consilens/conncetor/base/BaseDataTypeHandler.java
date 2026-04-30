@@ -6,10 +6,31 @@ import com.consilens.connector.api.model.DataType;
 import lombok.extern.slf4j.Slf4j;
 
 import java.lang.reflect.Method;
+import java.util.Locale;
 import java.util.Map;
 
 @Slf4j
 public class BaseDataTypeHandler implements DataTypeHandler {
+
+    private static final Map<String, DataType> DATA_TYPE_ALIASES = Map.ofEntries(
+            Map.entry("BOOL", DataType.BOOLEAN),
+            Map.entry("BIT", DataType.BIT),
+            Map.entry("BPCHAR", DataType.CHAR),
+            Map.entry("INT", DataType.INTEGER),
+            Map.entry("INT2", DataType.SMALLINT),
+            Map.entry("INT4", DataType.INTEGER),
+            Map.entry("INT8", DataType.BIGINT),
+            Map.entry("DOUBLE_PRECISION", DataType.DOUBLE),
+            Map.entry("CHARACTER_VARYING", DataType.VARCHAR),
+            Map.entry("CHARACTER", DataType.CHAR),
+            Map.entry("ENUM", DataType.VARCHAR),
+            Map.entry("SET", DataType.VARCHAR),
+            Map.entry("TIMESTAMP_WITH_TIME_ZONE", DataType.TIMESTAMP_WITH_TIMEZONE),
+            Map.entry("TIMESTAMP_WITHOUT_TIME_ZONE", DataType.TIMESTAMP),
+            Map.entry("TIME_WITH_TIME_ZONE", DataType.TIME_WITH_TIME_ZONE),
+            Map.entry("TIME_WITHOUT_TIME_ZONE", DataType.TIME),
+            Map.entry("DATETIME2", DataType.DATETIME)
+    );
 
     private final CapabilityProvider capabilityProvider;
     protected final Map<String, ?> normalizationConfig;
@@ -88,8 +109,8 @@ public class BaseDataTypeHandler implements DataTypeHandler {
         // Log normalization at DEBUG level
         log.debug("BaseDataTypeHandler.normalizeColumn: column='{}', dataType={}", columnName, dataType);
 
-        if (dataType == null) {
-            log.debug("  -> Using normalizeDefault (dataType is null)");
+        if (dataType == null || dataType == DataType.UNKNOWN) {
+            log.warn("Unsupported data type normalization for column '{}', falling back to default normalization", columnName);
             return normalizeDefault(quotedCol);
         }
         
@@ -118,6 +139,7 @@ public class BaseDataTypeHandler implements DataTypeHandler {
                 return normalizeDecimal(quotedCol);
 
             case BOOLEAN:
+            case BIT:
                 log.debug("  -> Using normalizeBoolean");
                 return normalizeBoolean(quotedCol);
 
@@ -154,7 +176,8 @@ public class BaseDataTypeHandler implements DataTypeHandler {
                 return normalizeJson(quotedCol);
 
             default:
-                log.debug("  -> Using normalizeDefault (default case)");
+                log.warn("Unsupported data type normalization for column '{}': {}, falling back to default normalization",
+                        columnName, dataType);
                 return normalizeDefault(quotedCol);
         }
     }
@@ -289,21 +312,34 @@ public class BaseDataTypeHandler implements DataTypeHandler {
 
     @Override
     public DataType convertToDataType(String sourceType) {
-        if (sourceType == null) {
+        if (sourceType == null || sourceType.isBlank()) {
             return DataType.UNKNOWN;
         }
-        String upperType = sourceType.toUpperCase();
+
+        String canonicalType = canonicalizeTypeName(sourceType);
+        DataType aliasType = DATA_TYPE_ALIASES.get(canonicalType);
+        if (aliasType != null) {
+            return aliasType;
+        }
+
         try {
-            return DataType.valueOf(upperType);
+            return DataType.valueOf(canonicalType);
         } catch (IllegalArgumentException e) {
-            // Try to find by display name or partial match
             for (DataType dt : DataType.values()) {
-                if (dt.getDisplayName().equalsIgnoreCase(upperType)) {
+                if (dt.getDisplayName().equalsIgnoreCase(canonicalType)
+                        || dt.getDisplayName().replace(' ', '_').equalsIgnoreCase(canonicalType)) {
                     return dt;
                 }
             }
             return DataType.UNKNOWN;
         }
+    }
+
+    private String canonicalizeTypeName(String sourceType) {
+        String upperType = sourceType.trim().toUpperCase(Locale.ROOT);
+        upperType = upperType.replaceAll("\\s*\\([^)]*\\)", "");
+        upperType = upperType.replaceAll("\\s+", " ").trim();
+        return upperType.replace(' ', '_');
     }
 
     @Override

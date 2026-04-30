@@ -41,6 +41,7 @@ public class ExecutorProvider {
                 ? poolConfig
                 : ("io".equals(name) ? ConcurrencyConfig.PoolConfig.defaultIo(1)
                                      : ConcurrencyConfig.PoolConfig.defaultCpu(1));
+        effective.validate(name);
         ThreadFactory factory = new NamedThreadFactory(
                 effective.getThreadNamePrefix() != null ? effective.getThreadNamePrefix() : "consilens-" + name + "-"
         );

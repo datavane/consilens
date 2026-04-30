@@ -48,6 +48,9 @@ public class TableDiffRecordSink implements Sink {
         dataSource = createDataSource(sinkConfig);
         tableName = sinkConfig.resolveTableName();
         batchSize = sinkConfig.getBatchSize();
+        if (batchSize <= 0) {
+            throw new IllegalArgumentException("sink.batchSize 必须大于 0");
+        }
 
         sourceColumns = context.getSourceColumnNames() != null
                 ? context.getSourceColumnNames() : new ArrayList<>();
@@ -70,18 +73,24 @@ public class TableDiffRecordSink implements Sink {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(insertSql)) {
             conn.setAutoCommit(false);
-            int count = 0;
-            for (DiffRow row : rows) {
-                bindInsertParams(ps, row, context);
-                ps.addBatch();
-                if (++count % batchSize == 0) {
-                    ps.executeBatch();
-                    conn.commit();
+            try {
+                int count = 0;
+                for (DiffRow row : rows) {
+                    bindInsertParams(ps, row, context);
+                    ps.addBatch();
+                    if (++count % batchSize == 0) {
+                        ps.executeBatch();
+                    }
                 }
+                if (count % batchSize != 0) {
+                    ps.executeBatch();
+                }
+                conn.commit();
+                log.debug("TableDiffRecordSink inserted {} rows", rows.size());
+            } catch (SQLException | RuntimeException e) {
+                rollbackQuietly(conn);
+                throw e;
             }
-            ps.executeBatch();
-            conn.commit();
-            log.debug("TableDiffRecordSink inserted {} rows", rows.size());
         }
     }
 
@@ -214,6 +223,17 @@ public class TableDiffRecordSink implements Sink {
             }
         }
         return map;
+    }
+
+    private void rollbackQuietly(Connection conn) {
+        if (conn == null) {
+            return;
+        }
+        try {
+            conn.rollback();
+        } catch (SQLException rollbackError) {
+            log.warn("TableDiffRecordSink rollback failed", rollbackError);
+        }
     }
 
     /**

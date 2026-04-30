@@ -26,8 +26,11 @@ public class CheckpointSelector {
      * Choose optimal checkpoints for the given key range.
      */
     public List<KeyVector> chooseCheckpoints(KeyVector minKey, KeyVector maxKey, int preferredCount) {
-        if (minKey.isGreaterThanOrEqual(maxKey)) {
-            throw new IllegalArgumentException("minKey must be less than maxKey");
+        if (minKey.isGreaterThan(maxKey)) {
+            throw new IllegalArgumentException("minKey must not be greater than maxKey");
+        }
+        if (minKey.equals(maxKey)) {
+            return List.of(minKey, maxKey);
         }
 
         // Calculate the total space size

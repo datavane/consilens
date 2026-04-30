@@ -71,4 +71,9 @@ class PostgreSQLDataTypeHandlerTest {
         String result = handler.getDataTypeMapping("jsonb", 0, 0, 0);
         assertEquals("JSONB", result);
     }
+
+    @Test
+    void testConvertBpcharToChar() {
+        assertEquals(DataType.CHAR, handler.convertToDataType("bpchar"));
+    }
 }

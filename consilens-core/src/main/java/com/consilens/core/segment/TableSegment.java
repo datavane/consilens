@@ -13,8 +13,11 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Represents a segment of table data for comparison.
@@ -23,6 +26,17 @@ import java.util.Set;
 @Data
 @Builder(toBuilder = true)
 public class TableSegment {
+
+    private static final Pattern CUSTOM_WHERE_TOKEN_PATTERN = Pattern.compile(
+            "\\s+|<=|>=|<>|!=|=|<|>|\\(|\\)|,|-?\\d+(?:\\.\\d+)?|'(?:''|[^'])*'|[A-Za-z_][A-Za-z0-9_]*");
+
+    private static final Set<String> ALLOWED_WHERE_KEYWORDS = Set.of(
+            "AND", "OR", "NOT", "IN", "IS", "NULL", "LIKE", "BETWEEN", "TRUE", "FALSE");
+
+    private static final Set<String> BLOCKED_WHERE_KEYWORDS = Set.of(
+            "SELECT", "UNION", "DROP", "DELETE", "INSERT", "UPDATE", "ALTER", "CREATE",
+            "TRUNCATE", "MERGE", "CALL", "EXEC", "EXECUTE", "FROM", "JOIN", "HAVING",
+            "ORDER", "GROUP", "LIMIT", "OFFSET", "WITH");
 
     // Database and table identification
     private DatabaseAdapter database;
@@ -157,15 +171,16 @@ public class TableSegment {
 
                 long minVal = ((Number) minValue).longValue();
                 long maxVal = ((Number) maxValue).longValue();
-                long range = Math.max(1, maxVal - minVal);
-
-                // Check for overflow
-                if (estimatedRows > Long.MAX_VALUE / range) {
+                long diff = Math.subtractExact(maxVal, minVal);
+                long range = Math.max(1L, diff);
+                if (range <= 0) {
                     return Long.MAX_VALUE;
                 }
-                estimatedRows *= range;
+                estimatedRows = Math.multiplyExact(estimatedRows, range);
             }
             return estimatedRows;
+        } catch (ArithmeticException e) {
+            return Long.MAX_VALUE;
         } catch (Exception e) {
             log.warn("Failed to estimate segment size", e);
             return -1; // Unknown size
@@ -409,14 +424,9 @@ public class TableSegment {
 
         // Add custom where clause
         if (whereClause != null && whereClause.isPresent()) {
-            // Basic validation for custom where clause to prevent obvious injection
-            // In a real scenario, this should be more robust or use a parser
             String customWhere = whereClause.get();
-            if (customWhere.toLowerCase().contains("drop table") ||
-                    customWhere.toLowerCase().contains("delete from") ||
-                    customWhere.toLowerCase().contains("update ") ||
-                    customWhere.toLowerCase().contains("insert into")) {
-                throw new IllegalArgumentException("Dangerous SQL detected in where clause");
+            if (!customWhere.isBlank()) {
+                validateCustomWhereClause(customWhere);
             }
 
             if (whereBuilder.length() > 0) {
@@ -443,6 +453,55 @@ public class TableSegment {
         if (column == null || !column.matches("^[a-zA-Z_][a-zA-Z0-9_]*$")) {
             throw new IllegalArgumentException("Invalid column name: " + column);
         }
+    }
+
+    private void validateCustomWhereClause(String customWhere) {
+        if (customWhere.contains(";") || customWhere.contains("--")
+                || customWhere.contains("/*") || customWhere.contains("*/")) {
+            throw new IllegalArgumentException("Invalid custom where clause");
+        }
+
+        Matcher matcher = CUSTOM_WHERE_TOKEN_PATTERN.matcher(customWhere);
+        int index = 0;
+        while (index < customWhere.length()) {
+            if (!matcher.find(index) || matcher.start() != index) {
+                throw new IllegalArgumentException("Unsupported token in custom where clause");
+            }
+
+            String token = matcher.group();
+            if (!token.isBlank()) {
+                validateCustomWhereToken(customWhere, token, matcher.end());
+            }
+            index = matcher.end();
+        }
+    }
+
+    private void validateCustomWhereToken(String customWhere, String token, int nextIndex) {
+        if (!Character.isLetter(token.charAt(0)) && token.charAt(0) != '_') {
+            return;
+        }
+
+        String upperToken = token.toUpperCase(Locale.ROOT);
+        if (BLOCKED_WHERE_KEYWORDS.contains(upperToken)) {
+            throw new IllegalArgumentException("Invalid custom where clause");
+        }
+        if (ALLOWED_WHERE_KEYWORDS.contains(upperToken)) {
+            return;
+        }
+
+        validateColumnName(token);
+        int followingIndex = skipWhitespace(customWhere, nextIndex);
+        if (followingIndex < customWhere.length() && customWhere.charAt(followingIndex) == '(') {
+            throw new IllegalArgumentException("Function calls are not allowed in custom where clause");
+        }
+    }
+
+    private int skipWhitespace(String value, int startIndex) {
+        int index = startIndex;
+        while (index < value.length() && Character.isWhitespace(value.charAt(index))) {
+            index++;
+        }
+        return index;
     }
 
     /**
@@ -526,13 +585,16 @@ public class TableSegment {
             return "NULL";
         } else if (value instanceof String) {
             return "'" + escapeSQL((String) value) + "'";
-        } else if (value instanceof java.time.Instant) {
+        } else if (value instanceof Boolean) {
+            return (Boolean) value ? "TRUE" : "FALSE";
+        } else if (value instanceof java.time.temporal.TemporalAccessor) {
             return "'" + value.toString() + "'";
+        } else if (value instanceof java.util.Date) {
+            return "'" + new java.sql.Timestamp(((java.util.Date) value).getTime()) + "'";
         } else if (value instanceof Number) {
             return value.toString();
         } else {
-            // Fallback for other types, but still escape if it's treated as string
-            return "'" + escapeSQL(value.toString()) + "'";
+            throw new IllegalArgumentException("Unsupported key value type: " + value.getClass().getName());
         }
     }
 
