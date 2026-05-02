@@ -117,7 +117,8 @@ public class MySQLDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeDate(String quotedCol) {
-        return "COALESCE(DATE_FORMAT(" + quotedCol + ", '%Y-%m-%d'), '')";
+        return "COALESCE(DATE_FORMAT(" + quotedCol + ", '" + resolveMySqlTemporalFormat("date",
+                "%Y-%m-%d", "%Y-%m-%d") + "'), '')";
     }
 
     /**
@@ -125,7 +126,8 @@ public class MySQLDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeTime(String quotedCol) {
-        return "COALESCE(TIME_FORMAT(" + quotedCol + ", '%H:%i:%s'), '')";
+        return "COALESCE(TIME_FORMAT(" + quotedCol + ", '" + resolveMySqlTemporalFormat("time",
+                "%H:%i:%s", "%H:%i:%s") + "'), '')";
     }
 
     /**
@@ -141,9 +143,10 @@ public class MySQLDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeDateTime(String quotedCol) {
-        // DATETIME: Convert to UTC assuming it's in session timezone
-        // This ensures consistency with PostgreSQL TIMESTAMPTZ
-        return "COALESCE(DATE_FORMAT(CONVERT_TZ(" + quotedCol + ", @@session.time_zone, '+00:00'), '%Y-%m-%d %H:%i:%s'), '')";
+        String targetTimezone = resolveMySqlTimezone("datetime", "+00:00");
+        String format = resolveMySqlTemporalFormat("datetime", "%Y-%m-%d %H:%i:%s", "%Y-%m-%d");
+        return "COALESCE(DATE_FORMAT(CONVERT_TZ(" + quotedCol + ", @@session.time_zone, '"
+                + targetTimezone + "'), '" + format + "'), '')";
     }
 
     /**
@@ -156,8 +159,10 @@ public class MySQLDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeTimestamp(String quotedCol) {
-        // Same as normalizeDateTime for MySQL
-        return "COALESCE(DATE_FORMAT(CONVERT_TZ(" + quotedCol + ", @@session.time_zone, '+00:00'), '%Y-%m-%d %H:%i:%s'), '')";
+        String targetTimezone = resolveMySqlTimezone("timestamp", "+00:00");
+        String format = resolveMySqlTemporalFormat("timestamp", "%Y-%m-%d %H:%i:%s", "%Y-%m-%d");
+        return "COALESCE(DATE_FORMAT(CONVERT_TZ(" + quotedCol + ", @@session.time_zone, '"
+                + targetTimezone + "'), '" + format + "'), '')";
     }
 
     /**
@@ -170,8 +175,10 @@ public class MySQLDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeTimestampWithTimezone(String quotedCol) {
-        // MySQL TIMESTAMP is already timezone-aware, same as normalizeTimestamp
-        return "COALESCE(DATE_FORMAT(CONVERT_TZ(" + quotedCol + ", @@session.time_zone, '+00:00'), '%Y-%m-%d %H:%i:%s'), '')";
+        String targetTimezone = resolveMySqlTimezone("timestamp", "+00:00");
+        String format = resolveMySqlTemporalFormat("timestamp", "%Y-%m-%d %H:%i:%s", "%Y-%m-%d");
+        return "COALESCE(DATE_FORMAT(CONVERT_TZ(" + quotedCol + ", @@session.time_zone, '"
+                + targetTimezone + "'), '" + format + "'), '')";
     }
 
     /**
@@ -208,6 +215,53 @@ public class MySQLDataTypeHandler extends BaseDataTypeHandler {
     @Override
     protected String normalizeDefault(String quotedCol) {
         return "COALESCE(TRIM(CAST(" + quotedCol + " AS CHAR)), '0')";
+    }
+
+    private String resolveMySqlTimezone(String dataTypeName, String defaultTimezone) {
+        String timezone = getTimezone(dataTypeName, defaultTimezone);
+        if ("UTC".equalsIgnoreCase(timezone)) {
+            return "+00:00";
+        }
+        return escapeSqlLiteral(timezone);
+    }
+
+    private String resolveMySqlTemporalFormat(String dataTypeName, String defaultFormat, String dateOnlyDefaultFormat) {
+        String configuredFormat = getFormat(dataTypeName, null);
+        String effectiveDefault = isDateOnlyComparison(dataTypeName) ? dateOnlyDefaultFormat : defaultFormat;
+        if (configuredFormat == null || configuredFormat.isBlank()) {
+            return effectiveDefault;
+        }
+        return toMySqlDateFormat(configuredFormat, effectiveDefault);
+    }
+
+    private String toMySqlDateFormat(String javaFormat, String fallbackFormat) {
+        if (!isSupportedJavaTemporalFormat(javaFormat)) {
+            log.warn("Unsupported MySQL temporal format '{}', falling back to '{}'", javaFormat, fallbackFormat);
+            return fallbackFormat;
+        }
+        return javaFormat
+                .replace("yyyy", "%Y")
+                .replace("MM", "%m")
+                .replace("dd", "%d")
+                .replace("HH", "%H")
+                .replace("mm", "%i")
+                .replace("ss", "%s");
+    }
+
+    private boolean isSupportedJavaTemporalFormat(String format) {
+        String residual = format
+                .replace("yyyy", "")
+                .replace("MM", "")
+                .replace("dd", "")
+                .replace("HH", "")
+                .replace("mm", "")
+                .replace("ss", "")
+                .replace("-", "")
+                .replace(":", "")
+                .replace(" ", "")
+                .replace("/", "")
+                .replace("T", "");
+        return residual.isEmpty();
     }
 
     @Override

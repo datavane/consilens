@@ -1,8 +1,11 @@
 package com.consilens.connector.postgresql;
 
 import com.consilens.connector.api.model.DataType;
+import com.consilens.conncetor.base.jdbc.JdbcDatasetHandle;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -31,6 +34,20 @@ class PostgreSQLDataTypeHandlerTest {
         String result = handler.normalizeColumn("created_at", DataType.TIMESTAMP);
         assertEquals(
                 "COALESCE(TO_CHAR(\"created_at\" AT TIME ZONE current_setting('TIMEZONE') AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'), '')",
+                result);
+    }
+
+    @Test
+    void testNormalizeColumn_TimestampDateOnlyModeWithTimezone() {
+        JdbcDatasetHandle.JdbcTypeNormalizationRule rule = new JdbcDatasetHandle.JdbcTypeNormalizationRule();
+        rule.setComparisonMode("TRUNCATE_TO_DAY");
+        rule.setTimezone("Asia/Shanghai");
+        handler = new PostgreSQLDataTypeHandler(capabilityProvider, Map.of("timestamp", rule));
+
+        String result = handler.normalizeColumn("created_at", DataType.TIMESTAMP);
+
+        assertEquals(
+                "COALESCE(TO_CHAR(\"created_at\" AT TIME ZONE current_setting('TIMEZONE') AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD'), '')",
                 result);
     }
 
@@ -70,5 +87,10 @@ class PostgreSQLDataTypeHandlerTest {
     void testGetDataTypeMappingJSON() {
         String result = handler.getDataTypeMapping("jsonb", 0, 0, 0);
         assertEquals("JSONB", result);
+    }
+
+    @Test
+    void testConvertBpcharToChar() {
+        assertEquals(DataType.CHAR, handler.convertToDataType("bpchar"));
     }
 }

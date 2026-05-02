@@ -101,6 +101,18 @@ public class TableSegmentTest {
     }
 
     @Test
+    public void testApproximateSizeReturnsLongMaxValueOnOverflow() {
+        TableSegment segment = TableSegment.builder()
+                .tablePath(TablePath.of("test_table"))
+                .keyColumns(Arrays.asList("id_part1", "id_part2"))
+                .minKey(Optional.of(Arrays.asList(0L, 0L)))
+                .maxKey(Optional.of(Arrays.asList(Long.MAX_VALUE, 3L)))
+                .build();
+
+        assertEquals(Long.MAX_VALUE, segment.approximateSize());
+    }
+
+    @Test
     public void testChooseCheckpoints() {
         TableSegment segment = TableSegment.builder()
                 .tablePath(TablePath.of("test_table"))
@@ -169,6 +181,36 @@ public class TableSegmentTest {
         assertTrue(whereClause.contains("(id > 1 OR (id = 1 AND type >= 'A'))"));
         assertTrue(whereClause.contains("(id < 100 OR (id = 100 AND type < 'Z'))"));
         assertTrue(whereClause.contains("status = 'active'"));
+    }
+
+    @Test
+    public void testBuildWhereClauseRejectsUnsafeCustomClause() {
+        TableSegment segment = TableSegment.builder()
+                .tablePath(TablePath.of("test_table"))
+                .keyColumns(Arrays.asList("id"))
+                .minKey(Optional.of(Arrays.asList(1)))
+                .maxKey(Optional.of(Arrays.asList(10)))
+                .whereClause(Optional.of("status = 'active'; DROP TABLE user_data"))
+                .build();
+
+        assertThrows(IllegalArgumentException.class, segment::buildWhereClause);
+    }
+
+    @Test
+    public void testBuildWhereClauseAllowsSafeCustomClause() {
+        TableSegment segment = TableSegment.builder()
+                .tablePath(TablePath.of("test_table"))
+                .keyColumns(Arrays.asList("id"))
+                .minKey(Optional.of(Arrays.asList(1)))
+                .maxKey(Optional.of(Arrays.asList(10)))
+                .whereClause(Optional.of("status = 'active' AND region IN ('cn', 'us') AND archived IS NULL"))
+                .build();
+
+        String whereClause = segment.buildWhereClause();
+
+        assertTrue(whereClause.contains("status = 'active'"));
+        assertTrue(whereClause.contains("region IN ('cn', 'us')"));
+        assertTrue(whereClause.contains("archived IS NULL"));
     }
 
     @Test

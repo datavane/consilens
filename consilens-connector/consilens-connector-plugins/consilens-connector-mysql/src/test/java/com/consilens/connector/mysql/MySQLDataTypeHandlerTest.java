@@ -1,8 +1,11 @@
 package com.consilens.connector.mysql;
 
 import com.consilens.connector.api.model.DataType;
+import com.consilens.conncetor.base.jdbc.JdbcDatasetHandle;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -35,8 +38,29 @@ class MySQLDataTypeHandlerTest {
     }
 
     @Test
+    void testNormalizeColumn_TimestampDateOnlyMode() {
+        JdbcDatasetHandle.JdbcTypeNormalizationRule rule = new JdbcDatasetHandle.JdbcTypeNormalizationRule();
+        rule.setComparisonMode("DATE_ONLY");
+        handler = new MySQLDataTypeHandler(capabilityProvider, Map.of("timestamp", rule));
+
+        String result = handler.normalizeColumn("created_at", DataType.TIMESTAMP);
+
+        assertEquals(
+                "COALESCE(DATE_FORMAT(CONVERT_TZ(`created_at`, @@session.time_zone, '+00:00'), '%Y-%m-%d'), '')",
+                result);
+    }
+
+    @Test
     void testNormalizeColumn_Boolean() {
         String result = handler.normalizeColumn("is_active", DataType.BOOLEAN);
+        assertTrue(result.contains("CASE"));
+        assertTrue(result.contains("'1'"));
+        assertTrue(result.contains("'0'"));
+    }
+
+    @Test
+    void testNormalizeColumn_Bit() {
+        String result = handler.normalizeColumn("is_active", DataType.BIT);
         assertTrue(result.contains("CASE"));
         assertTrue(result.contains("'1'"));
         assertTrue(result.contains("'0'"));

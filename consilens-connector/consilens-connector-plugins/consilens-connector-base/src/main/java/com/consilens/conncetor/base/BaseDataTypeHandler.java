@@ -6,10 +6,34 @@ import com.consilens.connector.api.model.DataType;
 import lombok.extern.slf4j.Slf4j;
 
 import java.lang.reflect.Method;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 @Slf4j
 public class BaseDataTypeHandler implements DataTypeHandler {
+
+    private static final Set<String> DATE_ONLY_COMPARISON_MODES = Set.of("DATE_ONLY", "TRUNCATE_TO_DAY");
+
+    private static final Map<String, DataType> DATA_TYPE_ALIASES = Map.ofEntries(
+            Map.entry("BOOL", DataType.BOOLEAN),
+            Map.entry("BIT", DataType.BIT),
+            Map.entry("BPCHAR", DataType.CHAR),
+            Map.entry("INT", DataType.INTEGER),
+            Map.entry("INT2", DataType.SMALLINT),
+            Map.entry("INT4", DataType.INTEGER),
+            Map.entry("INT8", DataType.BIGINT),
+            Map.entry("DOUBLE_PRECISION", DataType.DOUBLE),
+            Map.entry("CHARACTER_VARYING", DataType.VARCHAR),
+            Map.entry("CHARACTER", DataType.CHAR),
+            Map.entry("ENUM", DataType.VARCHAR),
+            Map.entry("SET", DataType.VARCHAR),
+            Map.entry("TIMESTAMP_WITH_TIME_ZONE", DataType.TIMESTAMP_WITH_TIMEZONE),
+            Map.entry("TIMESTAMP_WITHOUT_TIME_ZONE", DataType.TIMESTAMP),
+            Map.entry("TIME_WITH_TIME_ZONE", DataType.TIME_WITH_TIME_ZONE),
+            Map.entry("TIME_WITHOUT_TIME_ZONE", DataType.TIME),
+            Map.entry("DATETIME2", DataType.DATETIME)
+    );
 
     private final CapabilityProvider capabilityProvider;
     protected final Map<String, ?> normalizationConfig;
@@ -31,25 +55,8 @@ public class BaseDataTypeHandler implements DataTypeHandler {
      * @return configured precision, or defaultPrecision if not set
      */
     protected int getPrecision(String dataTypeName, int defaultPrecision) {
-        if (normalizationConfig == null) {
-            return defaultPrecision;
-        }
-        
-        try {
-            Object rule = normalizationConfig.get(dataTypeName);
-            if (rule != null) {
-                // Get precision field via reflection
-                java.lang.reflect.Method getPrecisionMethod = rule.getClass().getMethod("getPrecision");
-                Integer precision = (Integer) getPrecisionMethod.invoke(rule);
-                if (precision != null) {
-                    return precision;
-                }
-            }
-        } catch (Exception e) {
-            log.debug("Failed to get precision config for type '{}': {}", dataTypeName, e.getMessage());
-        }
-        
-        return defaultPrecision;
+        Integer precision = getRuleValue(dataTypeName, "getPrecision", Integer.class);
+        return precision != null ? precision : defaultPrecision;
     }
 
     /**
@@ -60,25 +67,50 @@ public class BaseDataTypeHandler implements DataTypeHandler {
      * @return configured rounding flag, or defaultRounding if not set
      */
     protected boolean getRounding(String dataTypeName, boolean defaultRounding) {
+        Boolean rounding = getRuleValue(dataTypeName, "getRounding", Boolean.class);
+        return rounding != null ? rounding : defaultRounding;
+    }
+
+    protected String getFormat(String dataTypeName, String defaultFormat) {
+        String format = getRuleValue(dataTypeName, "getFormat", String.class);
+        return format != null ? format : defaultFormat;
+    }
+
+    protected String getTimezone(String dataTypeName, String defaultTimezone) {
+        String timezone = getRuleValue(dataTypeName, "getTimezone", String.class);
+        return timezone != null ? timezone : defaultTimezone;
+    }
+
+    protected String getComparisonMode(String dataTypeName, String defaultMode) {
+        String comparisonMode = getRuleValue(dataTypeName, "getComparisonMode", String.class);
+        return comparisonMode != null ? comparisonMode.trim().toUpperCase(Locale.ROOT) : defaultMode;
+    }
+
+    protected boolean isDateOnlyComparison(String dataTypeName) {
+        return DATE_ONLY_COMPARISON_MODES.contains(getComparisonMode(dataTypeName, "EXACT"));
+    }
+
+    protected String escapeSqlLiteral(String value) {
+        return value == null ? null : value.replace("'", "''");
+    }
+
+    private <T> T getRuleValue(String dataTypeName, String getterName, Class<T> valueType) {
         if (normalizationConfig == null) {
-            return defaultRounding;
+            return null;
         }
-        
+
         try {
             Object rule = normalizationConfig.get(dataTypeName);
-            if (rule != null) {
-                // Get rounding field via reflection
-                Method getRoundingMethod = rule.getClass().getMethod("getRounding");
-                Boolean rounding = (Boolean) getRoundingMethod.invoke(rule);
-                if (rounding != null) {
-                    return rounding;
-                }
+            if (rule == null) {
+                return null;
             }
+            Method getter = rule.getClass().getMethod(getterName);
+            Object value = getter.invoke(rule);
+            return valueType.isInstance(value) ? valueType.cast(value) : null;
         } catch (Exception e) {
-            log.debug("Failed to get rounding config for type '{}': {}", dataTypeName, e.getMessage());
+            log.debug("Failed to get normalization config '{}' for type '{}': {}", getterName, dataTypeName, e.getMessage());
+            return null;
         }
-        
-        return defaultRounding;
     }
 
     @Override
@@ -88,8 +120,8 @@ public class BaseDataTypeHandler implements DataTypeHandler {
         // Log normalization at DEBUG level
         log.debug("BaseDataTypeHandler.normalizeColumn: column='{}', dataType={}", columnName, dataType);
 
-        if (dataType == null) {
-            log.debug("  -> Using normalizeDefault (dataType is null)");
+        if (dataType == null || dataType == DataType.UNKNOWN) {
+            log.warn("Unsupported data type normalization for column '{}', falling back to default normalization", columnName);
             return normalizeDefault(quotedCol);
         }
         
@@ -118,6 +150,7 @@ public class BaseDataTypeHandler implements DataTypeHandler {
                 return normalizeDecimal(quotedCol);
 
             case BOOLEAN:
+            case BIT:
                 log.debug("  -> Using normalizeBoolean");
                 return normalizeBoolean(quotedCol);
 
@@ -154,7 +187,8 @@ public class BaseDataTypeHandler implements DataTypeHandler {
                 return normalizeJson(quotedCol);
 
             default:
-                log.debug("  -> Using normalizeDefault (default case)");
+                log.warn("Unsupported data type normalization for column '{}': {}, falling back to default normalization",
+                        columnName, dataType);
                 return normalizeDefault(quotedCol);
         }
     }
@@ -289,21 +323,34 @@ public class BaseDataTypeHandler implements DataTypeHandler {
 
     @Override
     public DataType convertToDataType(String sourceType) {
-        if (sourceType == null) {
+        if (sourceType == null || sourceType.isBlank()) {
             return DataType.UNKNOWN;
         }
-        String upperType = sourceType.toUpperCase();
+
+        String canonicalType = canonicalizeTypeName(sourceType);
+        DataType aliasType = DATA_TYPE_ALIASES.get(canonicalType);
+        if (aliasType != null) {
+            return aliasType;
+        }
+
         try {
-            return DataType.valueOf(upperType);
+            return DataType.valueOf(canonicalType);
         } catch (IllegalArgumentException e) {
-            // Try to find by display name or partial match
             for (DataType dt : DataType.values()) {
-                if (dt.getDisplayName().equalsIgnoreCase(upperType)) {
+                if (dt.getDisplayName().equalsIgnoreCase(canonicalType)
+                        || dt.getDisplayName().replace(' ', '_').equalsIgnoreCase(canonicalType)) {
                     return dt;
                 }
             }
             return DataType.UNKNOWN;
         }
+    }
+
+    private String canonicalizeTypeName(String sourceType) {
+        String upperType = sourceType.trim().toUpperCase(Locale.ROOT);
+        upperType = upperType.replaceAll("\\s*\\([^)]*\\)", "");
+        upperType = upperType.replaceAll("\\s+", " ").trim();
+        return upperType.replace(' ', '_');
     }
 
     @Override

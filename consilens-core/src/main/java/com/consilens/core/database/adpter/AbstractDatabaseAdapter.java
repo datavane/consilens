@@ -13,7 +13,6 @@ import lombok.extern.slf4j.Slf4j;
 
 import java.sql.*;
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Abstract base class for database adapters providing common functionality.
@@ -310,7 +309,6 @@ public abstract class AbstractDatabaseAdapter implements DatabaseAdapter {
 
     @Override
     public void close() {
-        clearStatementCache();
         connectionPool.close();
         log.info("Database adapter '{}' closed", name);
     }
@@ -474,13 +472,14 @@ public abstract class AbstractDatabaseAdapter implements DatabaseAdapter {
         if (columns.size() == 1) {
             expr.append("COALESCE(CAST(").append(columns.get(0)).append(" AS TEXT), '')");
         } else {
-            expr.append("MD5(CONCAT(");
+            expr.append("MD5(");
             for (int i = 0; i < columns.size(); i++) {
-                if (i > 0)
-                    expr.append(", '|', ");
+                if (i > 0) {
+                    expr.append(" || '|' || ");
+                }
                 expr.append("COALESCE(CAST(").append(columns.get(i)).append(" AS TEXT), '')");
             }
-            expr.append("))");
+            expr.append(")");
         }
         return expr.toString();
     }
@@ -625,39 +624,29 @@ public abstract class AbstractDatabaseAdapter implements DatabaseAdapter {
 
             Map<List<Object>, String> rowHashes = new LinkedHashMap<>();
 
-            Connection connection = null;
-            PreparedStatement statement = null;
-            ResultSet resultSet = null;
-
-            try {
-                connection = getConnection();
-                statement = connection.prepareStatement(rowHashQuery);
+            try (Connection connection = getConnection();
+                 PreparedStatement statement = connection.prepareStatement(rowHashQuery)) {
                 statement.setFetchSize(1000);
-                resultSet = statement.executeQuery();
+                try (ResultSet resultSet = statement.executeQuery()) {
+                    int keyColumnCount = segment.getKeyColumns().size();
+                    int rowCount = 0;
 
-                int keyColumnCount = segment.getKeyColumns().size();
-                int rowCount = 0;
+                    while (resultSet.next()) {
+                        // Extract primary key values
+                        List<Object> primaryKey = new ArrayList<>(keyColumnCount);
+                        for (int i = 1; i <= keyColumnCount; i++) {
+                            primaryKey.add(resultSet.getObject(i));
+                        }
 
-                while (resultSet.next()) {
-                    // Extract primary key values
-                    List<Object> primaryKey = new ArrayList<>(keyColumnCount);
-                    for (int i = 1; i <= keyColumnCount; i++) {
-                        primaryKey.add(resultSet.getObject(i));
+                        // Extract row hash (last column)
+                        String rowHash = resultSet.getString(resultSet.getMetaData().getColumnCount());
+                        rowHashes.put(primaryKey, rowHash);
+                        rowCount++;
                     }
 
-                    // Extract row hash (last column)
-                    String rowHash = resultSet.getString(resultSet.getMetaData().getColumnCount());
-                    rowHashes.put(primaryKey, rowHash);
-                    rowCount++;
+                    log.debug("Retrieved {} row hashes for segment: {}", rowHashes.size(), segment.getTablePath());
+                    return rowHashes;
                 }
-
-                log.debug("Retrieved {} row hashes for segment: {}", rowHashes.size(), segment.getTablePath());
-
-                return rowHashes;
-
-            } finally {
-                ResourceManager.closeJdbcResources(statement, resultSet);
-                releaseQuietly(connection);
             }
 
         } catch (Exception e) {
@@ -1038,40 +1027,8 @@ public abstract class AbstractDatabaseAdapter implements DatabaseAdapter {
         }
     }
 
-    /**
-     * Cache for compiled statements to improve performance.
-     */
-    protected static final Map<String, PreparedStatement> statementCache = new ConcurrentHashMap<>();
-
     // Note: DatabaseChecksumHelper will be implemented in the query package
     // For now, we'll use a simplified approach
-
-    /**
-     * Get cached prepared statement or create new one.
-     */
-    protected PreparedStatement getCachedStatement(Connection connection, String sql) throws SQLException {
-        return statementCache.computeIfAbsent(sql, key -> {
-            try {
-                return connection.prepareStatement(key);
-            } catch (SQLException e) {
-                throw new RuntimeException("Error preparing statement: " + sql, e);
-            }
-        });
-    }
-
-    /**
-     * Clear the statement cache.
-     */
-    protected void clearStatementCache() {
-        statementCache.values().forEach(stmt -> {
-            try {
-                stmt.close();
-            } catch (Exception e) {
-                log.debug("Error closing statement", e);
-            }
-        });
-        statementCache.clear();
-    }
 
 
     /**
