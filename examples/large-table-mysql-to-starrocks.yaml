@@ -75,6 +75,7 @@ result:
     - format: table
       type: diff-record
       properties:
+        type: mysql
         url: jdbc:mysql://localhost:3306/diff_results
         username: ${env.MYSQL_USER}
         password: ${env.MYSQL_PASSWORD}

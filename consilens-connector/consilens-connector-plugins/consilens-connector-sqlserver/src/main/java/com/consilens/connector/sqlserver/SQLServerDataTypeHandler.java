@@ -1,5 +1,6 @@
 package com.consilens.connector.sqlserver;
 
+import com.consilens.common.type.TypeDescriptor;
 import com.consilens.connector.api.CapabilityProvider;
 import com.consilens.connector.api.model.DataType;
 import com.consilens.conncetor.base.BaseDataTypeHandler;
@@ -23,6 +24,155 @@ public class SQLServerDataTypeHandler extends BaseDataTypeHandler {
      */
     public SQLServerDataTypeHandler(CapabilityProvider capabilityProvider, Map<String, ?> normalizationConfig) {
         super(capabilityProvider, normalizationConfig);
+    }
+
+    @Override
+    public TypeDescriptor convertToTypeDescriptor(String originType) {
+        if (originType == null || originType.isBlank()) {
+            return TypeDescriptor.builder(com.consilens.common.enums.DataType.UNKNOWN_TYPE)
+                    .originType(originType)
+                    .build();
+        }
+        String upperType = normalizeTypeExpression(originType);
+        String baseType = extractBaseType(upperType);
+        switch (baseType) {
+            case "TINYINT":
+                return TypeDescriptor.builder(com.consilens.common.enums.DataType.INTEGER_TYPE).originType(originType).bitWidth(8).unsigned(true).build();
+            case "SMALLINT":
+                return TypeDescriptor.builder(com.consilens.common.enums.DataType.INTEGER_TYPE).originType(originType).bitWidth(16).build();
+            case "INT":
+                return TypeDescriptor.builder(com.consilens.common.enums.DataType.INTEGER_TYPE).originType(originType).bitWidth(32).build();
+            case "BIGINT":
+                return TypeDescriptor.builder(com.consilens.common.enums.DataType.INTEGER_TYPE).originType(originType).bitWidth(64).build();
+            case "REAL":
+                return TypeDescriptor.builder(com.consilens.common.enums.DataType.FLOAT_TYPE).originType(originType).build();
+            case "FLOAT":
+                return TypeDescriptor.builder(com.consilens.common.enums.DataType.DOUBLE_TYPE).originType(originType).build();
+            case "DECIMAL":
+            case "NUMERIC": {
+                Integer[] precisionScale = extractPrecisionScale(upperType);
+                return TypeDescriptor.builder(com.consilens.common.enums.DataType.DECIMAL_TYPE)
+                        .originType(originType)
+                        .numericPrecision(precisionScale[0] != null ? precisionScale[0] : 18)
+                        .numericScale(precisionScale[1] != null ? precisionScale[1] : 0)
+                        .build();
+            }
+            case "MONEY":
+                return TypeDescriptor.builder(com.consilens.common.enums.DataType.DECIMAL_TYPE).originType(originType).numericPrecision(19).numericScale(4).build();
+            case "SMALLMONEY":
+                return TypeDescriptor.builder(com.consilens.common.enums.DataType.DECIMAL_TYPE).originType(originType).numericPrecision(10).numericScale(4).build();
+            case "BIT":
+                return TypeDescriptor.builder(com.consilens.common.enums.DataType.BOOLEAN_TYPE).originType(originType).build();
+            case "CHAR":
+            case "NCHAR":
+                return TypeDescriptor.builder(com.consilens.common.enums.DataType.STRING_TYPE).originType(originType).length(extractLength(upperType) != null ? extractLength(upperType) : 1).build();
+            case "VARCHAR":
+            case "NVARCHAR":
+                return TypeDescriptor.builder(com.consilens.common.enums.DataType.STRING_TYPE)
+                        .originType(originType)
+                        .textType(containsMaxLength(upperType))
+                        .length(containsMaxLength(upperType) ? null : extractLength(upperType))
+                        .build();
+            case "TEXT":
+            case "NTEXT":
+                return TypeDescriptor.builder(com.consilens.common.enums.DataType.STRING_TYPE).originType(originType).textType(true).build();
+            case "BINARY":
+                return TypeDescriptor.builder(com.consilens.common.enums.DataType.BINARY_TYPE).originType(originType).length(extractLength(upperType) != null ? extractLength(upperType) : 1).build();
+            case "VARBINARY":
+                return TypeDescriptor.builder(com.consilens.common.enums.DataType.BINARY_TYPE)
+                        .originType(originType)
+                        .blobType(containsMaxLength(upperType))
+                        .length(containsMaxLength(upperType) ? null : extractLength(upperType))
+                        .build();
+            case "IMAGE":
+                return TypeDescriptor.builder(com.consilens.common.enums.DataType.BINARY_TYPE).originType(originType).blobType(true).build();
+            case "DATE":
+                return TypeDescriptor.builder(com.consilens.common.enums.DataType.DATE_TYPE).originType(originType).build();
+            case "TIME":
+                return TypeDescriptor.builder(com.consilens.common.enums.DataType.TIME_TYPE).originType(originType).timePrecision(extractLength(upperType)).build();
+            case "DATETIME":
+            case "SMALLDATETIME":
+                return TypeDescriptor.builder(com.consilens.common.enums.DataType.TIMESTAMP_TYPE).originType(originType).build();
+            case "DATETIME2":
+                return TypeDescriptor.builder(com.consilens.common.enums.DataType.TIMESTAMP_TYPE).originType(originType).timePrecision(extractLength(upperType)).build();
+            case "DATETIMEOFFSET":
+                return TypeDescriptor.builder(com.consilens.common.enums.DataType.TIMESTAMP_TYPE).originType(originType).timePrecision(extractLength(upperType)).withTimezone(true).build();
+            case "UNIQUEIDENTIFIER":
+                return TypeDescriptor.builder(com.consilens.common.enums.DataType.UUID_TYPE).originType(originType).build();
+            case "XML":
+                return TypeDescriptor.builder(com.consilens.common.enums.DataType.XML_TYPE).originType(originType).build();
+            case "GEOMETRY":
+            case "GEOGRAPHY":
+                return TypeDescriptor.builder(com.consilens.common.enums.DataType.GEOMETRY_TYPE).originType(originType).build();
+            case "SQL_VARIANT":
+                return TypeDescriptor.builder(com.consilens.common.enums.DataType.OBJECT_TYPE).originType(originType).build();
+            default:
+                return super.convertToTypeDescriptor(originType);
+        }
+    }
+
+    @Override
+    public String convertToOriginType(TypeDescriptor typeDescriptor) {
+        if (typeDescriptor == null) {
+            return "NVARCHAR(MAX)";
+        }
+        if (typeDescriptor.getOriginType() != null && !typeDescriptor.getOriginType().isBlank()) {
+            return typeDescriptor.getOriginType();
+        }
+        switch (typeDescriptor.getType()) {
+            case INTEGER_TYPE:
+                if (typeDescriptor.isUnsigned() && typeDescriptor.getBitWidth() != null && typeDescriptor.getBitWidth() <= 8) {
+                    return "TINYINT";
+                }
+                if (typeDescriptor.getBitWidth() == null || typeDescriptor.getBitWidth() <= 16) return "SMALLINT";
+                if (typeDescriptor.getBitWidth() <= 32) return "INT";
+                return "BIGINT";
+            case FLOAT_TYPE:
+                return "REAL";
+            case DOUBLE_TYPE:
+                return "FLOAT";
+            case DECIMAL_TYPE:
+                return "DECIMAL(" + (typeDescriptor.getNumericPrecision() != null ? typeDescriptor.getNumericPrecision() : 18)
+                        + "," + (typeDescriptor.getNumericScale() != null ? typeDescriptor.getNumericScale() : 0) + ")";
+            case BOOLEAN_TYPE:
+                return "BIT";
+            case STRING_TYPE:
+                if (typeDescriptor.isTextType()) {
+                    return "NVARCHAR(MAX)";
+                }
+                if (typeDescriptor.getLength() != null && typeDescriptor.getLength() > 0) {
+                    return "NVARCHAR(" + typeDescriptor.getLength() + ")";
+                }
+                return "NVARCHAR(MAX)";
+            case BINARY_TYPE:
+                if (typeDescriptor.isBlobType()) {
+                    return "VARBINARY(MAX)";
+                }
+                if (typeDescriptor.getLength() != null && typeDescriptor.getLength() > 0) {
+                    return "VARBINARY(" + typeDescriptor.getLength() + ")";
+                }
+                return "VARBINARY(MAX)";
+            case DATE_TYPE:
+                return "DATE";
+            case TIME_TYPE:
+                return typeDescriptor.getTimePrecision() != null ? "TIME(" + typeDescriptor.getTimePrecision() + ")" : "TIME";
+            case TIMESTAMP_TYPE:
+                if (typeDescriptor.isWithTimezone()) {
+                    return typeDescriptor.getTimePrecision() != null ? "DATETIMEOFFSET(" + typeDescriptor.getTimePrecision() + ")" : "DATETIMEOFFSET";
+                }
+                return typeDescriptor.getTimePrecision() != null ? "DATETIME2(" + typeDescriptor.getTimePrecision() + ")" : "DATETIME2";
+            case UUID_TYPE:
+                return "UNIQUEIDENTIFIER";
+            case XML_TYPE:
+                return "XML";
+            case GEOMETRY_TYPE:
+                return "GEOMETRY";
+            case OBJECT_TYPE:
+            case JSON_TYPE:
+                return "NVARCHAR(MAX)";
+            default:
+                return super.convertToOriginType(typeDescriptor);
+        }
     }
 
     /**

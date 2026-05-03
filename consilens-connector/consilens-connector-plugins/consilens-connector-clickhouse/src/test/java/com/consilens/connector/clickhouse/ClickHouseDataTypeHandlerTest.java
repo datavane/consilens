@@ -1,5 +1,6 @@
 package com.consilens.connector.clickhouse;
 
+import com.consilens.common.type.TypeDescriptor;
 import com.consilens.connector.api.model.DataType;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -68,5 +69,21 @@ class ClickHouseDataTypeHandlerTest {
     void testGetDataTypeMappingJSON() {
         String result = handler.getDataTypeMapping("jsonb", 0, 0, 0);
         assertEquals("JSONB", result);
+    }
+
+    @Test
+    void shouldConvertNullableArrayDescriptor() {
+        TypeDescriptor descriptor = handler.convertToTypeDescriptor("Nullable(Array(UInt32))");
+
+        assertEquals(com.consilens.common.enums.DataType.ARRAY_TYPE, descriptor.getType());
+        assertTrue(descriptor.isNullable());
+        assertTrue(descriptor.getElementType().isUnsigned());
+        assertEquals("Array(UInt32)", handler.convertToOriginType(
+                TypeDescriptor.builder(com.consilens.common.enums.DataType.ARRAY_TYPE)
+                        .elementType(TypeDescriptor.builder(com.consilens.common.enums.DataType.INTEGER_TYPE)
+                                .bitWidth(32)
+                                .unsigned(true)
+                                .build())
+                        .build()));
     }
 }

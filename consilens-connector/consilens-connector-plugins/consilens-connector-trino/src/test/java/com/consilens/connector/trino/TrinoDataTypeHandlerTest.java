@@ -1,5 +1,6 @@
 package com.consilens.connector.trino;
 
+import com.consilens.common.type.TypeDescriptor;
 import com.consilens.connector.api.model.DataType;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -58,5 +59,14 @@ class TrinoDataTypeHandlerTest {
     void testGetDataTypeMappingJSON() {
         String result = handler.getDataTypeMapping("json", 0, 0, 0);
         assertEquals("JSON", result);
+    }
+
+    @Test
+    void shouldConvertMapDescriptor() {
+        TypeDescriptor descriptor = handler.convertToTypeDescriptor("MAP(VARCHAR, BIGINT)");
+
+        assertEquals(com.consilens.common.enums.DataType.MAP_TYPE, descriptor.getType());
+        assertEquals(com.consilens.common.enums.DataType.STRING_TYPE, descriptor.getKeyType().getType());
+        assertEquals("MAP(VARCHAR, BIGINT)", handler.convertToOriginType(descriptor));
     }
 }

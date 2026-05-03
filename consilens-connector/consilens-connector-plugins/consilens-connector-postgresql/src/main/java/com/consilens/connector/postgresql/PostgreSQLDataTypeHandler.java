@@ -1,10 +1,14 @@
 package com.consilens.connector.postgresql;
 
+import com.consilens.common.type.StructField;
+import com.consilens.common.type.TypeDescriptor;
 import com.consilens.connector.api.CapabilityProvider;
 import com.consilens.connector.api.model.DataType;
 import com.consilens.conncetor.base.BaseDataTypeHandler;
 import lombok.extern.slf4j.Slf4j;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -29,6 +33,300 @@ public class PostgreSQLDataTypeHandler extends BaseDataTypeHandler {
     
     public PostgreSQLDataTypeHandler(CapabilityProvider capabilityProvider, Map<String, ?> normalizationConfig) {
         super(capabilityProvider, normalizationConfig);
+    }
+
+    @Override
+    public TypeDescriptor convertToTypeDescriptor(String originType) {
+        if (originType == null || originType.isBlank()) {
+            return TypeDescriptor.builder(com.consilens.common.enums.DataType.UNKNOWN_TYPE)
+                    .originType(originType)
+                    .build();
+        }
+
+        String upperType = normalizeTypeExpression(originType);
+        if (upperType.endsWith("[]")) {
+            TypeDescriptor elementType = convertToTypeDescriptor(originType.substring(0, originType.length() - 2));
+            return TypeDescriptor.builder(com.consilens.common.enums.DataType.ARRAY_TYPE)
+                    .originType(originType)
+                    .elementType(elementType)
+                    .build();
+        }
+
+        String baseType = extractBaseType(upperType);
+        switch (baseType) {
+            case "SMALLINT":
+            case "INT2":
+                return TypeDescriptor.builder(com.consilens.common.enums.DataType.INTEGER_TYPE)
+                        .originType(originType)
+                        .bitWidth(16)
+                        .build();
+            case "INTEGER":
+            case "INT":
+            case "INT4":
+            case "SERIAL":
+                return TypeDescriptor.builder(com.consilens.common.enums.DataType.INTEGER_TYPE)
+                        .originType(originType)
+                        .bitWidth(32)
+                        .build();
+            case "BIGINT":
+            case "INT8":
+            case "BIGSERIAL":
+            case "OID":
+                return TypeDescriptor.builder(com.consilens.common.enums.DataType.INTEGER_TYPE)
+                        .originType(originType)
+                        .bitWidth(64)
+                        .build();
+            case "REAL":
+            case "FLOAT4":
+                return TypeDescriptor.builder(com.consilens.common.enums.DataType.FLOAT_TYPE)
+                        .originType(originType)
+                        .build();
+            case "DOUBLE PRECISION":
+            case "FLOAT8":
+            case "FLOAT":
+                return TypeDescriptor.builder(com.consilens.common.enums.DataType.DOUBLE_TYPE)
+                        .originType(originType)
+                        .build();
+            case "NUMERIC":
+            case "DECIMAL": {
+                Integer[] precisionScale = extractPrecisionScale(upperType);
+                return TypeDescriptor.builder(com.consilens.common.enums.DataType.DECIMAL_TYPE)
+                        .originType(originType)
+                        .numericPrecision(precisionScale[0] != null ? precisionScale[0] : 131072)
+                        .numericScale(precisionScale[1] != null ? precisionScale[1] : 16383)
+                        .build();
+            }
+            case "MONEY":
+                return TypeDescriptor.builder(com.consilens.common.enums.DataType.DECIMAL_TYPE)
+                        .originType(originType)
+                        .numericPrecision(19)
+                        .numericScale(2)
+                        .build();
+            case "CHAR":
+            case "CHARACTER":
+            case "BPCHAR":
+                return TypeDescriptor.builder(com.consilens.common.enums.DataType.STRING_TYPE)
+                        .originType(originType)
+                        .length(extractLength(upperType) != null ? extractLength(upperType) : 1)
+                        .build();
+            case "VARCHAR":
+            case "CHARACTER VARYING":
+                return TypeDescriptor.builder(com.consilens.common.enums.DataType.STRING_TYPE)
+                        .originType(originType)
+                        .length(extractLength(upperType))
+                        .build();
+            case "TEXT":
+                return TypeDescriptor.builder(com.consilens.common.enums.DataType.STRING_TYPE)
+                        .originType(originType)
+                        .textType(true)
+                        .build();
+            case "BYTEA":
+                return TypeDescriptor.builder(com.consilens.common.enums.DataType.BINARY_TYPE)
+                        .originType(originType)
+                        .blobType(true)
+                        .build();
+            case "BIT":
+            case "VARBIT":
+                return TypeDescriptor.builder(com.consilens.common.enums.DataType.BINARY_TYPE)
+                        .originType(originType)
+                        .length(extractLength(upperType))
+                        .build();
+            case "DATE":
+                return TypeDescriptor.builder(com.consilens.common.enums.DataType.DATE_TYPE)
+                        .originType(originType)
+                        .build();
+            case "TIME":
+            case "TIME WITHOUT TIME ZONE":
+                return TypeDescriptor.builder(com.consilens.common.enums.DataType.TIME_TYPE)
+                        .originType(originType)
+                        .timePrecision(extractLength(upperType))
+                        .build();
+            case "TIMETZ":
+            case "TIME WITH TIME ZONE":
+                return TypeDescriptor.builder(com.consilens.common.enums.DataType.TIME_TYPE)
+                        .originType(originType)
+                        .timePrecision(extractLength(upperType))
+                        .withTimezone(true)
+                        .build();
+            case "TIMESTAMP":
+            case "TIMESTAMP WITHOUT TIME ZONE":
+                return TypeDescriptor.builder(com.consilens.common.enums.DataType.TIMESTAMP_TYPE)
+                        .originType(originType)
+                        .timePrecision(extractLength(upperType))
+                        .build();
+            case "TIMESTAMPTZ":
+            case "TIMESTAMP WITH TIME ZONE":
+                return TypeDescriptor.builder(com.consilens.common.enums.DataType.TIMESTAMP_TYPE)
+                        .originType(originType)
+                        .timePrecision(extractLength(upperType))
+                        .withTimezone(true)
+                        .build();
+            case "INTERVAL":
+                return TypeDescriptor.builder(com.consilens.common.enums.DataType.INTERVAL_TYPE)
+                        .originType(originType)
+                        .build();
+            case "BOOLEAN":
+            case "BOOL":
+                return TypeDescriptor.builder(com.consilens.common.enums.DataType.BOOLEAN_TYPE)
+                        .originType(originType)
+                        .build();
+            case "JSON":
+            case "JSONB":
+                return TypeDescriptor.builder(com.consilens.common.enums.DataType.JSON_TYPE)
+                        .originType(originType)
+                        .build();
+            case "XML":
+                return TypeDescriptor.builder(com.consilens.common.enums.DataType.XML_TYPE)
+                        .originType(originType)
+                        .build();
+            case "UUID":
+                return TypeDescriptor.builder(com.consilens.common.enums.DataType.UUID_TYPE)
+                        .originType(originType)
+                        .build();
+            case "POINT":
+            case "LINE":
+            case "LSEG":
+            case "BOX":
+            case "PATH":
+            case "POLYGON":
+            case "CIRCLE":
+                return TypeDescriptor.builder(com.consilens.common.enums.DataType.GEOMETRY_TYPE)
+                        .originType(originType)
+                        .build();
+            case "INET":
+            case "CIDR":
+            case "MACADDR":
+            case "MACADDR8":
+                return TypeDescriptor.builder(com.consilens.common.enums.DataType.STRING_TYPE)
+                        .originType(originType)
+                        .build();
+            case "HSTORE":
+            case "JSONPATH":
+            case "TSQUERY":
+            case "TSVECTOR":
+                return TypeDescriptor.builder(com.consilens.common.enums.DataType.OBJECT_TYPE)
+                        .originType(originType)
+                        .build();
+            default:
+                if (upperType.startsWith("ENUM(")) {
+                    List<String> enumValues = new ArrayList<>();
+                    for (String part : splitTopLevel(originType.substring(originType.indexOf('(') + 1, originType.lastIndexOf(')')))) {
+                        enumValues.add(part.replace("'", "").trim());
+                    }
+                    return TypeDescriptor.builder(com.consilens.common.enums.DataType.ENUM_TYPE)
+                            .originType(originType)
+                            .enumValues(enumValues)
+                            .build();
+                }
+                if (upperType.startsWith("RECORD(")) {
+                    List<StructField> fields = new ArrayList<>();
+                    for (String part : splitTopLevel(originType.substring(originType.indexOf('(') + 1, originType.lastIndexOf(')')))) {
+                        int separator = findTopLevelCharacter(part, ' ');
+                        if (separator <= 0) {
+                            continue;
+                        }
+                        String fieldName = part.substring(0, separator).trim().replace("\"", "");
+                        String fieldType = part.substring(separator + 1).trim();
+                        fields.add(StructField.builder(fieldName, convertToTypeDescriptor(fieldType)).build());
+                    }
+                    if (!fields.isEmpty()) {
+                        return TypeDescriptor.builder(com.consilens.common.enums.DataType.STRUCT_TYPE)
+                                .originType(originType)
+                                .fields(fields)
+                                .build();
+                    }
+                }
+                return super.convertToTypeDescriptor(originType);
+        }
+    }
+
+    @Override
+    public String convertToOriginType(TypeDescriptor typeDescriptor) {
+        if (typeDescriptor == null) {
+            return "TEXT";
+        }
+        if (typeDescriptor.getOriginType() != null && !typeDescriptor.getOriginType().isBlank()) {
+            return typeDescriptor.getOriginType();
+        }
+
+        switch (typeDescriptor.getType()) {
+            case INTEGER_TYPE:
+                if (typeDescriptor.getBitWidth() == null || typeDescriptor.getBitWidth() <= 16) {
+                    return "SMALLINT";
+                }
+                if (typeDescriptor.getBitWidth() <= 32) {
+                    return "INTEGER";
+                }
+                return "BIGINT";
+            case FLOAT_TYPE:
+                return "REAL";
+            case DOUBLE_TYPE:
+                return "DOUBLE PRECISION";
+            case DECIMAL_TYPE:
+                if (typeDescriptor.getNumericPrecision() != null && typeDescriptor.getNumericScale() != null) {
+                    return "NUMERIC(" + typeDescriptor.getNumericPrecision() + "," + typeDescriptor.getNumericScale() + ")";
+                }
+                return "NUMERIC";
+            case STRING_TYPE:
+                if (typeDescriptor.isTextType()) {
+                    return "TEXT";
+                }
+                if (typeDescriptor.getLength() != null && typeDescriptor.getLength() > 0) {
+                    return "VARCHAR(" + typeDescriptor.getLength() + ")";
+                }
+                return "TEXT";
+            case ENUM_TYPE:
+                if (typeDescriptor.getEnumValues() != null && !typeDescriptor.getEnumValues().isEmpty()) {
+                    StringBuilder builder = new StringBuilder("ENUM(");
+                    for (int i = 0; i < typeDescriptor.getEnumValues().size(); i++) {
+                        if (i > 0) {
+                            builder.append(", ");
+                        }
+                        builder.append('\'').append(typeDescriptor.getEnumValues().get(i).replace("'", "''")).append('\'');
+                    }
+                    return builder.append(')').toString();
+                }
+                return "TEXT";
+            case BINARY_TYPE:
+                if (typeDescriptor.getLength() != null && typeDescriptor.getLength() > 0) {
+                    return "VARBIT(" + typeDescriptor.getLength() + ")";
+                }
+                return typeDescriptor.isBlobType() ? "BYTEA" : "BYTEA";
+            case DATE_TYPE:
+                return "DATE";
+            case TIME_TYPE:
+                String timeType = typeDescriptor.isWithTimezone() ? "TIME WITH TIME ZONE" : "TIME";
+                return typeDescriptor.getTimePrecision() != null
+                        ? timeType + "(" + typeDescriptor.getTimePrecision() + ")"
+                        : timeType;
+            case TIMESTAMP_TYPE:
+                String timestampType = typeDescriptor.isWithTimezone()
+                        ? "TIMESTAMP WITH TIME ZONE"
+                        : "TIMESTAMP";
+                return typeDescriptor.getTimePrecision() != null
+                        ? timestampType + "(" + typeDescriptor.getTimePrecision() + ")"
+                        : timestampType;
+            case INTERVAL_TYPE:
+                return "INTERVAL";
+            case BOOLEAN_TYPE:
+                return "BOOLEAN";
+            case JSON_TYPE:
+                return "JSONB";
+            case XML_TYPE:
+                return "XML";
+            case UUID_TYPE:
+                return "UUID";
+            case ARRAY_TYPE:
+                return convertToOriginType(typeDescriptor.getElementType()) + "[]";
+            case MAP_TYPE:
+            case STRUCT_TYPE:
+            case OBJECT_TYPE:
+                return "JSONB";
+            case GEOMETRY_TYPE:
+                return "GEOMETRY";
+            default:
+                return super.convertToOriginType(typeDescriptor);
+        }
     }
 
     /**

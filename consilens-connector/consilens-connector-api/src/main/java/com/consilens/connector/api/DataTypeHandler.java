@@ -1,5 +1,6 @@
 package com.consilens.connector.api;
 
+import com.consilens.common.type.TypeDescriptor;
 import com.consilens.connector.api.model.DataType;
 
 /**
@@ -11,7 +12,7 @@ import com.consilens.connector.api.model.DataType;
  * databases.
  * It is a standalone component obtained from
  */
-public interface DataTypeHandler {
+public interface DataTypeHandler extends TypeConverter {
 
     /**
      * Normalizes a column value for consistent checksum calculation.
@@ -43,6 +44,9 @@ public interface DataTypeHandler {
      * @return the corresponding DataType enum
      */
     DataType convertToDataType(String sourceType);
+
+    @Override
+    TypeDescriptor convertToTypeDescriptor(String originType);
 
     /**
      * Format a DataType into a database-specific type definition string.

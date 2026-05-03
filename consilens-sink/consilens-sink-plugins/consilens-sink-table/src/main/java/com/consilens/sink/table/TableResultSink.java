@@ -1,8 +1,18 @@
 package com.consilens.sink.table;
 
+import com.consilens.common.type.TypeDescriptor;
+import com.consilens.common.type.Types;
+import com.consilens.connector.api.DatabaseDialect;
+import com.consilens.connector.api.DatabaseDialects;
+import com.consilens.connector.api.write.OutputColumnSpec;
+import com.consilens.connector.api.write.PreparedWriteRow;
+import com.consilens.connector.api.write.TableWriteCompileRequest;
+import com.consilens.connector.api.write.TableWriteCompiler;
+import com.consilens.connector.api.write.TableWritePlan;
+import com.consilens.connector.api.write.TypedOutputRow;
+import com.consilens.connector.api.write.TypedOutputValue;
 import com.consilens.core.diff.DiffResult;
 import com.consilens.core.lifecycle.DiffContext;
-import com.consilens.sink.api.ColumnValueInterpolator;
 import com.consilens.sink.api.Sink;
 import com.consilens.sink.api.model.ColumnMapping;
 import com.consilens.sink.api.model.SinkConfig;
@@ -14,25 +24,19 @@ import lombok.extern.slf4j.Slf4j;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
-import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 
-/**
- * Writes the final diff result to a database table.
- *
- * <p>Supports two output modes:
- * <ul>
- *   <li><b>Custom field mode</b> (fields non-empty): creates table and inserts by FieldMapping rules.</li>
- *   <li><b>Default fixed mode</b> (fields empty): fixed columns nl_dq_execution_id / src_table / tgt_table, etc.</li>
- * </ul>
- */
 @Slf4j
 public class TableResultSink implements Sink {
 
     private HikariDataSource dataSource;
     private TableSinkConfig sinkConfig;
     private String tableName;
+    private TableWriteCompiler writeCompiler;
+    private TableWritePlan writePlan;
+    private List<OutputColumnSpec> outputColumns;
 
     @Override
     public void open(SinkConfig config, DiffContext context) throws Exception {
@@ -40,51 +44,20 @@ public class TableResultSink implements Sink {
         dataSource = createDataSource(sinkConfig);
         tableName = sinkConfig.resolveTableName();
 
+        DatabaseDialect dialect = DatabaseDialects.require(sinkConfig.resolveDatabaseType());
+        writeCompiler = dialect.getTableWriteCompiler();
+        outputColumns = buildOutputColumns(dialect);
+        writePlan = writeCompiler.compile(new TableWriteCompileRequest(
+                tableName,
+                sinkConfig.isCreateTable(),
+                sinkConfig.isDropIfExists(),
+                outputColumns
+        ));
+
         if (sinkConfig.isCreateTable()) {
             createTableIfNotExists();
         }
         log.info("TableResultSink opened, table={}, customFields={}", tableName, sinkConfig.hasCustomColumns());
-    }
-
-    private void createTableIfNotExists() throws SQLException {
-        if (sinkConfig.isDropIfExists()) {
-            try (Connection conn = dataSource.getConnection();
-                 PreparedStatement ps = conn.prepareStatement("DROP TABLE IF EXISTS " + tableName)) {
-                ps.execute();
-            }
-        }
-        String ddl = buildCreateTableDdl();
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(ddl)) {
-            ps.execute();
-        }
-    }
-
-    private String buildCreateTableDdl() {
-        if (sinkConfig.hasCustomColumns()) {
-            StringBuilder sql = new StringBuilder("CREATE TABLE IF NOT EXISTS ").append(tableName).append(" (");
-            List<ColumnMapping> fields = sinkConfig.getColumns();
-            for (int i = 0; i < fields.size(); i++) {
-                if (i > 0) sql.append(", ");
-                ColumnMapping f = fields.get(i);
-                String colType = (f.getColumnType() != null && !f.getColumnType().isBlank())
-                        ? f.getColumnType() : "TEXT";
-                sql.append(sanitize(f.getName())).append(" ").append(colType);
-            }
-            sql.append(")");
-            return sql.toString();
-        }
-        return "CREATE TABLE IF NOT EXISTS " + tableName + " ("
-                + "nl_dq_execution_id VARCHAR(64), "
-                + "src_table VARCHAR(256), "
-                + "tgt_table VARCHAR(256), "
-                + "diff_count BIGINT, "
-                + "src_missing BIGINT, "
-                + "tgt_missing BIGINT, "
-                + "mismatch_count BIGINT, "
-                + "run_status VARCHAR(32), "
-                + "completed_at TIMESTAMP"
-                + ")";
     }
 
     @Override
@@ -92,55 +65,7 @@ public class TableResultSink implements Sink {
         if (dataSource == null) {
             return;
         }
-        if (sinkConfig.hasCustomColumns()) {
-            insertWithCustomFields(result, context);
-        } else {
-            insertDefault(result, context);
-        }
-        log.info("TableResultSink wrote result for task {}", context.getTaskId());
-    }
-
-    private void insertWithCustomFields(DiffResult result, DiffContext context) throws SQLException {
-        List<ColumnMapping> fields = sinkConfig.getColumns();
-        StringBuilder cols = new StringBuilder("INSERT INTO ").append(tableName).append(" (");
-        StringBuilder placeholders = new StringBuilder("VALUES (");
-        for (int i = 0; i < fields.size(); i++) {
-            if (i > 0) {
-                cols.append(", ");
-                placeholders.append(",");
-            }
-            cols.append(sanitize(fields.get(i).getName()));
-            placeholders.append("?");
-        }
-        cols.append(") ");
-        placeholders.append(")");
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(cols.toString() + placeholders.toString())) {
-            for (int i = 0; i < fields.size(); i++) {
-                ps.setString(i + 1, ColumnValueInterpolator.resolveField(fields.get(i), context, result));
-            }
-            ps.executeUpdate();
-        }
-    }
-
-    private void insertDefault(DiffResult result, DiffContext context) throws SQLException {
-        String sql = "INSERT INTO " + tableName
-                + " (nl_dq_execution_id, src_table, tgt_table, diff_count, src_missing, tgt_missing, mismatch_count, run_status, completed_at)"
-                + " VALUES (?,?,?,?,?,?,?,?,?)";
-        DiffResult.DiffStatistics stats = result.getStatistics();
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setString(1, context.getTaskId());
-            ps.setString(2, result.getSourceTablePath() != null ? result.getSourceTablePath().getTableName() : "");
-            ps.setString(3, result.getTargetTablePath() != null ? result.getTargetTablePath().getTableName() : "");
-            ps.setLong(4, stats != null ? stats.getTotalDifferences() : 0);
-            ps.setLong(5, stats != null ? stats.getSourceMissingCount() : 0);
-            ps.setLong(6, stats != null ? stats.getTargetMissingCount() : 0);
-            ps.setLong(7, stats != null ? stats.getMismatchCount() : 0);
-            ps.setString(8, result.hasDifferences() ? "DIFF" : "EQUAL");
-            ps.setTimestamp(9, Timestamp.from(Instant.now()));
-            ps.executeUpdate();
-        }
+        executePreparedRow(writeCompiler.prepareRow(buildResultRow(result, context), writePlan));
     }
 
     @Override
@@ -149,75 +74,9 @@ public class TableResultSink implements Sink {
             return;
         }
         try {
-            if (sinkConfig.hasCustomColumns()) {
-                insertCustomErrorFields(context, error);
-            } else {
-                insertDefaultError(context);
-            }
+            executePreparedRow(writeCompiler.prepareRow(buildErrorRow(context, error), writePlan));
         } catch (SQLException e) {
             log.error("Failed to write error result for task {}", context.getTaskId(), e);
-        }
-    }
-
-    private void insertDefaultError(DiffContext context) throws SQLException {
-        String sql = "INSERT INTO " + tableName
-                + " (nl_dq_execution_id, run_status, completed_at) VALUES (?,?,?)";
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setString(1, context.getTaskId());
-            ps.setString(2, "ERROR");
-            ps.setTimestamp(3, Timestamp.from(Instant.now()));
-            ps.executeUpdate();
-        }
-    }
-
-    private void insertCustomErrorFields(DiffContext context, Throwable error) throws SQLException {
-        List<ColumnMapping> fields = sinkConfig.getColumns();
-        StringBuilder cols = new StringBuilder("INSERT INTO ").append(tableName).append(" (");
-        StringBuilder placeholders = new StringBuilder("VALUES (");
-        for (int i = 0; i < fields.size(); i++) {
-            if (i > 0) {
-                cols.append(", ");
-                placeholders.append(",");
-            }
-            cols.append(sanitize(fields.get(i).getName()));
-            placeholders.append("?");
-        }
-        cols.append(") ");
-        placeholders.append(")");
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(cols.toString() + placeholders.toString())) {
-            for (int i = 0; i < fields.size(); i++) {
-                ps.setString(i + 1, resolveErrorField(fields.get(i), context, error));
-            }
-            ps.executeUpdate();
-        }
-    }
-
-    private String resolveErrorField(ColumnMapping field, DiffContext context, Throwable error) {
-        String resolved = ColumnValueInterpolator.resolveField(field, context, (DiffResult) null);
-        if (resolved != null && !resolved.isEmpty()) {
-            return resolved;
-        }
-        String normalizedName = field.getName() != null ? sanitize(field.getName()).toLowerCase() : "";
-        switch (normalizedName) {
-            case "run_status":
-            case "status":
-            case "execution_status":
-                return "ERROR";
-            case "error_message":
-            case "message":
-            case "error":
-                return error != null ? error.getMessage() : null;
-            case "task_id":
-            case "execution_id":
-            case "nl_dq_execution_id":
-                return context.getTaskId();
-            case "completed_at":
-            case "timestamp":
-                return Instant.now().toString();
-            default:
-                return null;
         }
     }
 
@@ -228,8 +87,142 @@ public class TableResultSink implements Sink {
         }
     }
 
-    private String sanitize(String col) {
-        return col.replaceAll("[^a-zA-Z0-9_]", "_");
+    private void createTableIfNotExists() throws SQLException {
+        try (Connection connection = dataSource.getConnection()) {
+            if (sinkConfig.isDropIfExists()) {
+                try (PreparedStatement statement = connection.prepareStatement(writePlan.getDropTableSql())) {
+                    statement.execute();
+                }
+            }
+            try (PreparedStatement statement = connection.prepareStatement(writePlan.getCreateTableSql())) {
+                statement.execute();
+            }
+        }
+    }
+
+    private void executePreparedRow(PreparedWriteRow preparedWriteRow) throws SQLException {
+        try (Connection connection = dataSource.getConnection();
+             PreparedStatement statement = connection.prepareStatement(writePlan.getInsertSql())) {
+            preparedWriteRow.bind(statement);
+            statement.executeUpdate();
+        }
+    }
+
+    private TypedOutputRow buildResultRow(DiffResult result, DiffContext context) {
+        List<TypedOutputValue> values = new ArrayList<>();
+        for (OutputColumnSpec outputColumn : outputColumns) {
+            Object value;
+            if (sinkConfig.hasCustomColumns()) {
+                ColumnMapping mapping = findColumnMapping(outputColumn.getColumnName());
+                value = TypedValueResolver.resolve(mapping, context, result);
+            } else {
+                value = resolveDefaultResultValue(outputColumn.getColumnName(), result, context);
+            }
+            values.add(new TypedOutputValue(outputColumn.getColumnName(), outputColumn.getSystemType(), value));
+        }
+        return new TypedOutputRow(values);
+    }
+
+    private TypedOutputRow buildErrorRow(DiffContext context, Throwable error) {
+        List<TypedOutputValue> values = new ArrayList<>();
+        for (OutputColumnSpec outputColumn : outputColumns) {
+            Object value;
+            if (sinkConfig.hasCustomColumns()) {
+                ColumnMapping mapping = findColumnMapping(outputColumn.getColumnName());
+                value = TypedValueResolver.resolveError(mapping, context, error);
+            } else {
+                value = resolveDefaultErrorValue(outputColumn.getColumnName(), context);
+            }
+            values.add(new TypedOutputValue(outputColumn.getColumnName(), outputColumn.getSystemType(), value));
+        }
+        return new TypedOutputRow(values);
+    }
+
+    private Object resolveDefaultResultValue(String columnName, DiffResult result, DiffContext context) {
+        DiffResult.DiffStatistics stats = result != null ? result.getStatistics() : null;
+        switch (columnName) {
+            case "nl_dq_execution_id":
+                return context.getTaskId();
+            case "src_table":
+                return result != null && result.getSourceTablePath() != null ? result.getSourceTablePath().getTableName() : "";
+            case "tgt_table":
+                return result != null && result.getTargetTablePath() != null ? result.getTargetTablePath().getTableName() : "";
+            case "diff_count":
+                return stats != null ? stats.getTotalDifferences() : 0L;
+            case "src_missing":
+                return stats != null ? stats.getSourceMissingCount() : 0L;
+            case "tgt_missing":
+                return stats != null ? stats.getTargetMissingCount() : 0L;
+            case "mismatch_count":
+                return stats != null ? stats.getMismatchCount() : 0L;
+            case "run_status":
+                return result != null && result.hasDifferences() ? "DIFF" : "EQUAL";
+            case "completed_at":
+                return result != null && result.getCompletedAt() != null ? result.getCompletedAt() : Instant.now();
+            default:
+                return null;
+        }
+    }
+
+    private Object resolveDefaultErrorValue(String columnName, DiffContext context) {
+        switch (columnName) {
+            case "nl_dq_execution_id":
+                return context.getTaskId();
+            case "run_status":
+                return "ERROR";
+            case "completed_at":
+                return Instant.now();
+            default:
+                return null;
+        }
+    }
+
+    private List<OutputColumnSpec> buildOutputColumns(DatabaseDialect dialect) {
+        if (sinkConfig.hasCustomColumns()) {
+            List<OutputColumnSpec> columns = new ArrayList<>();
+            for (ColumnMapping mapping : sinkConfig.getColumns()) {
+                columns.add(new OutputColumnSpec(
+                        sanitize(mapping.getName()),
+                        resolveSystemType(dialect, mapping.getColumnType(), Types.TEXT()),
+                        true,
+                        mapping.getColumnType()
+                ));
+            }
+            return List.copyOf(columns);
+        }
+
+        return List.of(
+                new OutputColumnSpec("nl_dq_execution_id", Types.VARCHAR(64), true, null),
+                new OutputColumnSpec("src_table", Types.VARCHAR(256), true, null),
+                new OutputColumnSpec("tgt_table", Types.VARCHAR(256), true, null),
+                new OutputColumnSpec("diff_count", Types.BIGINT(), true, null),
+                new OutputColumnSpec("src_missing", Types.BIGINT(), true, null),
+                new OutputColumnSpec("tgt_missing", Types.BIGINT(), true, null),
+                new OutputColumnSpec("mismatch_count", Types.BIGINT(), true, null),
+                new OutputColumnSpec("run_status", Types.VARCHAR(32), true, null),
+                new OutputColumnSpec("completed_at", Types.TIMESTAMP(), true, null)
+        );
+    }
+
+    private TypeDescriptor resolveSystemType(DatabaseDialect dialect, String declaredColumnType, TypeDescriptor defaultType) {
+        if (declaredColumnType == null || declaredColumnType.isBlank()) {
+            return defaultType;
+        }
+        TypeDescriptor descriptor = dialect.getDataTypeHandler().convertToTypeDescriptor(declaredColumnType);
+        return descriptor.getType() == com.consilens.common.enums.DataType.UNKNOWN_TYPE ? defaultType : descriptor;
+    }
+
+    private ColumnMapping findColumnMapping(String outputColumnName) {
+        for (ColumnMapping mapping : sinkConfig.getColumns()) {
+            if (sanitize(mapping.getName()).equals(outputColumnName)) {
+                return mapping;
+            }
+        }
+        return null;
+    }
+
+    private String sanitize(String column) {
+        return column.replaceAll("[^a-zA-Z0-9_]", "_");
     }
 
     private TableSinkConfig parseConfig(String properties) throws Exception {
@@ -239,13 +232,13 @@ public class TableResultSink implements Sink {
         return new ObjectMapper().readValue(properties, TableSinkConfig.class);
     }
 
-    private HikariDataSource createDataSource(TableSinkConfig cfg) {
+    private HikariDataSource createDataSource(TableSinkConfig config) {
         HikariConfig hikari = new HikariConfig();
-        hikari.setJdbcUrl(cfg.getUrl());
-        hikari.setUsername(cfg.getUsername());
-        hikari.setPassword(cfg.getPassword());
-        hikari.setDriverClassName(cfg.resolveDriver());
-        hikari.setMaximumPoolSize(cfg.getMaxPoolSize());
+        hikari.setJdbcUrl(config.getUrl());
+        hikari.setUsername(config.getUsername());
+        hikari.setPassword(config.getPassword());
+        hikari.setDriverClassName(config.resolveDriver());
+        hikari.setMaximumPoolSize(config.getMaxPoolSize());
         return new HikariDataSource(hikari);
     }
 }

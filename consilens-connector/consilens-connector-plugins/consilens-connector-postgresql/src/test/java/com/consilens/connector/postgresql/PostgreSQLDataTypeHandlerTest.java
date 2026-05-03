@@ -1,5 +1,6 @@
 package com.consilens.connector.postgresql;
 
+import com.consilens.common.type.TypeDescriptor;
 import com.consilens.connector.api.model.DataType;
 import com.consilens.conncetor.base.jdbc.JdbcDatasetHandle;
 import org.junit.jupiter.api.BeforeEach;
@@ -92,5 +93,17 @@ class PostgreSQLDataTypeHandlerTest {
     @Test
     void testConvertBpcharToChar() {
         assertEquals(DataType.CHAR, handler.convertToDataType("bpchar"));
+    }
+
+    @Test
+    void shouldConvertArrayDescriptor() {
+        TypeDescriptor descriptor = handler.convertToTypeDescriptor("int8[]");
+
+        assertEquals(com.consilens.common.enums.DataType.ARRAY_TYPE, descriptor.getType());
+        assertEquals(com.consilens.common.enums.DataType.INTEGER_TYPE, descriptor.getElementType().getType());
+        assertEquals("BIGINT[]", handler.convertToOriginType(
+                TypeDescriptor.builder(com.consilens.common.enums.DataType.ARRAY_TYPE)
+                        .elementType(TypeDescriptor.builder(com.consilens.common.enums.DataType.INTEGER_TYPE).bitWidth(64).build())
+                        .build()));
     }
 }

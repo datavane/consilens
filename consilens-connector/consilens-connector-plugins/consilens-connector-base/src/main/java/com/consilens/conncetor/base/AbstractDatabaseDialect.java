@@ -1,6 +1,8 @@
 package com.consilens.conncetor.base;
 
 import com.consilens.connector.api.*;
+import com.consilens.connector.api.write.TableWriteCompiler;
+import com.consilens.conncetor.base.write.JdbcTableWriteCompiler;
 
 /**
  * Abstract base class for database dialect implementations.
@@ -56,5 +58,10 @@ public abstract class AbstractDatabaseDialect
     @Override
     public ConnectionPoolOptimizer getConnectionPoolOptimizer() {
         return new BaseConnectionPoolOptimizer();
+    }
+
+    @Override
+    public TableWriteCompiler getTableWriteCompiler() {
+        return new JdbcTableWriteCompiler(this);
     }
 }

@@ -1,9 +1,13 @@
 package com.consilens.connector.clickhouse;
 
+import com.consilens.common.type.StructField;
+import com.consilens.common.type.TypeDescriptor;
 import com.consilens.connector.api.CapabilityProvider;
 import com.consilens.connector.api.model.DataType;
 import com.consilens.conncetor.base.BaseDataTypeHandler;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -33,6 +37,206 @@ public class ClickHouseDataTypeHandler extends BaseDataTypeHandler {
      */
     public ClickHouseDataTypeHandler(CapabilityProvider capabilityProvider, Map<String, ?> normalizationConfig) {
         super(capabilityProvider, normalizationConfig);
+    }
+
+    @Override
+    public TypeDescriptor convertToTypeDescriptor(String originType) {
+        if (originType == null || originType.isBlank()) {
+            return TypeDescriptor.builder(com.consilens.common.enums.DataType.UNKNOWN_TYPE)
+                    .originType(originType)
+                    .build();
+        }
+
+        String upperType = normalizeTypeExpression(originType);
+        if (upperType.startsWith("NULLABLE(") && upperType.endsWith(")")) {
+            TypeDescriptor inner = convertToTypeDescriptor(originType.substring(originType.indexOf('(') + 1, originType.lastIndexOf(')')));
+            return inner.toBuilder().originType(originType).nullable(true).build();
+        }
+        if (upperType.startsWith("LOWCARDINALITY(") && upperType.endsWith(")")) {
+            TypeDescriptor inner = convertToTypeDescriptor(originType.substring(originType.indexOf('(') + 1, originType.lastIndexOf(')')));
+            return inner.toBuilder().originType(originType).build();
+        }
+        if (upperType.startsWith("ARRAY(") && upperType.endsWith(")")) {
+            TypeDescriptor elementType = convertToTypeDescriptor(originType.substring(originType.indexOf('(') + 1, originType.lastIndexOf(')')));
+            return TypeDescriptor.builder(com.consilens.common.enums.DataType.ARRAY_TYPE)
+                    .originType(originType)
+                    .elementType(elementType)
+                    .build();
+        }
+        if (upperType.startsWith("MAP(") && upperType.endsWith(")")) {
+            List<String> arguments = splitTopLevel(originType.substring(originType.indexOf('(') + 1, originType.lastIndexOf(')')));
+            TypeDescriptor keyType = arguments.size() > 0 ? convertToTypeDescriptor(arguments.get(0)) : TypeDescriptor.builder(com.consilens.common.enums.DataType.UNKNOWN_TYPE).build();
+            TypeDescriptor valueType = arguments.size() > 1 ? convertToTypeDescriptor(arguments.get(1)) : TypeDescriptor.builder(com.consilens.common.enums.DataType.UNKNOWN_TYPE).build();
+            return TypeDescriptor.builder(com.consilens.common.enums.DataType.MAP_TYPE)
+                    .originType(originType)
+                    .keyType(keyType)
+                    .valueType(valueType)
+                    .build();
+        }
+        if (upperType.startsWith("TUPLE(") && upperType.endsWith(")")) {
+            List<StructField> fields = new ArrayList<>();
+            List<String> parts = splitTopLevel(originType.substring(originType.indexOf('(') + 1, originType.lastIndexOf(')')));
+            for (int i = 0; i < parts.size(); i++) {
+                String part = parts.get(i).trim();
+                int separator = findTopLevelCharacter(part, ' ');
+                if (separator > 0) {
+                    fields.add(StructField.builder(part.substring(0, separator).trim().replace("`", "").replace("\"", ""),
+                            convertToTypeDescriptor(part.substring(separator + 1).trim())).build());
+                } else {
+                    fields.add(StructField.builder("field_" + i, convertToTypeDescriptor(part)).build());
+                }
+            }
+            return TypeDescriptor.builder(com.consilens.common.enums.DataType.STRUCT_TYPE)
+                    .originType(originType)
+                    .fields(fields)
+                    .build();
+        }
+
+        String baseType = extractBaseType(upperType);
+        switch (baseType) {
+            case "INT8":
+            case "TINYINT":
+                return TypeDescriptor.builder(com.consilens.common.enums.DataType.INTEGER_TYPE).originType(originType).bitWidth(8).build();
+            case "INT16":
+            case "SMALLINT":
+                return TypeDescriptor.builder(com.consilens.common.enums.DataType.INTEGER_TYPE).originType(originType).bitWidth(16).build();
+            case "INT32":
+            case "INT":
+            case "INTEGER":
+                return TypeDescriptor.builder(com.consilens.common.enums.DataType.INTEGER_TYPE).originType(originType).bitWidth(32).build();
+            case "INT64":
+            case "BIGINT":
+                return TypeDescriptor.builder(com.consilens.common.enums.DataType.INTEGER_TYPE).originType(originType).bitWidth(64).build();
+            case "INT128":
+                return TypeDescriptor.builder(com.consilens.common.enums.DataType.INTEGER_TYPE).originType(originType).bitWidth(128).build();
+            case "INT256":
+                return TypeDescriptor.builder(com.consilens.common.enums.DataType.INTEGER_TYPE).originType(originType).bitWidth(256).build();
+            case "UINT8":
+                return TypeDescriptor.builder(com.consilens.common.enums.DataType.INTEGER_TYPE).originType(originType).bitWidth(8).unsigned(true).build();
+            case "UINT16":
+                return TypeDescriptor.builder(com.consilens.common.enums.DataType.INTEGER_TYPE).originType(originType).bitWidth(16).unsigned(true).build();
+            case "UINT32":
+                return TypeDescriptor.builder(com.consilens.common.enums.DataType.INTEGER_TYPE).originType(originType).bitWidth(32).unsigned(true).build();
+            case "UINT64":
+                return TypeDescriptor.builder(com.consilens.common.enums.DataType.INTEGER_TYPE).originType(originType).bitWidth(64).unsigned(true).build();
+            case "UINT128":
+                return TypeDescriptor.builder(com.consilens.common.enums.DataType.INTEGER_TYPE).originType(originType).bitWidth(128).unsigned(true).build();
+            case "UINT256":
+                return TypeDescriptor.builder(com.consilens.common.enums.DataType.INTEGER_TYPE).originType(originType).bitWidth(256).unsigned(true).build();
+            case "FLOAT32":
+            case "FLOAT":
+                return TypeDescriptor.builder(com.consilens.common.enums.DataType.FLOAT_TYPE).originType(originType).build();
+            case "FLOAT64":
+            case "DOUBLE":
+                return TypeDescriptor.builder(com.consilens.common.enums.DataType.DOUBLE_TYPE).originType(originType).build();
+            case "DECIMAL":
+            case "DECIMAL32":
+            case "DECIMAL64":
+            case "DECIMAL128":
+            case "DECIMAL256": {
+                Integer[] precisionScale = extractPrecisionScale(upperType);
+                return TypeDescriptor.builder(com.consilens.common.enums.DataType.DECIMAL_TYPE)
+                        .originType(originType)
+                        .numericPrecision(precisionScale[0] != null ? precisionScale[0] : 10)
+                        .numericScale(precisionScale[1] != null ? precisionScale[1] : 0)
+                        .build();
+            }
+            case "BOOL":
+            case "BOOLEAN":
+                return TypeDescriptor.builder(com.consilens.common.enums.DataType.BOOLEAN_TYPE).originType(originType).build();
+            case "STRING":
+            case "TEXT":
+            case "LONGTEXT":
+                return TypeDescriptor.builder(com.consilens.common.enums.DataType.STRING_TYPE).originType(originType).textType(true).build();
+            case "FIXEDSTRING":
+                return TypeDescriptor.builder(com.consilens.common.enums.DataType.STRING_TYPE).originType(originType).length(extractLength(upperType)).build();
+            case "DATE":
+            case "DATE32":
+                return TypeDescriptor.builder(com.consilens.common.enums.DataType.DATE_TYPE).originType(originType).build();
+            case "DATETIME":
+            case "DATETIME64":
+                return TypeDescriptor.builder(com.consilens.common.enums.DataType.TIMESTAMP_TYPE)
+                        .originType(originType)
+                        .timePrecision(extractLength(upperType))
+                        .build();
+            case "UUID":
+                return TypeDescriptor.builder(com.consilens.common.enums.DataType.UUID_TYPE).originType(originType).build();
+            case "ENUM8":
+            case "ENUM16":
+                return TypeDescriptor.builder(com.consilens.common.enums.DataType.ENUM_TYPE).originType(originType).build();
+            case "IPV4":
+            case "IPV6":
+                return TypeDescriptor.builder(com.consilens.common.enums.DataType.STRING_TYPE).originType(originType).build();
+            default:
+                return super.convertToTypeDescriptor(originType);
+        }
+    }
+
+    @Override
+    public String convertToOriginType(TypeDescriptor typeDescriptor) {
+        if (typeDescriptor == null) {
+            return "String";
+        }
+        if (typeDescriptor.getOriginType() != null && !typeDescriptor.getOriginType().isBlank()) {
+            return typeDescriptor.getOriginType();
+        }
+        switch (typeDescriptor.getType()) {
+            case INTEGER_TYPE: {
+                int bitWidth = typeDescriptor.getBitWidth() != null ? typeDescriptor.getBitWidth() : 32;
+                boolean unsigned = typeDescriptor.isUnsigned();
+                if (bitWidth <= 8) return unsigned ? "UInt8" : "Int8";
+                if (bitWidth <= 16) return unsigned ? "UInt16" : "Int16";
+                if (bitWidth <= 32) return unsigned ? "UInt32" : "Int32";
+                if (bitWidth <= 64) return unsigned ? "UInt64" : "Int64";
+                if (bitWidth <= 128) return unsigned ? "UInt128" : "Int128";
+                return unsigned ? "UInt256" : "Int256";
+            }
+            case FLOAT_TYPE:
+                return "Float32";
+            case DOUBLE_TYPE:
+                return "Float64";
+            case DECIMAL_TYPE:
+                return "Decimal(" + (typeDescriptor.getNumericPrecision() != null ? typeDescriptor.getNumericPrecision() : 10)
+                        + "," + (typeDescriptor.getNumericScale() != null ? typeDescriptor.getNumericScale() : 0) + ")";
+            case BOOLEAN_TYPE:
+                return "Bool";
+            case STRING_TYPE:
+                if (typeDescriptor.getLength() != null && !typeDescriptor.isTextType()) {
+                    return "FixedString(" + typeDescriptor.getLength() + ")";
+                }
+                return "String";
+            case ENUM_TYPE:
+                return "String";
+            case BINARY_TYPE:
+                return "String";
+            case DATE_TYPE:
+                return "Date";
+            case TIMESTAMP_TYPE:
+                return typeDescriptor.getTimePrecision() != null && typeDescriptor.getTimePrecision() > 0
+                        ? "DateTime64(" + typeDescriptor.getTimePrecision() + ")"
+                        : "DateTime";
+            case UUID_TYPE:
+                return "UUID";
+            case ARRAY_TYPE:
+                return "Array(" + convertToOriginType(typeDescriptor.getElementType()) + ")";
+            case MAP_TYPE:
+                return "Map(" + convertToOriginType(typeDescriptor.getKeyType()) + ", "
+                        + convertToOriginType(typeDescriptor.getValueType()) + ")";
+            case STRUCT_TYPE: {
+                StringBuilder builder = new StringBuilder("Tuple(");
+                List<StructField> fields = typeDescriptor.getFields();
+                for (int i = 0; i < fields.size(); i++) {
+                    if (i > 0) {
+                        builder.append(", ");
+                    }
+                    builder.append(fields.get(i).getName()).append(' ')
+                            .append(convertToOriginType(fields.get(i).getTypeDescriptor()));
+                }
+                return builder.append(')').toString();
+            }
+            default:
+                return super.convertToOriginType(typeDescriptor);
+        }
     }
 
     /**

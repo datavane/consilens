@@ -1,0 +1,291 @@
+# 性能测试配置 - MySQL vs PostgreSQL 跨数据库比对
+# 表: performance_test_table
+# 行数: 2,000,000
+# 列数: 50（所有列）
+
+source:
+  type: "mysql"
+  name: source-mysql
+  connection:
+    url: jdbc:mysql://localhost:3306/test
+    username: ${env.MYSQL_USER}
+    password: ${env.MYSQL_PASSWORD}
+  resource:
+    type: table
+    name: performance_test_table
+
+target:
+  type: postgresql
+  name: target-postgresql
+  connection:
+    url: jdbc:postgresql://localhost:5432/postgres?currentSchema=public
+    username: ${env.PG_USER}
+    password: ${env.PG_PASSWORD}
+  resource:
+    type: table
+    name: performance_test_table
+
+comparison:
+  keys:
+    source:
+      - record_id
+    target:
+      - record_id
+
+  fields:
+    source:
+      - col_tinyint
+      - col_smallint
+      - col_mediumint
+      - col_int
+      - col_bigint
+      - col_unsigned_int
+      - col_double
+      - col_decimal
+      - col_numeric
+      - col_char
+      - col_varchar_50
+      - col_varchar_100
+      - col_varchar_255
+      - col_text
+      - col_mediumtext
+      - col_binary
+      - col_varbinary
+      - col_blob
+      - col_date
+      - col_datetime
+      - col_timestamp
+      - col_time
+      - col_boolean
+      - col_tinyint_bool
+      - col_enum
+      - col_set
+      - col_json
+      - user_name
+      - email
+      - phone
+      - address
+      - city
+      - country
+      - postal_code
+      - amount
+      - balance
+      - credit_limit
+      - status
+      - category
+      - priority
+      - score
+      - created_at
+      - updated_at
+    target:
+      - col_tinyint
+      - col_smallint
+      - col_mediumint
+      - col_int
+      - col_bigint
+      - col_unsigned_int
+      - col_double
+      - col_decimal
+      - col_numeric
+      - col_char
+      - col_varchar_50
+      - col_varchar_100
+      - col_varchar_255
+      - col_text
+      - col_mediumtext
+      - col_binary
+      - col_varbinary
+      - col_blob
+      - col_date
+      - col_datetime
+      - col_timestamp
+      - col_time
+      - col_boolean
+      - col_tinyint_bool
+      - col_enum
+      - col_set
+      - col_json
+      - user_name
+      - email
+      - phone
+      - address
+      - city
+      - country
+      - postal_code
+      - amount
+      - balance
+      - credit_limit
+      - status
+      - category
+      - priority
+      - score
+      - created_at
+      - updated_at
+
+  # filters:
+  #   source: "record_id >= 'REC0000000000' AND record_id <= 'REC0000000000'"
+  #   target: "record_id >= 'REC0000000000' AND record_id <= 'REC0000000000'"
+
+strategy:
+  mode: checksum
+  algorithm: xor
+  bisectionFactor: 8
+  bisectionThreshold: 8000
+  batchSize: 1000
+  enableProfiling: true
+
+concurrency:
+  io:
+    core: 8
+    max: 32
+    queueSize: 10000
+    keepAliveSeconds: 60
+    threadNamePrefix: consilens-io-
+  cpu:
+    core: 4
+    max: 8
+    queueSize: 10000
+    keepAliveSeconds: 60
+    threadNamePrefix: consilens-cpu-
+
+result:
+  sinks:
+    - format: table
+      type: result
+      properties:
+        type: postgresql
+        url: jdbc:postgresql://localhost:5432/postgres?currentSchema=public
+        username: ${env.PG_USER}
+        password: ${env.PG_PASSWORD}
+        driver: org.postgresql.Driver
+        maxPoolSize: 10
+        tableName: dv_actual_values
+        suffixTimestamp: true
+        createTable: true
+        dropIfExists: false
+        defaultColumnLength: 500
+        batchSize: 1000
+        columns:
+          - name: job_execution_id
+            defaultValue: "12121212"
+            columnType: BIGINT
+          - name: metric_name
+            defaultValue: "multi_table_accuracy"
+            columnType: varchar(255)
+          - name: unique_code
+            defaultValue: "6JM4IH1FQCZTC2ZEMDQ8UVCGNJXQZLAU14MBUNSS3NC="
+            columnType: varchar(255)
+          - name: actual_value
+            value: ${totalDifferences}
+            columnType: decimal(20,4)
+          - name: data_time
+            defaultValue: "2025-05-26 22:35:35"
+            columnType: TIMESTAMP
+          - name: create_time
+            defaultValue: "2025-05-26 22:35:35"
+            columnType: TIMESTAMP
+          - name: update_time
+            defaultValue: "2025-05-26 22:35:35"
+            columnType: TIMESTAMP
+    - format: table
+      type: result
+      properties:
+        type: postgresql
+        url: jdbc:postgresql://localhost:5432/postgres?currentSchema=public
+        username: ${env.PG_USER}
+        password: ${env.PG_PASSWORD}
+        driver: org.postgresql.Driver
+        maxPoolSize: 10
+        tableName: dv_job_execution_result
+        suffixTimestamp: true
+        createTable: true
+        dropIfExists: false
+        defaultColumnLength: 500
+        batchSize: 1000
+        columns:
+          - name: job_id
+            columnType: BIGINT
+            defaultValue: "11111111"
+          - name: job_execution_id
+            defaultValue: "12121212"
+            columnType: BIGINT
+          - name: metric_unique_key
+            defaultValue: "21312313"
+            columnType: varchar(255)
+          - name: metric_type
+            defaultValue: "multi_table_accuracy"
+            columnType: varchar(255)
+          - name: metric_dimension
+            columnType: varchar(255)
+            defaultValue: "accuracy"
+          - name: metric_name
+            defaultValue: "multi_table_accuracy"
+            columnType: varchar(255)
+          - name: catalog_name
+            columnType: varchar(128)
+            defaultValue: ""
+          - name: schema_name
+            columnType: varchar(128)
+            defaultValue: ""
+          - name: database_name
+            columnType: varchar(128)
+            defaultValue: "test"
+          - name: table_name
+            columnType: varchar(128)
+            defaultValue: "test"
+          - name: column_name
+            columnType: varchar(128)
+            defaultValue: "test"
+          - name: actual_value
+            value: ${totalDifferences}
+            columnType: decimal(38,4)
+          - name: expected_value
+            columnType: decimal(38,4)
+            defaultValue: ${sourceRowCount}
+          - name: expected_type
+            columnType: varchar(255)
+            defaultValue: "none"
+          - name: result_formula
+            columnType: varchar(255)
+            defaultValue: "count"
+          - name: statistics_json
+            columnType: text
+            defaultValue: ${statistics_json}
+          - name: operator
+            columnType: varchar(255)
+            defaultValue: "lte"
+          - name: threshold
+            columnType: decimal(20,4)
+            defaultValue: "0.0000"
+          - name: score
+            defaultValue: "0.0000"
+            columnType: decimal(20,4)
+          - name: state
+            defaultValue: "1"
+            columnType: INTEGER
+          - name: create_time
+            defaultValue: "2025-05-26 22:35:35"
+            columnType: TIMESTAMP
+          - name: update_time
+            defaultValue: "2025-05-26 22:35:35"
+            columnType: TIMESTAMP
+    - format: table
+      type: diff-record
+      properties:
+        type: postgresql
+        url: jdbc:postgresql://localhost:5432/postgres?currentSchema=public
+        username: ${env.PG_USER}
+        password: ${env.PG_PASSWORD}
+        driver: org.postgresql.Driver
+        maxPoolSize: 10
+        prefix: diff_results_
+        suffixTimestamp: true
+        createTable: true
+        dropIfExists: false
+        defaultColumnLength: 500
+        batchSize: 1000
+        mergeDefaults: true
+        columns:
+          - name: nl_dq_execution_id
+            defaultValue: "12121212"
+            columnType: BIGINT

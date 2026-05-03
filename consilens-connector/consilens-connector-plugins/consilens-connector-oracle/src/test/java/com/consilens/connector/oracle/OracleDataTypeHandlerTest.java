@@ -1,5 +1,6 @@
 package com.consilens.connector.oracle;
 
+import com.consilens.common.type.TypeDescriptor;
 import com.consilens.connector.api.model.DataType;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -58,5 +59,17 @@ class OracleDataTypeHandlerTest {
     void testGetDataTypeMappingJSON() {
         String result = handler.getDataTypeMapping("json", 0, 0, 0);
         assertEquals("CLOB", result);
+    }
+
+    @Test
+    void shouldConvertNumberDescriptor() {
+        TypeDescriptor descriptor = handler.convertToTypeDescriptor("NUMBER(10,0)");
+
+        assertEquals(com.consilens.common.enums.DataType.INTEGER_TYPE, descriptor.getType());
+        assertEquals(64, descriptor.getBitWidth());
+        assertEquals("NUMBER(10,0)", handler.convertToOriginType(TypeDescriptor.builder(com.consilens.common.enums.DataType.DECIMAL_TYPE)
+                .numericPrecision(10)
+                .numericScale(0)
+                .build()));
     }
 }

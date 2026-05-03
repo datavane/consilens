@@ -1,8 +1,10 @@
 package com.consilens.conncetor.base.jdbc;
 
 import com.consilens.common.enums.ChecksumAlgorithm;
+import com.consilens.common.type.TypeDescriptor;
 import com.consilens.connector.api.DatabaseDialect;
 import com.consilens.connector.api.ConnectorException;
+import com.consilens.connector.api.LegacyTypeMapper;
 import com.consilens.connector.api.capability.CapabilitySet;
 import com.consilens.connector.api.capability.ConnectorCapability;
 import com.consilens.connector.api.config.ReadOptions;
@@ -20,6 +22,7 @@ import com.consilens.connector.api.dataset.SnapshotProvider;
 import com.consilens.connector.api.dataset.SplitPlanner;
 
 import com.consilens.connector.api.model.ComparisonSpec;
+import com.consilens.connector.api.model.ConnectorNativeType;
 import com.consilens.connector.api.model.DataType;
 import com.consilens.connector.api.model.FieldDescriptor;
 import com.consilens.connector.api.model.ResourceLocator;
@@ -302,10 +305,14 @@ public class JdbcDatasetHandle implements DatasetHandle, RelationalDatasetSuppor
                 String typeName = columns.getString("TYPE_NAME");
                 boolean nullable = DatabaseMetaData.columnNullable == columns.getInt("NULLABLE");
                 int ordinal = columns.getInt("ORDINAL_POSITION");
-                DataType dataType = dialect.getDataTypeHandler().convertToDataType(typeName);
+                TypeDescriptor typeDescriptor = dialect.getDataTypeHandler().convertToTypeDescriptor(typeName).toBuilder()
+                        .nullable(nullable)
+                        .build();
                 fields.add(FieldDescriptor.builder()
                         .name(columnName)
-                        .canonicalType(dataType.name().toLowerCase(Locale.ROOT))
+                        .canonicalType(LegacyTypeMapper.toCanonicalType(typeDescriptor))
+                        .typeDescriptor(typeDescriptor)
+                        .nativeType(ConnectorNativeType.builder().name(typeName).declaration(typeName).build())
                         .nullable(nullable)
                         .ordinal(ordinal)
                         .attributes(Map.of("sourceType", typeName))
@@ -350,11 +357,15 @@ public class JdbcDatasetHandle implements DatasetHandle, RelationalDatasetSuppor
             for (int index = 1; index <= resultSetMetaData.getColumnCount(); index++) {
                 String columnName = resultSetMetaData.getColumnLabel(index);
                 String typeName = resultSetMetaData.getColumnTypeName(index);
-                DataType dataType = dialect.getDataTypeHandler().convertToDataType(typeName);
+                TypeDescriptor typeDescriptor = dialect.getDataTypeHandler().convertToTypeDescriptor(typeName).toBuilder()
+                        .nullable(resultSetMetaData.isNullable(index) != ResultSetMetaData.columnNoNulls)
+                        .build();
                 FieldDescriptor field = FieldDescriptor.builder()
                         .name(columnName)
-                        .canonicalType(dataType.name().toLowerCase(Locale.ROOT))
-                        .nullable(resultSetMetaData.isNullable(index) != ResultSetMetaData.columnNoNulls)
+                        .canonicalType(LegacyTypeMapper.toCanonicalType(typeDescriptor))
+                        .typeDescriptor(typeDescriptor)
+                        .nativeType(ConnectorNativeType.builder().name(typeName).declaration(typeName).build())
+                        .nullable(typeDescriptor.isNullable())
                         .ordinal(index)
                         .attributes(Map.of("sourceType", typeName))
                         .build();
@@ -471,7 +482,7 @@ public class JdbcDatasetHandle implements DatasetHandle, RelationalDatasetSuppor
             }
             FieldDescriptor field = fieldMap.get(column);
             values.put(column, CanonicalValue.builder()
-                    .type(field != null ? field.getCanonicalType() : null)
+                    .type(resolveCanonicalType(field))
                     .value(value)
                     .build());
         }
@@ -581,9 +592,19 @@ public class JdbcDatasetHandle implements DatasetHandle, RelationalDatasetSuppor
                 : Collections.emptyMap();
         for (String column : columns) {
             FieldDescriptor field = fieldMap.get(column);
-            result.put(column, field != null ? resolveDataType(field.getCanonicalType()) : DataType.UNKNOWN);
+            result.put(column, field != null ? resolveDataType(resolveCanonicalType(field)) : DataType.UNKNOWN);
         }
         return result;
+    }
+
+    private String resolveCanonicalType(FieldDescriptor field) {
+        if (field == null) {
+            return null;
+        }
+        if (field.getTypeDescriptor() != null) {
+            return LegacyTypeMapper.toCanonicalType(field.getTypeDescriptor());
+        }
+        return field.getCanonicalType();
     }
 
     private DataType resolveDataType(String canonicalType) {

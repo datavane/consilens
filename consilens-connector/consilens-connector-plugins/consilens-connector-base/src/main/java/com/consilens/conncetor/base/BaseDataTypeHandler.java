@@ -1,19 +1,28 @@
 package com.consilens.conncetor.base;
 
+import com.consilens.common.type.TypeDescriptor;
 import com.consilens.connector.api.CapabilityProvider;
 import com.consilens.connector.api.DataTypeHandler;
+import com.consilens.connector.api.LegacyTypeMapper;
 import com.consilens.connector.api.model.DataType;
 import lombok.extern.slf4j.Slf4j;
 
 import java.lang.reflect.Method;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Slf4j
 public class BaseDataTypeHandler implements DataTypeHandler {
 
     private static final Set<String> DATE_ONLY_COMPARISON_MODES = Set.of("DATE_ONLY", "TRUNCATE_TO_DAY");
+    private static final Pattern TYPE_PARAMS_PATTERN = Pattern.compile("^\\s*([^()]+?)(?:\\(([^)]*)\\))?\\s*$");
+    private static final Pattern LENGTH_PATTERN = Pattern.compile("\\((\\d+)\\)");
+    private static final Pattern PRECISION_SCALE_PATTERN = Pattern.compile("\\((\\d+)\\s*(?:,\\s*(\\d+))?\\)");
 
     private static final Map<String, DataType> DATA_TYPE_ALIASES = Map.ofEntries(
             Map.entry("BOOL", DataType.BOOLEAN),
@@ -346,11 +355,108 @@ public class BaseDataTypeHandler implements DataTypeHandler {
         }
     }
 
+    @Override
+    public TypeDescriptor convertToTypeDescriptor(String originType) {
+        TypeDescriptor baseDescriptor = LegacyTypeMapper.toTypeDescriptor(convertToDataType(originType), originType);
+        TypeDescriptor.Builder builder = baseDescriptor.toBuilder();
+        ParsedType parsedType = parseType(originType);
+        String canonicalType = parsedType.canonicalType;
+
+        if (canonicalType.endsWith("_UNSIGNED")) {
+            builder.unsigned(true);
+        }
+
+        switch (convertToDataType(originType)) {
+            case TINYINT:
+                builder.bitWidth(8);
+                break;
+            case SMALLINT:
+                builder.bitWidth(16);
+                break;
+            case INTEGER:
+                builder.bitWidth(32);
+                break;
+            case BIGINT:
+                builder.bitWidth(64);
+                break;
+            case DECIMAL:
+            case NUMERIC:
+                builder.numericPrecision(parsedType.integerAt(0, 38));
+                builder.numericScale(parsedType.integerAt(1, 0));
+                break;
+            case CHAR:
+            case VARCHAR:
+            case BINARY:
+            case VARBINARY:
+                Integer length = parsedType.integerAt(0, null);
+                if (length != null) {
+                    builder.length(length);
+                }
+                break;
+            case TEXT:
+            case CLOB:
+            case LONGVARCHAR:
+                builder.textType(true);
+                break;
+            case BLOB:
+            case LONGBLOB:
+                builder.blobType(true);
+                break;
+            case TIME:
+            case TIME_WITH_TIME_ZONE:
+            case TIMESTAMP:
+            case DATETIME:
+            case TIMESTAMP_WITH_TIMEZONE:
+                Integer precision = parsedType.integerAt(0, null);
+                if (precision != null) {
+                    builder.timePrecision(precision);
+                }
+                break;
+            default:
+                break;
+        }
+
+        return builder.build();
+    }
+
     private String canonicalizeTypeName(String sourceType) {
         String upperType = sourceType.trim().toUpperCase(Locale.ROOT);
         upperType = upperType.replaceAll("\\s*\\([^)]*\\)", "");
         upperType = upperType.replaceAll("\\s+", " ").trim();
         return upperType.replace(' ', '_');
+    }
+
+    @Override
+    public String convertToOriginType(TypeDescriptor typeDescriptor) {
+        if (typeDescriptor == null) {
+            return "";
+        }
+        if (typeDescriptor.getOriginType() != null && !typeDescriptor.getOriginType().isBlank()) {
+            return typeDescriptor.getOriginType();
+        }
+        DataType legacyType = LegacyTypeMapper.toLegacyDataType(typeDescriptor);
+        switch (legacyType) {
+            case VARCHAR:
+            case CHAR:
+            case BINARY:
+            case VARBINARY:
+                return formatDataType(legacyType, safeValue(typeDescriptor.getLength()), 0, 0);
+            case DECIMAL:
+            case NUMERIC:
+                return formatDataType(legacyType, 0, safeValue(typeDescriptor.getNumericPrecision()),
+                        safeValue(typeDescriptor.getNumericScale()));
+            case TIME:
+            case TIME_WITH_TIME_ZONE:
+            case TIMESTAMP:
+            case TIMESTAMP_WITH_TIMEZONE:
+                if (typeDescriptor.getTimePrecision() != null) {
+                    return legacyType.getDisplayName() + "(" + typeDescriptor.getTimePrecision() + ")";
+                }
+                return legacyType.getDisplayName();
+            default:
+                return formatDataType(legacyType, safeValue(typeDescriptor.getLength()),
+                        safeValue(typeDescriptor.getNumericPrecision()), safeValue(typeDescriptor.getNumericScale()));
+        }
     }
 
     @Override
@@ -440,6 +546,161 @@ public class BaseDataTypeHandler implements DataTypeHandler {
                 dataType.equals("BOOL") ||
                 dataType.equals("BIT") ||
                 dataType.equals("TINYINT(1)");
+    }
+
+    protected String normalizeTypeExpression(String originType) {
+        return originType == null ? "" : originType.trim().toUpperCase(Locale.ROOT);
+    }
+
+    protected String extractBaseType(String typeExpression) {
+        if (typeExpression == null || typeExpression.isBlank()) {
+            return "";
+        }
+        String trimmed = typeExpression.trim();
+        int idx = trimmed.indexOf('(');
+        if (idx > 0) {
+            trimmed = trimmed.substring(0, idx).trim();
+        }
+        if (trimmed.toUpperCase(Locale.ROOT).endsWith(" UNSIGNED")) {
+            trimmed = trimmed.substring(0, trimmed.length() - " UNSIGNED".length()).trim();
+        }
+        return trimmed;
+    }
+
+    protected Integer extractLength(String typeExpression) {
+        if (typeExpression == null) {
+            return null;
+        }
+        Matcher matcher = LENGTH_PATTERN.matcher(typeExpression);
+        if (matcher.find()) {
+            return Integer.parseInt(matcher.group(1));
+        }
+        return null;
+    }
+
+    protected Integer[] extractPrecisionScale(String typeExpression) {
+        if (typeExpression == null) {
+            return new Integer[]{null, null};
+        }
+        Matcher matcher = PRECISION_SCALE_PATTERN.matcher(typeExpression);
+        if (!matcher.find()) {
+            return new Integer[]{null, null};
+        }
+        Integer precision = Integer.parseInt(matcher.group(1));
+        Integer scale = matcher.group(2) != null ? Integer.parseInt(matcher.group(2)) : null;
+        return new Integer[]{precision, scale};
+    }
+
+    protected boolean containsMaxLength(String typeExpression) {
+        return typeExpression != null && typeExpression.toUpperCase(Locale.ROOT).contains("(MAX)");
+    }
+
+    protected List<String> splitTopLevel(String input) {
+        List<String> parts = new ArrayList<>();
+        if (input == null || input.isBlank()) {
+            return parts;
+        }
+        StringBuilder current = new StringBuilder();
+        int parenthesesDepth = 0;
+        int angleDepth = 0;
+        boolean inSingleQuotes = false;
+        boolean inDoubleQuotes = false;
+        for (int i = 0; i < input.length(); i++) {
+            char ch = input.charAt(i);
+            if (ch == '\'' && !inDoubleQuotes) {
+                inSingleQuotes = !inSingleQuotes;
+            } else if (ch == '"' && !inSingleQuotes) {
+                inDoubleQuotes = !inDoubleQuotes;
+            } else if (!inSingleQuotes && !inDoubleQuotes) {
+                if (ch == '(') {
+                    parenthesesDepth++;
+                } else if (ch == ')') {
+                    parenthesesDepth--;
+                } else if (ch == '<') {
+                    angleDepth++;
+                } else if (ch == '>') {
+                    angleDepth--;
+                } else if (ch == ',' && parenthesesDepth == 0 && angleDepth == 0) {
+                    parts.add(current.toString().trim());
+                    current.setLength(0);
+                    continue;
+                }
+            }
+            current.append(ch);
+        }
+        if (current.length() > 0) {
+            parts.add(current.toString().trim());
+        }
+        return parts;
+    }
+
+    protected int findTopLevelCharacter(String input, char target) {
+        if (input == null) {
+            return -1;
+        }
+        int parenthesesDepth = 0;
+        int angleDepth = 0;
+        boolean inSingleQuotes = false;
+        boolean inDoubleQuotes = false;
+        for (int i = 0; i < input.length(); i++) {
+            char ch = input.charAt(i);
+            if (ch == '\'' && !inDoubleQuotes) {
+                inSingleQuotes = !inSingleQuotes;
+            } else if (ch == '"' && !inSingleQuotes) {
+                inDoubleQuotes = !inDoubleQuotes;
+            } else if (!inSingleQuotes && !inDoubleQuotes) {
+                if (ch == '(') {
+                    parenthesesDepth++;
+                } else if (ch == ')') {
+                    parenthesesDepth--;
+                } else if (ch == '<') {
+                    angleDepth++;
+                } else if (ch == '>') {
+                    angleDepth--;
+                } else if (ch == target && parenthesesDepth == 0 && angleDepth == 0) {
+                    return i;
+                }
+            }
+        }
+        return -1;
+    }
+
+    private ParsedType parseType(String sourceType) {
+        if (sourceType == null) {
+            return new ParsedType(DataType.UNKNOWN.name(), null);
+        }
+        Matcher matcher = TYPE_PARAMS_PATTERN.matcher(sourceType.trim());
+        if (!matcher.matches()) {
+            return new ParsedType(canonicalizeTypeName(sourceType), null);
+        }
+        return new ParsedType(canonicalizeTypeName(matcher.group(1)), matcher.group(2));
+    }
+
+    private int safeValue(Integer value) {
+        return value != null ? value : 0;
+    }
+
+    private static final class ParsedType {
+        private final String canonicalType;
+        private final String[] parts;
+
+        private ParsedType(String canonicalType, String rawParameters) {
+            this.canonicalType = canonicalType;
+            this.parts = rawParameters == null || rawParameters.isBlank()
+                    ? new String[0]
+                    : rawParameters.split("\\s*,\\s*");
+        }
+
+        private Integer integerAt(int index, Integer fallback) {
+            if (index >= parts.length) {
+                return fallback;
+            }
+            try {
+                return Integer.parseInt(parts[index].trim());
+            } catch (NumberFormatException e) {
+                return fallback;
+            }
+        }
     }
 
 }

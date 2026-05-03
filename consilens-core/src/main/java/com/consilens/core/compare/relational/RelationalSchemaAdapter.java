@@ -1,5 +1,6 @@
 package com.consilens.core.compare.relational;
 
+import com.consilens.connector.api.LegacyTypeMapper;
 import com.consilens.connector.api.model.ColumnInfo;
 import com.consilens.connector.api.model.DataType;
 import com.consilens.connector.api.model.FieldDescriptor;
@@ -30,7 +31,9 @@ public final class RelationalSchemaAdapter {
                 }
                 columns.put(field.getName(), ColumnInfo.builder()
                         .name(field.getName())
-                        .type(resolveDataType(field.getCanonicalType()))
+                        .type(field.getTypeDescriptor() != null
+                                ? LegacyTypeMapper.toLegacyDataType(field.getTypeDescriptor())
+                                : resolveDataType(field.getCanonicalType()))
                         .nullable(field.isNullable())
                         .precision(Optional.empty())
                         .scale(Optional.empty())

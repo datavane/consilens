@@ -1,5 +1,7 @@
 package com.consilens.connector.api;
 
+import com.consilens.connector.api.write.TableWriteCompiler;
+
 /**
  * Database dialect interface - main entry point for database-specific
  * operations.
@@ -87,4 +89,8 @@ public interface DatabaseDialect {
      * @return connection pool optimizer for this dialect
      */
     ConnectionPoolOptimizer getConnectionPoolOptimizer();
+
+    default TableWriteCompiler getTableWriteCompiler() {
+        throw new UnsupportedOperationException("Table sink write is not supported for connectorType=" + getConnectorType());
+    }
 }

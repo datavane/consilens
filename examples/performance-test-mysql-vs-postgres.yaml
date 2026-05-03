@@ -153,6 +153,7 @@ result:
     - format: table
       type: result
       properties:
+        type: mysql
         url: jdbc:mysql://localhost:3306/test?useUnicode=true&characterEncoding=UTF-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
         username: ${env.MYSQL_USER}
         password: ${env.MYSQL_PASSWORD}
@@ -189,6 +190,7 @@ result:
     - format: table
       type: result
       properties:
+        type: mysql
         url: jdbc:mysql://localhost:3306/test?useUnicode=true&characterEncoding=UTF-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
         username: ${env.MYSQL_USER}
         password: ${env.MYSQL_PASSWORD}
@@ -270,6 +272,7 @@ result:
     - format: table
       type: diff-record
       properties:
+        type: mysql
         url: jdbc:mysql://localhost:3306/test?useUnicode=true&characterEncoding=UTF-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
         username: ${env.MYSQL_USER}
         password: ${env.MYSQL_PASSWORD}

@@ -1,6 +1,7 @@
 package com.consilens.core.compare.executor;
 
 import com.consilens.connector.api.ConnectorException;
+import com.consilens.connector.api.LegacyTypeMapper;
 import com.consilens.connector.api.dataset.DatasetHandle;
 import com.consilens.connector.api.model.ComparisonSpec;
 import com.consilens.connector.api.model.DataType;
@@ -260,7 +261,10 @@ final class ConnectorRecordDiffer {
         Map<String, DataType> result = new LinkedHashMap<>();
         for (String column : columns) {
             FieldDescriptor field = fieldMap.get(column);
-            result.put(column, resolveType(field != null ? field.getCanonicalType() : null));
+            String canonicalType = field != null && field.getTypeDescriptor() != null
+                    ? LegacyTypeMapper.toCanonicalType(field.getTypeDescriptor())
+                    : field != null ? field.getCanonicalType() : null;
+            result.put(column, resolveType(canonicalType));
         }
         return result;
     }

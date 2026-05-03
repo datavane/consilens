@@ -74,6 +74,8 @@ class ConfigurationManagerTest {
                 "        \"format\": \"table\",\n" +
                 "        \"type\": \"result\",\n" +
                 "        \"properties\": {\n" +
+                "          \"type\": \"mysql\",\n" +
+                "          \"url\": \"jdbc:mysql://localhost:3306/consilens\",\n" +
                 "          \"tableName\": \"dv_job_execution_result\",\n" +
                 "          \"createTable\": true,\n" +
                 "          \"columns\": [\n" +
@@ -157,6 +159,8 @@ class ConfigurationManagerTest {
                 "        \"format\": \"table\",\n" +
                 "        \"type\": \"result\",\n" +
                 "        \"properties\": {\n" +
+                "          \"type\": \"mysql\",\n" +
+                "          \"url\": \"jdbc:mysql://localhost:3306/consilens\",\n" +
                 "          \"tableName\": \"${env.RESULT_TABLE:dv_job_execution_result}\",\n" +
                 "          \"createTable\": true,\n" +
                 "          \"columns\": [\n" +
@@ -272,5 +276,88 @@ class ConfigurationManagerTest {
                 () -> configurationManager.loadConfiguration(configFile.toString(), false));
 
         assertEquals("Missing required environment variable: SOURCE_URL", exception.getMessage());
+    }
+
+    @Test
+    void shouldRejectUnsupportedTableSinkDatabase() throws Exception {
+        Path configFile = tempDir.resolve("diff-config-unsupported-sink.yaml");
+        Files.writeString(configFile, "source:\n" +
+                "  type: mysql\n" +
+                "  url: jdbc:mysql://localhost:3306/test\n" +
+                "  username: root\n" +
+                "  password: 123456\n" +
+                "target:\n" +
+                "  type: postgresql\n" +
+                "  url: jdbc:postgresql://localhost:5432/postgres?currentSchema=public\n" +
+                "  username: postgres\n" +
+                "  password: 123456\n" +
+                "comparison:\n" +
+                "  tables:\n" +
+                "    source: performance_test_table\n" +
+                "    target: performance_test_table\n" +
+                "  keys:\n" +
+                "    source:\n" +
+                "      - record_id\n" +
+                "    target:\n" +
+                "      - record_id\n" +
+                "strategy:\n" +
+                "  mode: checksum\n" +
+                "  algorithm: xor\n" +
+                "result:\n" +
+                "  sinks:\n" +
+                "    - format: table\n" +
+                "      type: result\n" +
+                "      properties:\n" +
+                "        type: oracle\n" +
+                "        url: jdbc:oracle:thin:@localhost:1521/xe\n" +
+                "        tableName: diff_result\n");
+
+        ConfigurationManager configurationManager = new ConfigurationManager();
+
+        ConfigurationException exception = assertThrows(ConfigurationException.class,
+                () -> configurationManager.loadConfiguration(configFile.toString(), false));
+
+        assertTrue(exception.getMessage().contains("properties.type must be mysql or postgresql"));
+    }
+
+    @Test
+    void shouldRejectTableSinkWithoutExplicitDatabaseType() throws Exception {
+        Path configFile = tempDir.resolve("diff-config-missing-sink-type.yaml");
+        Files.writeString(configFile, "source:\n" +
+                "  type: mysql\n" +
+                "  url: jdbc:mysql://localhost:3306/test\n" +
+                "  username: root\n" +
+                "  password: 123456\n" +
+                "target:\n" +
+                "  type: postgresql\n" +
+                "  url: jdbc:postgresql://localhost:5432/postgres?currentSchema=public\n" +
+                "  username: postgres\n" +
+                "  password: 123456\n" +
+                "comparison:\n" +
+                "  tables:\n" +
+                "    source: performance_test_table\n" +
+                "    target: performance_test_table\n" +
+                "  keys:\n" +
+                "    source:\n" +
+                "      - record_id\n" +
+                "    target:\n" +
+                "      - record_id\n" +
+                "strategy:\n" +
+                "  mode: checksum\n" +
+                "  algorithm: xor\n" +
+                "result:\n" +
+                "  sinks:\n" +
+                "    - format: table\n" +
+                "      type: result\n" +
+                "      properties:\n" +
+                "        url: jdbc:mysql://localhost:3306/test\n" +
+                "        tableName: diff_result\n");
+
+        ConfigurationManager configurationManager = new ConfigurationManager();
+
+        ConfigurationException exception = assertThrows(ConfigurationException.class,
+                () -> configurationManager.loadConfiguration(configFile.toString(), false));
+
+        assertTrue(exception.getMessage().contains("properties.type is required"));
     }
 }

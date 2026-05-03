@@ -1,5 +1,6 @@
 package com.consilens.connector.starrocks;
 
+import com.consilens.common.type.TypeDescriptor;
 import com.consilens.connector.api.model.DataType;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -71,5 +72,14 @@ class StarRocksDataTypeHandlerTest {
     @Test
     void testGetDataTypeMappingJSON() {
         assertEquals("JSON", handler.getDataTypeMapping("json", 0, 0, 0));
+    }
+
+    @Test
+    void shouldConvertStructDescriptor() {
+        TypeDescriptor descriptor = handler.convertToTypeDescriptor("STRUCT<id:BIGINT, name:STRING>");
+
+        assertEquals(com.consilens.common.enums.DataType.STRUCT_TYPE, descriptor.getType());
+        assertEquals(2, descriptor.getFields().size());
+        assertEquals("STRUCT<id:BIGINT, name:STRING>", handler.convertToOriginType(descriptor));
     }
 }

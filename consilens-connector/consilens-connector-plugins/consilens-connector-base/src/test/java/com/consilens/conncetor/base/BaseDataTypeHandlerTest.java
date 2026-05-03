@@ -1,5 +1,6 @@
 package com.consilens.conncetor.base;
 
+import com.consilens.common.type.TypeDescriptor;
 import com.consilens.connector.api.CapabilityProvider;
 import com.consilens.connector.api.enums.DatabaseFeature;
 import com.consilens.connector.api.model.DataType;
@@ -10,6 +11,7 @@ import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class BaseDataTypeHandlerTest {
 
@@ -40,6 +42,25 @@ class BaseDataTypeHandlerTest {
     void shouldNormalizeBitAsBoolean() {
         assertEquals("CASE WHEN \"flag\" = TRUE THEN '1' ELSE '0' END",
                 handler.normalizeColumn("flag", DataType.BIT));
+    }
+
+    @Test
+    void shouldConvertToTypedDescriptor() {
+        TypeDescriptor descriptor = handler.convertToTypeDescriptor("decimal(18,4)");
+
+        assertEquals(com.consilens.common.enums.DataType.DECIMAL_TYPE, descriptor.getType());
+        assertEquals(18, descriptor.getNumericPrecision());
+        assertEquals(4, descriptor.getNumericScale());
+        assertEquals("decimal(18,4)", handler.convertToOriginType(descriptor));
+    }
+
+    @Test
+    void shouldParseTypedStringLength() {
+        TypeDescriptor descriptor = handler.convertToTypeDescriptor("varchar(255)");
+
+        assertEquals(com.consilens.common.enums.DataType.STRING_TYPE, descriptor.getType());
+        assertEquals(255, descriptor.getLength());
+        assertTrue(handler.convertToOriginType(descriptor).contains("255"));
     }
 
     private static class TestCapabilityProvider implements CapabilityProvider {

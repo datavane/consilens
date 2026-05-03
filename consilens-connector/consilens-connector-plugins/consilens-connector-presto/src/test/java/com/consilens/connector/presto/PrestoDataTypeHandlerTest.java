@@ -1,5 +1,6 @@
 package com.consilens.connector.presto;
 
+import com.consilens.common.type.TypeDescriptor;
 import com.consilens.connector.api.model.DataType;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -58,5 +59,14 @@ class PrestoDataTypeHandlerTest {
     void testGetDataTypeMappingJSON() {
         String result = handler.getDataTypeMapping("json", 0, 0, 0);
         assertEquals("JSON", result);
+    }
+
+    @Test
+    void shouldConvertRowDescriptor() {
+        TypeDescriptor descriptor = handler.convertToTypeDescriptor("ROW(id BIGINT, name VARCHAR)");
+
+        assertEquals(com.consilens.common.enums.DataType.STRUCT_TYPE, descriptor.getType());
+        assertEquals(2, descriptor.getFields().size());
+        assertEquals("ROW(id BIGINT, name VARCHAR)", handler.convertToOriginType(descriptor));
     }
 }

@@ -1,5 +1,6 @@
 package com.consilens.connector.sqlserver;
 
+import com.consilens.common.type.TypeDescriptor;
 import com.consilens.connector.api.model.DataType;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -68,5 +69,14 @@ class SQLServerDataTypeHandlerTest {
     void testGetDataTypeMappingJSON() {
         String result = handler.getDataTypeMapping("json", 0, 0, 0);
         assertEquals("NVARCHAR(MAX)", result);
+    }
+
+    @Test
+    void shouldConvertDateTimeOffsetDescriptor() {
+        TypeDescriptor descriptor = handler.convertToTypeDescriptor("datetimeoffset(7)");
+
+        assertEquals(com.consilens.common.enums.DataType.TIMESTAMP_TYPE, descriptor.getType());
+        assertTrue(descriptor.isWithTimezone());
+        assertEquals("datetimeoffset(7)", handler.convertToOriginType(descriptor));
     }
 }

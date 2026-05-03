@@ -90,7 +90,8 @@ public class ColumnMapping {
     private String defaultValue;
 
     /**
-     * SQL column type for DDL (table format only), e.g. {@code VARCHAR(64)}, {@code BIGINT}, {@code TEXT}.
+     * SQL column type for table sinks, used by target write-plan compilation and prepared-value conversion,
+     * e.g. {@code VARCHAR(64)}, {@code BIGINT}, {@code TEXT}.
      * Defaults to {@code TEXT} if not set.
      */
     private String columnType;

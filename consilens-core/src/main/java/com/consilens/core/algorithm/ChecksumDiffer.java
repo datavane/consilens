@@ -9,6 +9,7 @@ import com.consilens.core.segment.TableSegmenter;
 import com.consilens.core.diff.DiffRow;
 import com.consilens.core.diff.DiffOperation;
 import com.consilens.core.diff.InfoTreeRecorder;
+import com.consilens.core.thread.ConcurrencyConfig;
 import com.consilens.core.thread.ExecutorProvider;
 import com.consilens.connector.api.model.DataType;
 import com.consilens.connector.api.model.TableSchema;
@@ -25,7 +26,6 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
@@ -42,7 +42,7 @@ public class ChecksumDiffer extends TableDiffer implements AutoCloseable {
     private final ProgressReporter progressReporter;
     private final AtomicLong segmentSequence = new AtomicLong(0);
     private final Map<DatabaseAdapter, TableSegmenter> segmenterCache = new ConcurrentHashMap<>();
-    private final Semaphore activeSegmentBudget;
+    private final SegmentPermitController activeSegmentBudget;
 
     /**
      * Creates a new ChecksumDiffer with the given configuration.
@@ -73,10 +73,11 @@ public class ChecksumDiffer extends TableDiffer implements AutoCloseable {
         this.checksumCache = new ChecksumCache();
         this.performanceMonitor = new PerformanceMonitor();
         this.progressReporter = new ProgressReporter();
-        this.activeSegmentBudget = new Semaphore(resolveSegmentBudget(config));
+        int segmentBudget = resolveSegmentBudget(config);
+        this.activeSegmentBudget = new SegmentPermitController(segmentBudget);
         
-        log.info("ChecksumDiffer initialized with checksumAlgorithm: {}, local comparison mode: auto",
-                config.getChecksumAlgorithm());
+        log.info("ChecksumDiffer initialized with checksumAlgorithm: {}, local comparison mode: auto, segmentBudget={}",
+                config.getChecksumAlgorithm(), segmentBudget);
     }
 
     @Override
@@ -361,17 +362,10 @@ public class ChecksumDiffer extends TableDiffer implements AutoCloseable {
                         return CompletableFuture.completedFuture(null);
                     }
 
-                    int requestedPermits = largerSegments.size();
-                    if (!activeSegmentBudget.tryAcquire(requestedPermits)) {
-                        log.warn("Segment budget exhausted (requested={}, available={}), falling back to local comparison for {}",
-                                requestedPermits, activeSegmentBudget.availablePermits(), parentSegmentId);
-                        return performLocalComparison(table1, table2, infoTreeRecorder, parentSegmentId);
-                    }
-
-                    // Create corresponding segments for the smaller table and process all segments
+                    // Create corresponding segments for the smaller table and process all segments.
+                    // Each child segment acquires its own permit and waits in FIFO order when the budget is full.
                     return createCorrespondingSegmentsAndProcess(smallerTable, largerSegments, table1, table2,
-                            largerTable, infoTreeRecorder, level, parentSegmentId)
-                            .whenComplete((ignored, error) -> activeSegmentBudget.release(requestedPermits));
+                            largerTable, infoTreeRecorder, level, parentSegmentId);
                 });
     }
 
@@ -486,7 +480,7 @@ public class ChecksumDiffer extends TableDiffer implements AutoCloseable {
         if (config == null || config.getConcurrencyConfig() == null || config.getConcurrencyConfig().getIo() == null) {
             return 64;
         }
-        com.consilens.core.thread.ConcurrencyConfig.PoolConfig ioConfig = config.getConcurrencyConfig().getIo();
+        ConcurrencyConfig.PoolConfig ioConfig = config.getConcurrencyConfig().getIo();
         int executorCapacity = Math.max(ioConfig.getCore(), ioConfig.getMax());
         return Math.max(64, executorCapacity * 4);
     }
@@ -1092,12 +1086,36 @@ public class ChecksumDiffer extends TableDiffer implements AutoCloseable {
             long segmentMaxRows = Math.max(size1, size2);
 
             // Each aligned pair gets diffed concurrently. The summed futures allow the caller to await completion.
-            CompletableFuture<Void> future = diffSegmentsWithParent(
-                    t1, t2, infoTreeRecorder, segmentMaxRows, level + 1, parentSegmentId);
+            String permitRequestId = parentSegmentId + "#child-" + segIdx;
+            CompletableFuture<Void> future = diffSegmentWithPermit(
+                    permitRequestId, t1, t2, infoTreeRecorder, segmentMaxRows, level + 1, parentSegmentId);
             futures.add(future);
         }
 
         return CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]));
+    }
+
+    private CompletableFuture<Void> diffSegmentWithPermit(
+            String permitRequestId,
+            TableSegment table1,
+            TableSegment table2,
+            InfoTreeRecorder infoTreeRecorder,
+            long maxRows,
+            int level,
+            String parentSegmentId) {
+
+        return activeSegmentBudget.acquire(permitRequestId)
+                .thenCompose(lease -> {
+                    log.debug("Segment permit acquired for {} (availablePermits={}, queueDepth={})",
+                            permitRequestId, activeSegmentBudget.availablePermits(), activeSegmentBudget.queueDepth());
+                    try {
+                        return diffSegmentsWithParent(table1, table2, infoTreeRecorder, maxRows, level, parentSegmentId)
+                                .whenComplete((ignored, error) -> lease.release());
+                    } catch (Throwable error) {
+                        lease.release();
+                        return CompletableFuture.failedFuture(error);
+                    }
+                });
     }
 
     /**

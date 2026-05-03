@@ -4,23 +4,29 @@ import com.consilens.cli.model.normalization.NormalizationConfig;
 import com.consilens.cli.model.normalization.TypeNormalizationRule;
 import com.consilens.common.enums.ChecksumAlgorithm;
 import com.consilens.common.enums.ComparisonStrategy;
+import com.consilens.connector.api.DatabaseDialect;
+import com.consilens.connector.api.DatabaseDialects;
 import com.consilens.core.thread.ConcurrencyConfig;
 import com.consilens.core.validation.ValidationException;
 import com.consilens.core.validation.ValidationFramework;
 import com.consilens.sink.api.model.ResultConfig;
 import com.consilens.sink.api.model.SinkConfig;
+import com.consilens.sink.table.TableSinkConfig;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * CLI configuration model.
@@ -31,6 +37,8 @@ import java.util.Objects;
 @AllArgsConstructor
 @JsonInclude(JsonInclude.Include.NON_DEFAULT)
 public class CliConfiguration {
+
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
     @JsonProperty("source")
     private ConnectionConfig source;
@@ -156,7 +164,8 @@ public class CliConfiguration {
         SinkConfig tableSink = new SinkConfig();
         tableSink.setFormat("table");
         tableSink.setType("diff-record");
-        tableSink.setProperties("{\"url\":\"jdbc:mysql://localhost:3306/consilens_results?useSSL=false&serverTimezone=UTC\","
+        tableSink.setProperties("{\"type\":\"mysql\","
+                + "\"url\":\"jdbc:mysql://localhost:3306/consilens_results?useSSL=false&serverTimezone=UTC\","
                 + "\"username\":\"consilens_user\","
                 + "\"password\":\"consilens_pass\","
                 + "\"driver\":\"com.mysql.cj.jdbc.Driver\","
@@ -259,6 +268,8 @@ public class CliConfiguration {
         if (normalization != null) {
             normalization.validate();
         }
+
+        validateResultSinks();
     }
 
     public void validateDatabaseConnections() throws ValidationException {
@@ -269,5 +280,85 @@ public class CliConfiguration {
 
         source.validate("source");
         target.validate("target");
+    }
+
+    private void validateResultSinks() {
+        if (result == null || result.getSinks() == null) {
+            return;
+        }
+        for (int i = 0; i < result.getSinks().size(); i++) {
+            SinkConfig sink = result.getSinks().get(i);
+            if (sink == null || !"table".equalsIgnoreCase(sink.getFormat())) {
+                continue;
+            }
+            TableSinkConfig tableSinkConfig = parseTableSinkConfig(i, sink);
+            String databaseType;
+            try {
+                databaseType = tableSinkConfig.resolveDatabaseType();
+            } catch (IllegalStateException e) {
+                throw ValidationException.simple("CONFIGURATION_VALIDATION",
+                        "result.sinks[" + i + "].properties.type is required for table sinks");
+            }
+            if (!"mysql".equals(databaseType) && !"postgresql".equals(databaseType)) {
+                throw ValidationException.simple("CONFIGURATION_VALIDATION",
+                        "result.sinks[" + i + "].properties.type must be mysql or postgresql");
+            }
+            DatabaseDialect dialect = DatabaseDialects.require(databaseType);
+            dialect.getTableWriteCompiler();
+            validateTableSinkColumns(i, tableSinkConfig, dialect);
+        }
+    }
+
+    private void validateTableSinkColumns(int sinkIndex, TableSinkConfig tableSinkConfig, DatabaseDialect dialect) {
+        if (tableSinkConfig.getColumns() == null || tableSinkConfig.getColumns().isEmpty()) {
+            return;
+        }
+        Set<String> columnNames = new HashSet<>();
+        for (int i = 0; i < tableSinkConfig.getColumns().size(); i++) {
+            String columnName = tableSinkConfig.getColumns().get(i).getName();
+            if (columnName == null || columnName.isBlank()) {
+                throw ValidationException.simple("CONFIGURATION_VALIDATION",
+                        "result.sinks[" + sinkIndex + "].columns[" + i + "].name 不能为空");
+            }
+            if (!columnNames.add(columnName.trim().toLowerCase())) {
+                throw ValidationException.simple("CONFIGURATION_VALIDATION",
+                        "result.sinks[" + sinkIndex + "] contains duplicate column name: " + columnName);
+            }
+            String declaredColumnType = tableSinkConfig.getColumns().get(i).getColumnType();
+            if (declaredColumnType == null || declaredColumnType.isBlank()) {
+                continue;
+            }
+            if (dialect.getDataTypeHandler().convertToTypeDescriptor(extractTypeDefinition(declaredColumnType)).getType()
+                    == com.consilens.common.enums.DataType.UNKNOWN_TYPE) {
+                throw ValidationException.simple("CONFIGURATION_VALIDATION",
+                        "result.sinks[" + sinkIndex + "].columns[" + i + "].columnType: target connector "
+                                + databaseTypeName(dialect) + " cannot parse type definition \"" + declaredColumnType + "\"");
+            }
+        }
+    }
+
+    private String databaseTypeName(DatabaseDialect dialect) {
+        return dialect != null ? dialect.getConnectorType() : "unknown";
+    }
+
+    private String extractTypeDefinition(String declaredColumnType) {
+        String normalized = declaredColumnType.trim();
+        String upper = normalized.toUpperCase();
+        for (String keyword : List.of(" PRIMARY KEY", " NOT NULL", " NULL", " UNIQUE", " DEFAULT ", " CHECK ", " REFERENCES ")) {
+            int index = upper.indexOf(keyword);
+            if (index >= 0) {
+                return normalized.substring(0, index).trim();
+            }
+        }
+        return normalized;
+    }
+
+    private TableSinkConfig parseTableSinkConfig(int index, SinkConfig sink) {
+        try {
+            return OBJECT_MAPPER.readValue(sink.getProperties(), TableSinkConfig.class);
+        } catch (Exception e) {
+            throw ValidationException.simple("CONFIGURATION_VALIDATION",
+                    "result.sinks[" + index + "] table sink properties are invalid: " + e.getMessage());
+        }
     }
 }

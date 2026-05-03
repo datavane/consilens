@@ -1,5 +1,6 @@
 package com.consilens.connector.mysql;
 
+import com.consilens.common.type.TypeDescriptor;
 import com.consilens.connector.api.model.DataType;
 import com.consilens.conncetor.base.jdbc.JdbcDatasetHandle;
 import org.junit.jupiter.api.BeforeEach;
@@ -95,5 +96,15 @@ class MySQLDataTypeHandlerTest {
     @Test
     void testGetDataTypeMappingJSON() {
         assertEquals("JSON", handler.getDataTypeMapping("json", 0, 0, 0));
+    }
+
+    @Test
+    void shouldConvertUnsignedIntegerDescriptor() {
+        TypeDescriptor descriptor = handler.convertToTypeDescriptor("bigint unsigned");
+
+        assertEquals(com.consilens.common.enums.DataType.INTEGER_TYPE, descriptor.getType());
+        assertEquals(64, descriptor.getBitWidth());
+        assertTrue(descriptor.isUnsigned());
+        assertEquals("bigint unsigned", handler.convertToOriginType(descriptor));
     }
 }

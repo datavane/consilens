@@ -1,5 +1,6 @@
 package com.consilens.connector.doris;
 
+import com.consilens.common.type.TypeDescriptor;
 import com.consilens.connector.api.model.DataType;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -71,5 +72,14 @@ class DorisDataTypeHandlerTest {
     @Test
     void testGetDataTypeMappingJSON() {
         assertEquals("JSON", handler.getDataTypeMapping("json", 0, 0, 0));
+    }
+
+    @Test
+    void shouldConvertArrayDescriptor() {
+        TypeDescriptor descriptor = handler.convertToTypeDescriptor("ARRAY<INT>");
+
+        assertEquals(com.consilens.common.enums.DataType.ARRAY_TYPE, descriptor.getType());
+        assertEquals(com.consilens.common.enums.DataType.INTEGER_TYPE, descriptor.getElementType().getType());
+        assertEquals("ARRAY<INT>", handler.convertToOriginType(descriptor));
     }
 }

@@ -24,6 +24,7 @@ import java.util.List;
  *     - format: table
  *       type: diff-record
  *       properties:
+ *         type: mysql
  *         url: jdbc:mysql://localhost:3306/mydb
  *         username: root
  *         password: secret
@@ -52,6 +53,7 @@ import java.util.List;
  *     - format: table
  *       type: diff-record
  *       properties:
+ *         type: mysql
  *         url: jdbc:mysql://localhost:3306/audit
  *         username: root
  *         password: secret
@@ -69,6 +71,9 @@ public class TableSinkConfig {
 
     // ---- Database connection ----
 
+    /** Target database type for the sink; supported values: mysql, postgresql. */
+    private String type;
+
     /** JDBC URL */
     private String url;
 
@@ -78,7 +83,7 @@ public class TableSinkConfig {
     /** Password. */
     private String password;
 
-    /** JDBC driver (optional; auto-detected from URL). */
+    /** JDBC driver (optional; overrides the default driver resolved from {@code type}). */
     private String driver;
 
     /** Max connection pool size; default 5. */
@@ -158,18 +163,33 @@ public class TableSinkConfig {
     }
 
     /**
-     * Infers the JDBC driver class from the URL.
+     * Resolves the JDBC driver class from explicit configuration.
      */
     public String resolveDriver() {
         if (driver != null && !driver.isBlank()) {
             return driver;
         }
-        if (url != null) {
-            if (url.contains("mysql")) return "com.mysql.cj.jdbc.Driver";
-            if (url.contains("postgresql")) return "org.postgresql.Driver";
-            if (url.contains("h2")) return "org.h2.Driver";
-            if (url.contains("oracle")) return "oracle.jdbc.OracleDriver";
+        String databaseType = resolveDatabaseType();
+        if ("mysql".equals(databaseType)) {
+            return "com.mysql.cj.jdbc.Driver";
         }
-        return "com.mysql.cj.jdbc.Driver";
+        if ("postgresql".equals(databaseType)) {
+            return "org.postgresql.Driver";
+        }
+        throw new IllegalStateException("table sink only supports mysql and postgresql targets");
+    }
+
+    public String resolveDatabaseType() {
+        if (type == null || type.isBlank()) {
+            throw new IllegalStateException("table sink properties.type is required");
+        }
+        String normalizedType = type.trim().toLowerCase();
+        if ("mysql".equals(normalizedType)) {
+            return "mysql";
+        }
+        if ("postgresql".equals(normalizedType)) {
+            return "postgresql";
+        }
+        return normalizedType;
     }
 }
