@@ -11,6 +11,7 @@ import com.consilens.connector.api.dataset.RecordScanner;
 import com.consilens.connector.api.dataset.RelationalDatasetSupport;
 import com.consilens.connector.api.dataset.SnapshotProvider;
 import com.consilens.connector.api.dataset.SplitPlanner;
+import com.consilens.connector.api.model.ComparisonSpec;
 import com.consilens.connector.api.model.FieldDescriptor;
 import com.consilens.connector.api.model.KeySpec;
 import com.consilens.connector.api.model.ResourceLocator;
@@ -61,6 +62,28 @@ class RelationalCompareSegmentAdapterTest {
         assertEquals(List.of("name"), tableSegment.getExtraColumns());
         assertFalse(tableSegment.getRelationFromSql().contains("CREATE TEMPORARY"));
         assertThrows(ConnectorException.class, dataset::getTablePath);
+    }
+
+    @Test
+    void shouldExcludeColumnsFromAutomaticMatching() {
+        ResourceLocator resource = ResourceLocator.builder()
+                .type("sql")
+                .name("orders_sql")
+                .path("SELECT id, name FROM orders")
+                .build();
+        StubRelationalDataset dataset = new StubRelationalDataset(resource);
+        CompareSegment segment = CompareSegment.builder()
+                .dataset(dataset)
+                .resource(resource)
+                .keySpec(KeySpec.builder().fields(List.of("id")).build())
+                .comparisons(ComparisonSpec.builder().exclude(List.of("name")).build())
+                .schema(dataset.getSchema())
+                .build();
+
+        RelationalCompareSegmentAdapter.PreparedTableSegment prepared =
+                RelationalCompareSegmentAdapter.toTableSegment(segment, CompareExecutionSettings.fromRequest(null));
+
+        assertEquals(List.of(), prepared.getTableSegment().getExtraColumns());
     }
 
     private static final class StubRelationalDataset implements DatasetHandle, RelationalDatasetSupport {

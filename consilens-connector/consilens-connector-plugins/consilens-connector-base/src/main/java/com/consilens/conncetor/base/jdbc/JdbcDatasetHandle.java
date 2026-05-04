@@ -644,8 +644,15 @@ public class JdbcDatasetHandle implements DatasetHandle, RelationalDatasetSuppor
     private List<String> comparisonColumns(ComparisonSpec comparisons,
                                            SchemaDescriptor schemaDescriptor,
                                            List<String> keyColumns) {
+        Set<String> excluded = excludedColumns(comparisons);
         if (comparisons != null && comparisons.getFields() != null && !comparisons.getFields().isEmpty()) {
-            return List.copyOf(comparisons.getFields());
+            List<String> result = new ArrayList<>();
+            for (String field : comparisons.getFields()) {
+                if (field != null && !excluded.contains(field)) {
+                    result.add(field);
+                }
+            }
+            return List.copyOf(result);
         }
         if (schemaDescriptor == null || schemaDescriptor.getFields() == null) {
             return List.of();
@@ -653,8 +660,21 @@ public class JdbcDatasetHandle implements DatasetHandle, RelationalDatasetSuppor
         Set<String> keys = new LinkedHashSet<>(keyColumns);
         List<String> result = new ArrayList<>();
         for (FieldDescriptor field : schemaDescriptor.getFields()) {
-            if (field.getName() != null && !keys.contains(field.getName())) {
+            if (field.getName() != null && !keys.contains(field.getName()) && !excluded.contains(field.getName())) {
                 result.add(field.getName());
+            }
+        }
+        return result;
+    }
+
+    private Set<String> excludedColumns(ComparisonSpec comparisons) {
+        if (comparisons == null || comparisons.getExclude() == null || comparisons.getExclude().isEmpty()) {
+            return Set.of();
+        }
+        Set<String> result = new LinkedHashSet<>();
+        for (String field : comparisons.getExclude()) {
+            if (field != null && !field.trim().isEmpty()) {
+                result.add(field.trim());
             }
         }
         return result;

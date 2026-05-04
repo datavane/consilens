@@ -12,7 +12,13 @@ source:
   resource:
     type: sql
     path: |
-      SELECT *
+      SELECT record_id,
+        col_tinyint,
+        col_int,
+        col_decimal,
+        amount,
+        status,
+        updated_at
       FROM performance_test_table
 
 target:
@@ -25,7 +31,13 @@ target:
   resource:
     type: sql
     path: |
-      SELECT *
+      SELECT record_id,
+        col_tinyint,
+        col_int,
+        col_decimal,
+        amount,
+        status,
+        updated_at
       FROM performance_test_table
 
 comparison:
@@ -35,21 +47,21 @@ comparison:
     target:
       - record_id
 
-  fields:
-    source:
-      - col_tinyint
-      - col_int
-      - col_decimal
-      - amount
-      - status
-      - updated_at
-    target:
-      - col_tinyint
-      - col_int
-      - col_decimal
-      - amount
-      - status
-      - updated_at
+#  fields:
+#    source:
+#      - col_tinyint
+#      - col_int
+#      - col_decimal
+#      - amount
+#      - status
+#      - updated_at
+#    target:
+#      - col_tinyint
+#      - col_int
+#      - col_decimal
+#      - amount
+#      - status
+#      - updated_at
 
 #  filters:
 #    source: "updated_at >= '2026-01-01 00:00:00'"

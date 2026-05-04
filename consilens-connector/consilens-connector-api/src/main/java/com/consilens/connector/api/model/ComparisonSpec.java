@@ -14,4 +14,6 @@ import java.util.List;
 public class ComparisonSpec {
 
     private List<String> fields;
+
+    private List<String> exclude;
 }

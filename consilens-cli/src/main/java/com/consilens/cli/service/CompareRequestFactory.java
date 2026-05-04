@@ -93,6 +93,7 @@ public class CompareRequestFactory {
             for (CompareMappingConfig mapping : comparison.getMappings()) {
                 if (!Boolean.TRUE.equals(mapping.getKey())
                         && !Boolean.FALSE.equals(mapping.getCompare())
+                        && !isMappingExcluded(comparison, mapping.getName())
                         && !columns.contains(mapping.getName())) {
                     columns.add(mapping.getName());
                 }
@@ -104,7 +105,7 @@ public class CompareRequestFactory {
                 : null;
         if (sideFields != null) {
             for (String field : sideFields) {
-                if (!columns.contains(field)) {
+                if (!isExcluded(excludeFields(comparison, sourceSide), field) && !columns.contains(field)) {
                     columns.add(field);
                 }
             }
@@ -126,8 +127,8 @@ public class CompareRequestFactory {
             return BuildResult.builder()
                     .sourceKeySpec(toKeySpec(keys))
                     .targetKeySpec(toKeySpec(keys))
-                    .sourceComparisons(toComparisonSpec(fields))
-                    .targetComparisons(toComparisonSpec(fields))
+                    .sourceComparisons(toComparisonSpec(fields, mappingExcludeFields(comparison)))
+                    .targetComparisons(toComparisonSpec(fields, mappingExcludeFields(comparison)))
                     .sourceFilter(null)
                     .targetFilter(null)
                     .build();
@@ -137,10 +138,10 @@ public class CompareRequestFactory {
                 .targetKeySpec(toKeySpec(comparison.getKeys().getTarget()))
                 .sourceComparisons(toComparisonSpec(comparison.getFields() != null
                         ? comparison.getFields().getSource()
-                        : null))
+                        : null, excludeFields(comparison, true)))
                 .targetComparisons(toComparisonSpec(comparison.getFields() != null
                         ? comparison.getFields().getTarget()
-                        : null))
+                        : null, excludeFields(comparison, false)))
                 .sourceFilter(toPredicateSpec(comparison.getFilters() != null ? comparison.getFilters().getSource() : null))
                 .targetFilter(toPredicateSpec(comparison.getFilters() != null ? comparison.getFilters().getTarget() : null))
                 .build();
@@ -168,7 +169,9 @@ public class CompareRequestFactory {
     private List<String> mappedCompareFields(ComparisonConfig comparison) {
         List<String> result = new ArrayList<>();
         for (CompareMappingConfig mapping : comparison.getMappings()) {
-            if (!Boolean.TRUE.equals(mapping.getKey()) && !Boolean.FALSE.equals(mapping.getCompare())) {
+            if (!Boolean.TRUE.equals(mapping.getKey())
+                    && !Boolean.FALSE.equals(mapping.getCompare())
+                    && !isMappingExcluded(comparison, mapping.getName())) {
                 result.add(mapping.getName());
             }
         }
@@ -212,6 +215,9 @@ public class CompareRequestFactory {
             selectExpressions.add(expressionAlias(physicalKey, logicalKey));
         }
         for (CompareMappingConfig mapping : comparison.getMappings()) {
+            if (!Boolean.TRUE.equals(mapping.getKey()) && isMappingExcluded(comparison, mapping.getName())) {
+                continue;
+            }
             FieldExpressionConfig expression = sourceSide ? mapping.getSource() : mapping.getTarget();
             selectExpressions.add(expressionAlias(toSqlExpression(expression), mapping.getName()));
         }
@@ -261,10 +267,53 @@ public class CompareRequestFactory {
                 .build();
     }
 
-    private ComparisonSpec toComparisonSpec(List<String> fields) {
+    private ComparisonSpec toComparisonSpec(List<String> fields, List<String> exclude) {
         return ComparisonSpec.builder()
                 .fields(fields != null ? List.copyOf(fields) : Collections.emptyList())
+                .exclude(normalizeList(exclude))
                 .build();
+    }
+
+    private List<String> excludeFields(ComparisonConfig comparison, boolean sourceSide) {
+        if (comparison == null || comparison.getExclude() == null) {
+            return Collections.emptyList();
+        }
+        List<String> fields = sourceSide ? comparison.getExclude().getSource() : comparison.getExclude().getTarget();
+        return normalizeList(fields);
+    }
+
+    private List<String> mappingExcludeFields(ComparisonConfig comparison) {
+        LinkedHashSet<String> result = new LinkedHashSet<>();
+        result.addAll(excludeFields(comparison, true));
+        result.addAll(excludeFields(comparison, false));
+        return List.copyOf(result);
+    }
+
+    private boolean isMappingExcluded(ComparisonConfig comparison, String field) {
+        return isExcluded(mappingExcludeFields(comparison), field);
+    }
+
+    private boolean isExcluded(List<String> exclude, String field) {
+        if (exclude == null || field == null) {
+            return false;
+        }
+        return exclude.stream()
+                .filter(value -> value != null)
+                .map(String::trim)
+                .anyMatch(field::equals);
+    }
+
+    private List<String> normalizeList(List<String> values) {
+        if (values == null || values.isEmpty()) {
+            return Collections.emptyList();
+        }
+        List<String> result = new ArrayList<>();
+        for (String value : values) {
+            if (value != null && !value.trim().isEmpty()) {
+                result.add(value.trim());
+            }
+        }
+        return result;
     }
 
     private PredicateSpec toPredicateSpec(String expression) {

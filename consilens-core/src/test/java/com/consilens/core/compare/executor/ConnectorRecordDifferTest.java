@@ -60,7 +60,31 @@ class ConnectorRecordDifferTest {
         assertEquals(3, result.getDifferences().size());
     }
 
+    @Test
+    void shouldExcludeColumnsInStreamingMode() {
+        CompareSegment source = segment("source_orders",
+                ComparisonSpec.builder().fields(List.of("value")).exclude(List.of("value")).build(),
+                List.of(record("1", "A")));
+        CompareSegment target = segment("target_orders",
+                ComparisonSpec.builder().fields(List.of("value")).exclude(List.of("value")).build(),
+                List.of(record("1", "B")));
+
+        DiffResult result = new ConnectorRecordDiffer().diff(
+                source,
+                target,
+                CompareExecutionSettings.builder()
+                        .validateUniqueKeys(true)
+                        .build());
+
+        assertEquals(0L, result.getStatistics().getMismatchCount());
+        assertEquals(0L, result.getStatistics().getTotalDifferences());
+    }
+
     private CompareSegment segment(String tableName, List<CanonicalRecord> records) {
+        return segment(tableName, ComparisonSpec.builder().fields(List.of("value")).build(), records);
+    }
+
+    private CompareSegment segment(String tableName, ComparisonSpec comparisons, List<CanonicalRecord> records) {
         ResourceLocator resource = ResourceLocator.builder()
                 .type("table")
                 .name(tableName)
@@ -77,7 +101,7 @@ class ConnectorRecordDifferTest {
                 .dataset(new TestDatasetHandle(resource, schema, records))
                 .resource(resource)
                 .keySpec(KeySpec.builder().fields(List.of("id")).build())
-                .comparisons(ComparisonSpec.builder().fields(List.of("value")).build())
+                .comparisons(comparisons)
                 .schema(schema)
                 .build();
     }

@@ -32,6 +32,9 @@ public class ComparisonConfig {
     @JsonProperty("fields")
     private ListPairConfig fields;
 
+    @JsonProperty("exclude")
+    private ListPairConfig exclude;
+
     @JsonProperty("mappings")
     private List<CompareMappingConfig> mappings;
 
@@ -64,6 +67,10 @@ public class ComparisonConfig {
 
         if (fields != null && !fields.isBothEmpty() && mappings != null && !mappings.isEmpty()) {
             throw ValidationException.simple("CONFIGURATION_VALIDATION", "comparison.fields 与 comparison.mappings 不能同时配置");
+        }
+
+        if (exclude != null && !exclude.isBothEmpty()) {
+            exclude.validate("comparison.exclude");
         }
 
         validateMappings();

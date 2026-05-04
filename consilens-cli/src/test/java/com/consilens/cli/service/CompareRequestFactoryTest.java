@@ -40,6 +40,10 @@ class CompareRequestFactoryTest {
                                         .expression("CASE WHEN state = 1 THEN 'PAID' ELSE 'UNPAID' END")
                                         .build())
                                 .build()))
+                .exclude(ListPairConfig.builder()
+                        .source(List.of("order_status"))
+                        .target(List.of("order_status"))
+                        .build())
                 .filters(StringPairConfig.builder().source("status IS NOT NULL").target("state IS NOT NULL").build())
                 .build());
 
@@ -49,12 +53,12 @@ class CompareRequestFactoryTest {
         assertEquals("sql", request.getTarget().getResource().getType());
         assertEquals(List.of("id"), request.getSourceKeySpec().getFields());
         assertEquals(List.of("id"), request.getTargetKeySpec().getFields());
-        assertEquals(List.of("order_amount", "order_status"), request.getSourceComparisons().getFields());
-        assertEquals("SELECT id, amount AS order_amount, status AS order_status FROM source_table WHERE status IS NOT NULL",
+        assertEquals(List.of("order_amount"), request.getSourceComparisons().getFields());
+        assertEquals(List.of("order_status"), request.getSourceComparisons().getExclude());
+        assertEquals(List.of("order_status"), request.getTargetComparisons().getExclude());
+        assertEquals("SELECT id, amount AS order_amount FROM source_table WHERE status IS NOT NULL",
                 request.getSource().getResource().getPath());
-        assertEquals("SELECT order_id AS id, actual_amount + discount_amount AS order_amount, "
-                        + "CASE WHEN state = 1 THEN 'PAID' ELSE 'UNPAID' END AS order_status "
-                        + "FROM target_table WHERE state IS NOT NULL",
+        assertEquals("SELECT order_id AS id, actual_amount + discount_amount AS order_amount FROM target_table WHERE state IS NOT NULL",
                 request.getTarget().getResource().getPath());
         assertEquals(null, request.getSourceFilter());
         assertEquals(null, request.getTargetFilter());
@@ -73,7 +77,14 @@ class CompareRequestFactoryTest {
                 .build());
         config.setComparison(ComparisonConfig.builder()
                 .keys(ListPairConfig.builder().source(List.of("id")).target(List.of("id")).build())
-                .fields(ListPairConfig.builder().source(List.of("order_amount")).target(List.of("order_amount")).build())
+                .fields(ListPairConfig.builder()
+                        .source(List.of("order_amount", "source_updated_at"))
+                        .target(List.of("order_amount", "target_updated_at"))
+                        .build())
+                .exclude(ListPairConfig.builder()
+                        .source(List.of("source_updated_at"))
+                        .target(List.of("target_updated_at"))
+                        .build())
                 .filters(StringPairConfig.builder().source("id > 10").target("id > 10").build())
                 .build());
 
@@ -81,7 +92,9 @@ class CompareRequestFactoryTest {
 
         assertEquals("sql", request.getSource().getResource().getType());
         assertEquals("sql", request.getTarget().getResource().getType());
-        assertEquals(List.of("order_amount"), request.getSourceComparisons().getFields());
+        assertEquals(List.of("order_amount", "source_updated_at"), request.getSourceComparisons().getFields());
+        assertEquals(List.of("source_updated_at"), request.getSourceComparisons().getExclude());
+        assertEquals(List.of("target_updated_at"), request.getTargetComparisons().getExclude());
         assertEquals("id > 10", request.getSourceFilter().getExpression());
     }
 

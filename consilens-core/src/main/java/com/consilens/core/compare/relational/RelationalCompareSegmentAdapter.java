@@ -178,8 +178,10 @@ public final class RelationalCompareSegmentAdapter {
     private static List<String> resolveComparisonColumns(ComparisonSpec comparisons,
                                                          SchemaDescriptor schema,
                                                          List<String> keyColumns) {
+        Set<String> excluded = excludedColumns(comparisons);
         if (comparisons != null && comparisons.getFields() != null && !comparisons.getFields().isEmpty()) {
             Set<String> result = new LinkedHashSet<>(comparisons.getFields());
+            result.removeAll(excluded);
             Set<String> overlap = new LinkedHashSet<>(result);
             overlap.retainAll(keyColumns);
             if (!overlap.isEmpty()) {
@@ -193,8 +195,18 @@ public final class RelationalCompareSegmentAdapter {
         Set<String> keySet = new LinkedHashSet<>(keyColumns);
         return schema.getFields().stream()
                 .map(FieldDescriptor::getName)
-                .filter(name -> name != null && !keySet.contains(name))
+                .filter(name -> name != null && !keySet.contains(name) && !excluded.contains(name))
                 .collect(Collectors.toCollection(ArrayList::new));
+    }
+
+    private static Set<String> excludedColumns(ComparisonSpec comparisons) {
+        if (comparisons == null || comparisons.getExclude() == null || comparisons.getExclude().isEmpty()) {
+            return Set.of();
+        }
+        return comparisons.getExclude().stream()
+                .filter(value -> value != null && !value.trim().isEmpty())
+                .map(String::trim)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
     }
 
     @Getter

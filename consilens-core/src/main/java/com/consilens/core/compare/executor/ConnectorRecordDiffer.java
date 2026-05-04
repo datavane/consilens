@@ -237,8 +237,13 @@ final class ConnectorRecordDiffer {
         if (keySpec != null && keySpec.getFields() != null) {
             result.addAll(keySpec.getFields());
         }
+        Set<String> excluded = excludedColumns(comparisons);
         if (comparisons != null && comparisons.getFields() != null && !comparisons.getFields().isEmpty()) {
-            result.addAll(comparisons.getFields());
+            for (String field : comparisons.getFields()) {
+                if (field != null && !excluded.contains(field)) {
+                    result.add(field);
+                }
+            }
             return List.copyOf(result);
         }
         if (schema != null && schema.getFields() != null) {
@@ -246,12 +251,25 @@ final class ConnectorRecordDiffer {
                     ? new LinkedHashSet<>(keySpec.getFields())
                     : Set.of();
             for (FieldDescriptor field : schema.getFields()) {
-                if (field.getName() != null && !keys.contains(field.getName())) {
+                if (field.getName() != null && !keys.contains(field.getName()) && !excluded.contains(field.getName())) {
                     result.add(field.getName());
                 }
             }
         }
         return List.copyOf(result);
+    }
+
+    private Set<String> excludedColumns(ComparisonSpec comparisons) {
+        if (comparisons == null || comparisons.getExclude() == null || comparisons.getExclude().isEmpty()) {
+            return Set.of();
+        }
+        Set<String> result = new LinkedHashSet<>();
+        for (String field : comparisons.getExclude()) {
+            if (field != null && !field.trim().isEmpty()) {
+                result.add(field.trim());
+            }
+        }
+        return result;
     }
 
     private Map<String, DataType> columnTypes(SchemaDescriptor schema, List<String> columns) {
