@@ -82,10 +82,7 @@ public class SQLServerSqlQueryGenerator extends BaseSqlQueryGenerator {
             sql.append(")), 2) as row_checksum");
 
             sql.append(" FROM ");
-            if (schemaName != null && !schemaName.isEmpty()) {
-                sql.append(capabilityProvider.quote(schemaName)).append(".");
-            }
-            sql.append(capabilityProvider.quote(tableName));
+            sql.append(buildRelationRef(schemaName, tableName));
             if (whereClause != null && !whereClause.trim().isEmpty()) {
                 sql.append(" WHERE ").append(whereClause);
             }
@@ -94,10 +91,7 @@ public class SQLServerSqlQueryGenerator extends BaseSqlQueryGenerator {
         }
 
         sql.append("FROM ");
-        if (schemaName != null && !schemaName.isEmpty()) {
-            sql.append(capabilityProvider.quote(schemaName)).append(".");
-        }
-        sql.append(capabilityProvider.quote(tableName));
+        sql.append(buildRelationRef(schemaName, tableName));
 
         if (whereClause != null && !whereClause.trim().isEmpty()) {
             sql.append(" WHERE ").append(whereClause);
@@ -142,10 +136,7 @@ public class SQLServerSqlQueryGenerator extends BaseSqlQueryGenerator {
         sql.append(")), 2) as row_hash");
 
         sql.append(" FROM ");
-        if (schemaName != null && !schemaName.isEmpty()) {
-            sql.append(capabilityProvider.quote(schemaName)).append(".");
-        }
-        sql.append(capabilityProvider.quote(tableName));
+        sql.append(buildRelationRef(schemaName, tableName));
 
         if (whereClause != null && !whereClause.trim().isEmpty()) {
             sql.append(" WHERE ").append(whereClause);

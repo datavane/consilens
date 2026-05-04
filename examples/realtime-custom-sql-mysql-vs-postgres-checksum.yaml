@@ -1,0 +1,85 @@
+# 实时自定义 SQL 比对配置 - SQL 结果集走 checksum
+# 启动方式：
+#   单窗口：./consilens diff --config examples/realtime-custom-sql-mysql-vs-postgres-checksum.yaml --realtime-once
+#   长驻：  ./consilens diff --config examples/realtime-custom-sql-mysql-vs-postgres-checksum.yaml --realtime-loop
+
+source:
+  type: mysql
+  name: source-mysql-realtime-sql
+  connection:
+    url: jdbc:mysql://localhost:3306/test
+    username: ${env.MYSQL_USER}
+    password: ${env.MYSQL_PASSWORD}
+  resource:
+    type: sql
+    path: |
+      SELECT record_id,
+        amount,
+        status,
+        updated_at
+      FROM performance_test_table
+      WHERE deleted = 0
+
+target:
+  type: postgresql
+  name: target-postgresql-realtime-sql
+  connection:
+    url: jdbc:postgresql://localhost:5432/postgres?currentSchema=public
+    username: ${env.PG_USER}
+    password: ${env.PG_PASSWORD}
+  resource:
+    type: sql
+    path: |
+      SELECT record_id,
+        amount_cents / 100.0 AS amount,
+        order_status AS status,
+        updated_time AS updated_at
+      FROM performance_test_table
+      WHERE is_deleted = false
+
+comparison:
+  keys:
+    source:
+      - record_id
+    target:
+      - record_id
+
+  fields:
+    source:
+      - amount
+      - status
+      - updated_at
+    target:
+      - amount
+      - status
+      - updated_at
+
+realtime:
+  enabled: true
+  updateColumns:
+    source: updated_at
+    target: updated_at
+  watermarkDelay: PT5M
+  windowSize: PT15M
+  overlap: PT1H
+  interval: PT2M
+  checkpointStore:
+    type: table
+    name: consilens_compare_checkpoint
+    url: jdbc:postgresql://localhost:5432/postgres?currentSchema=public
+    username: ${env.PG_USER}
+    password: ${env.PG_PASSWORD}
+    driver: org.postgresql.Driver
+
+strategy:
+  mode: checksum
+  algorithm: xor
+  bisectionFactor: 8
+  bisectionThreshold: 8000
+  batchSize: 1000
+  enableProfiling: true
+
+result:
+  sinks:
+    - format: console
+      type: result

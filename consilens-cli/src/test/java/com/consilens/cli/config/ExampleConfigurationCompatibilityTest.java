@@ -20,6 +20,11 @@ class ExampleConfigurationCompatibilityTest {
             "examples/large-table-mysql-to-starrocks.yaml",
             "examples/performance-test-mysql-vs-postgres.yaml",
             "examples/performance-test-mysql-vs-starrocks.yaml",
+            "examples/custom-sql-mysql-vs-postgres-checksum.yaml",
+            "examples/realtime-table-mysql-vs-postgres-loop.yaml",
+            "examples/realtime-custom-sql-mysql-vs-postgres-checksum.yaml",
+            "examples/mysql-to-doris-partitioned-checksum.yaml",
+            "examples/detail-to-aggregate-custom-sql.yaml",
             "examples/performance-test-mysql-vs-postgres.json"
     })
     void shouldLoadExampleConfigurations(String relativePath) throws Exception {
@@ -31,8 +36,9 @@ class ExampleConfigurationCompatibilityTest {
         assertNotNull(config);
         assertNotNull(config.getSource());
         assertNotNull(config.getTarget());
+        assertNotNull(config.getSource().getResource());
+        assertNotNull(config.getTarget().getResource());
         assertNotNull(config.getComparison());
-        assertNotNull(config.getComparison().getTables());
         assertNotNull(config.getComparison().getKeys());
     }
 
@@ -44,6 +50,8 @@ class ExampleConfigurationCompatibilityTest {
         env.put("PG_PASSWORD", "test_password");
         env.put("STARROCKS_USER", "test_user");
         env.put("STARROCKS_PASSWORD", "test_password");
+        env.put("DORIS_USER", "test_user");
+        env.put("DORIS_PASSWORD", "test_password");
         return env;
     }
 }

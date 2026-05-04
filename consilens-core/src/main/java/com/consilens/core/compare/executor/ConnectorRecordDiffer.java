@@ -301,6 +301,9 @@ final class ConnectorRecordDiffer {
         if (locator.getName() != null && !locator.getName().trim().isEmpty()) {
             return TablePath.fromString(locator.getName().trim());
         }
+        if (locator.getType() != null && "sql".equalsIgnoreCase(locator.getType())) {
+            return TablePath.of("sql-resource");
+        }
         if (locator.getPath() != null && !locator.getPath().trim().isEmpty()) {
             return TablePath.fromString(locator.getPath().trim());
         }

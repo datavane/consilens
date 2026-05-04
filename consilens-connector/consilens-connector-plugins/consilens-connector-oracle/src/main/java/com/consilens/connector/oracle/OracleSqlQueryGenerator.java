@@ -44,7 +44,7 @@ public class OracleSqlQueryGenerator extends BaseSqlQueryGenerator {
             String whereClause,
             ChecksumAlgorithm checksumAlgorithm) {
         
-        if (checksumAlgorithm.isXor()) {
+        if (checksumAlgorithm != null && checksumAlgorithm.isXor()) {
             return getChecksumSQLWithXor(schemaName, tableName, keyColumns, columns, columnDataTypes, whereClause);
         } else {
             return getChecksumSQLWithConcat(schemaName, tableName, keyColumns, columns, columnDataTypes, whereClause);
@@ -93,10 +93,7 @@ public class OracleSqlQueryGenerator extends BaseSqlQueryGenerator {
             sql.append("), 3)) as row_checksum ");
             
             sql.append("FROM ");
-            if (schemaName != null && !schemaName.isEmpty()) {
-                sql.append(capabilityProvider.quote(schemaName)).append(".");
-            }
-            sql.append(capabilityProvider.quote(tableName));
+            sql.append(buildRelationRef(schemaName, tableName));
 
             if (whereClause != null && !whereClause.trim().isEmpty()) {
                 sql.append(" WHERE ").append(whereClause);
@@ -154,10 +151,7 @@ public class OracleSqlQueryGenerator extends BaseSqlQueryGenerator {
         }
 
         sql.append("FROM ");
-        if (schemaName != null && !schemaName.isEmpty()) {
-            sql.append(capabilityProvider.quote(schemaName)).append(".");
-        }
-        sql.append(capabilityProvider.quote(tableName));
+        sql.append(buildRelationRef(schemaName, tableName));
 
         if (whereClause != null && !whereClause.trim().isEmpty()) {
             sql.append(" WHERE ").append(whereClause);
@@ -202,10 +196,7 @@ public class OracleSqlQueryGenerator extends BaseSqlQueryGenerator {
         sql.append(", 'MD5') as row_hash");
 
         sql.append(" FROM ");
-        if (schemaName != null && !schemaName.isEmpty()) {
-            sql.append(capabilityProvider.quote(schemaName)).append(".");
-        }
-        sql.append(capabilityProvider.quote(tableName));
+        sql.append(buildRelationRef(schemaName, tableName));
 
         if (whereClause != null && !whereClause.trim().isEmpty()) {
             sql.append(" WHERE ").append(whereClause);

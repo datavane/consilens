@@ -20,6 +20,10 @@ class ConnectionConfigTest {
         ConnectionConfig config = ConnectionConfig.builder()
                 .type("mongodb")
                 .connection(properties)
+                .resource(ConnectionConfig.ResourceConfig.builder()
+                        .type("table")
+                        .name("orders")
+                        .build())
                 .build();
 
         assertDoesNotThrow(() -> config.validate("source"));

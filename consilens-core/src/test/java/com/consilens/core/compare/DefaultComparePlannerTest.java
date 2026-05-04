@@ -19,6 +19,7 @@ import com.consilens.connector.api.planner.CompareStrategyPreference;
 import org.junit.jupiter.api.Test;
 
 import java.util.EnumSet;
+import java.util.Map;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -116,13 +117,41 @@ class DefaultComparePlannerTest {
         assertEquals(ComparePlanTypes.PUSHDOWN_CHECKSUM, plan.getPlanType());
     }
 
+    @Test
+    void shouldPreferChecksumForSqlResources() {
+        CompareRequest request = CompareRequest.builder().build();
+
+        DatasetHandle source = dataset("shared", capabilities(
+                ConnectorCapability.SERVER_SIDE_JOIN,
+                ConnectorCapability.SERVER_SIDE_HASH), true, Map.of("resourceType", "sql"));
+        DatasetHandle target = dataset("shared", capabilities(
+                ConnectorCapability.SERVER_SIDE_JOIN,
+                ConnectorCapability.SERVER_SIDE_HASH), true, Map.of("resourceType", "table"));
+
+        ComparePlan plan = planner.plan(request, source, target);
+
+        assertEquals(ComparePlanTypes.PUSHDOWN_CHECKSUM, plan.getPlanType());
+    }
+
     private DatasetHandle dataset(String executionDomainId, CapabilitySet capabilities) {
+        return dataset(executionDomainId, capabilities, false);
+    }
+
+    private DatasetHandle dataset(String executionDomainId, CapabilitySet capabilities, boolean withScanner) {
+        return dataset(executionDomainId, capabilities, withScanner, Map.of());
+    }
+
+    private DatasetHandle dataset(String executionDomainId,
+                                  CapabilitySet capabilities,
+                                  boolean withScanner,
+                                  Map<String, Object> attributes) {
         DatasetMetadata metadata = DatasetMetadata.builder()
                 .logicalName("orders")
                 .executionDomainId(executionDomainId)
                 .capabilities(capabilities)
+                .attributes(attributes)
                 .build();
-        return new StubDatasetHandle(metadata);
+        return new StubDatasetHandle(metadata, withScanner);
     }
 
     private CapabilitySet capabilities(ConnectorCapability... capabilities) {
@@ -132,9 +161,11 @@ class DefaultComparePlannerTest {
     private static final class StubDatasetHandle implements DatasetHandle {
 
         private final DatasetMetadata metadata;
+        private final boolean withScanner;
 
-        private StubDatasetHandle(DatasetMetadata metadata) {
+        private StubDatasetHandle(DatasetMetadata metadata, boolean withScanner) {
             this.metadata = metadata;
+            this.withScanner = withScanner;
         }
 
         @Override
@@ -154,7 +185,24 @@ class DefaultComparePlannerTest {
 
         @Override
         public Optional<RecordScanner> getRecordScanner() {
-            return Optional.empty();
+            if (!withScanner) {
+                return Optional.empty();
+            }
+            return Optional.of(segment -> new com.consilens.connector.api.record.CloseableIterator<>() {
+                @Override
+                public boolean hasNext() {
+                    return false;
+                }
+
+                @Override
+                public com.consilens.connector.api.record.CanonicalRecord next() {
+                    throw new java.util.NoSuchElementException();
+                }
+
+                @Override
+                public void close() {
+                }
+            });
         }
 
         @Override

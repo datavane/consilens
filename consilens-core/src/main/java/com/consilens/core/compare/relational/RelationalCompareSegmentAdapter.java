@@ -7,8 +7,10 @@ import com.consilens.connector.api.model.FieldDescriptor;
 import com.consilens.connector.api.model.KeySpec;
 import com.consilens.connector.api.model.PoolConfiguration;
 import com.consilens.connector.api.model.PredicateSpec;
+import com.consilens.connector.api.model.ResourceLocator;
 import com.consilens.connector.api.model.SchemaDescriptor;
 import com.consilens.connector.api.model.TablePath;
+import com.consilens.connector.api.model.UpdateWindow;
 import com.consilens.connector.api.planner.CompareSegment;
 import com.consilens.connector.api.planner.KeyRangeSplit;
 import com.consilens.connector.api.planner.OffsetLimitSplit;
@@ -22,6 +24,7 @@ import lombok.Getter;
 
 import java.sql.Connection;
 import java.sql.SQLException;
+import java.sql.Timestamp;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -47,18 +50,24 @@ public final class RelationalCompareSegmentAdapter {
                         "Dataset " + segment.getDataset().getClass().getSimpleName()
                                 + " does not provide relational execution support"));
 
-        TablePath tablePath = support.getTablePath();
+        ResourceLocator resource = segment.getResource();
+        boolean sqlResource = isSqlResource(resource);
+        TablePath tablePath = sqlResource ? sqlResourceTablePath(resource) : support.getTablePath();
         SchemaDescriptor schema = segment.getSchema() != null ? segment.getSchema() : segment.getDataset().getSchema();
         List<String> keyColumns = requireKeyColumns(segment.getKeySpec(), tablePath);
         List<String> extraColumns = resolveComparisonColumns(segment.getComparisons(), schema, keyColumns);
-        DatabaseAdapter databaseAdapter = createDatabaseAdapter(support, executionSettings);
+        DatabaseAdapter databaseAdapter = createDatabaseAdapter(
+                support,
+                executionSettings,
+                new SupportBackedConnectionPool(support));
 
         TableSegment.TableSegmentBuilder builder = TableSegment.builder()
                 .database(databaseAdapter)
                 .tablePath(tablePath)
+                .relationSource(sqlResource ? sqlRelationSource(resource) : null)
                 .keyColumns(keyColumns)
                 .extraColumns(extraColumns)
-                .whereClause(resolveWhereClause(segment.getFilter()))
+                .whereClause(resolveWhereClause(segment.getFilter(), segment.getUpdateWindow(), support))
                 .caseSensitive(false)
                 .schema(Optional.ofNullable(RelationalSchemaAdapter.toLegacySchema(schema, tablePath)));
 
@@ -67,10 +76,11 @@ public final class RelationalCompareSegmentAdapter {
     }
 
     private static DatabaseAdapter createDatabaseAdapter(RelationalDatasetSupport support,
-                                                         CompareExecutionSettings executionSettings) {
+                                                         CompareExecutionSettings executionSettings,
+                                                         SupportBackedConnectionPool connectionPool) {
         return new DefaultDatabaseAdapter(
                 support.getName(),
-                new SupportBackedConnectionPool(support),
+                connectionPool,
                 support.getDialect(),
                 support.getJdbcUrl(),
                 executionSettings.getChecksumAlgorithm());
@@ -96,11 +106,66 @@ public final class RelationalCompareSegmentAdapter {
         throw new ConnectorException("Unsupported relational split type: " + split.getClass().getSimpleName());
     }
 
-    private static Optional<String> resolveWhereClause(PredicateSpec filter) {
-        if (filter == null || filter.getExpression() == null || filter.getExpression().trim().isEmpty()) {
-            return Optional.empty();
+    private static Optional<String> resolveWhereClause(PredicateSpec filter,
+                                                       UpdateWindow updateWindow,
+                                                       RelationalDatasetSupport support) {
+        String whereClause = buildWhereClause(filter, updateWindow, support);
+        return whereClause == null || whereClause.isBlank() ? Optional.empty() : Optional.of(whereClause);
+    }
+
+    private static String buildWhereClause(PredicateSpec filter,
+                                           UpdateWindow updateWindow,
+                                           RelationalDatasetSupport support) {
+        List<String> predicates = new ArrayList<>();
+        if (filter != null && filter.getExpression() != null && !filter.getExpression().trim().isEmpty()) {
+            predicates.add("(" + filter.getExpression().trim() + ")");
         }
-        return Optional.of(filter.getExpression().trim());
+        if (updateWindow != null && updateWindow.getColumn() != null && !updateWindow.getColumn().isBlank()) {
+            List<String> window = new ArrayList<>();
+            String column = updateWindow.getColumn();
+            if (updateWindow.getStart() != null) {
+                window.add(column + " >= " + support.getDialect().getSqlQueryGenerator()
+                        .formatValue(Timestamp.from(updateWindow.getStart())));
+            }
+            if (updateWindow.getEnd() != null) {
+                window.add(column + " < " + support.getDialect().getSqlQueryGenerator()
+                        .formatValue(Timestamp.from(updateWindow.getEnd())));
+            }
+            if (!window.isEmpty()) {
+                predicates.add("(" + String.join(" AND ", window) + ")");
+            }
+        }
+        return predicates.isEmpty() ? null : String.join(" AND ", predicates);
+    }
+
+    private static String stripTrailingSemicolon(String sql) {
+        String normalized = sql.trim();
+        while (normalized.endsWith(";")) {
+            normalized = normalized.substring(0, normalized.length() - 1).trim();
+        }
+        return normalized;
+    }
+
+    private static boolean isSqlResource(ResourceLocator resource) {
+        return resource != null
+                && resource.getType() != null
+                && "sql".equalsIgnoreCase(resource.getType())
+                && resource.getPath() != null
+                && !resource.getPath().isBlank();
+    }
+
+    private static TablePath sqlResourceTablePath(ResourceLocator resource) {
+        String name = resource.getName();
+        if (name == null || name.isBlank()) {
+            name = "consilens_sql_resource";
+        }
+        return TablePath.of(name.trim());
+    }
+
+    private static TableSegment.RelationSource sqlRelationSource(ResourceLocator resource) {
+        return new TableSegment.RelationSource(
+                stripTrailingSemicolon(resource.getPath()),
+                sqlResourceTablePath(resource).getFullPath());
     }
 
     private static List<String> requireKeyColumns(KeySpec keySpec, TablePath tablePath) {

@@ -10,6 +10,7 @@ import com.consilens.connector.api.dataset.KeyLookupProvider;
 import com.consilens.connector.api.dataset.RecordScanner;
 import com.consilens.connector.api.dataset.SnapshotProvider;
 import com.consilens.connector.api.dataset.SplitPlanner;
+import com.consilens.connector.api.model.FieldDescriptor;
 import com.consilens.connector.api.model.KeySpec;
 import com.consilens.connector.api.model.ResourceLocator;
 import com.consilens.connector.api.model.SchemaDescriptor;
@@ -145,7 +146,19 @@ class DefaultCompareRuntimeTest {
 
         @Override
         public SchemaDescriptor getSchema() {
-            return SchemaDescriptor.builder().build();
+            FieldDescriptor id = FieldDescriptor.builder().name("id").canonicalType("bigint").build();
+            FieldDescriptor amount = FieldDescriptor.builder().name("amount").canonicalType("decimal").build();
+            FieldDescriptor actualAmount = FieldDescriptor.builder().name("actual_amount").canonicalType("decimal").build();
+            FieldDescriptor dt = FieldDescriptor.builder().name("dt").canonicalType("date").build();
+            FieldDescriptor orderCnt = FieldDescriptor.builder().name("order_cnt").canonicalType("integer").build();
+            Map<String, FieldDescriptor> fieldMap = new LinkedHashMap<>();
+            for (FieldDescriptor field : List.of(id, amount, actualAmount, dt, orderCnt)) {
+                fieldMap.put(field.getName(), field);
+            }
+            return SchemaDescriptor.builder()
+                    .fields(List.of(id, amount, actualAmount, dt, orderCnt))
+                    .fieldMap(fieldMap)
+                    .build();
         }
 
         @Override
@@ -192,6 +205,24 @@ class DefaultCompareRuntimeTest {
 
         @Override
         public DiffResult execute(ComparePlan plan, CompareRequest request, CompareSegment source, CompareSegment target) {
+            return mock(DiffResult.class);
+        }
+    }
+
+    private static final class CapturingExecutor implements PlanExecutor<ComparePlan> {
+
+        private CompareSegment lastSourceSegment;
+        private CompareSegment lastTargetSegment;
+
+        @Override
+        public boolean supports(ComparePlan plan) {
+            return true;
+        }
+
+        @Override
+        public DiffResult execute(ComparePlan plan, CompareRequest request, CompareSegment source, CompareSegment target) {
+            this.lastSourceSegment = source;
+            this.lastTargetSegment = target;
             return mock(DiffResult.class);
         }
     }

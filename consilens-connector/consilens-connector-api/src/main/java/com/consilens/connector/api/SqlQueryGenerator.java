@@ -45,6 +45,17 @@ public interface SqlQueryGenerator {
         String getCountSQL(String schemaName, String tableName, String whereClause);
 
         /**
+         * Generate SQL for counting rows from a SQL relation source.
+         *
+         * @param fromSql     the source SQL used as a subquery
+         * @param whereClause optional WHERE clause (can be null)
+         * @return SQL COUNT query
+         */
+        default String getCountSQLFromSql(String fromSql, String whereClause) {
+                throw new UnsupportedOperationException("getCountSQLFromSql is not implemented");
+        }
+
+        /**
          * Generate SQL for selecting rows from a table.
          *
          * @param schemaName        the schema name (can be null)
@@ -58,6 +69,16 @@ public interface SqlQueryGenerator {
                         List<String> selectExpressions,
                         String whereClause,
                         List<String> orderByColumns);
+
+        /**
+         * Generate SQL for selecting rows from a SQL relation source.
+         */
+        default String getSelectSQLFromSql(String fromSql,
+                        List<String> selectExpressions,
+                        String whereClause,
+                        List<String> orderByColumns) {
+                throw new UnsupportedOperationException("getSelectSQLFromSql is not implemented");
+        }
 
         /**
          * Generate SQL for selecting rows by primary keys.
@@ -79,6 +100,18 @@ public interface SqlQueryGenerator {
                         List<String> orderByColumns);
 
         /**
+         * Generate SQL for selecting rows by primary keys from a SQL relation source.
+         */
+        default String getSelectByKeysSQLFromSql(String fromSql,
+                        List<String> selectExpressions,
+                        List<String> keyColumns,
+                        List<List<Object>> primaryKeys,
+                        String whereClause,
+                        List<String> orderByColumns) {
+                throw new UnsupportedOperationException("getSelectByKeysSQLFromSql is not implemented");
+        }
+
+        /**
          * Generate SQL for retrieving MIN/MAX values of key columns.
          *
          * @param schemaName  the schema name (can be null)
@@ -92,6 +125,16 @@ public interface SqlQueryGenerator {
                         List<String> keyColumns,
                         boolean getMin,
                         String whereClause);
+
+        /**
+         * Generate SQL for retrieving MIN/MAX key values from a SQL relation source.
+         */
+        default String getMinMaxKeySQLFromSql(String fromSql,
+                        List<String> keyColumns,
+                        boolean getMin,
+                        String whereClause) {
+                throw new UnsupportedOperationException("getMinMaxKeySQLFromSql is not implemented");
+        }
 
         /**
          * Generate SQL for calculating checksum/hash of table data.
@@ -111,6 +154,18 @@ public interface SqlQueryGenerator {
                         Map<String, DataType> columnDataTypes,
                         String whereClause,
                         ChecksumAlgorithm checksumAlgorithm);
+
+        /**
+         * Generate SQL for calculating checksum/hash from a SQL relation source.
+         */
+        default String getChecksumSQLFromSql(String fromSql,
+                        List<String> keyColumns,
+                        List<String> columns,
+                        Map<String, DataType> columnDataTypes,
+                        String whereClause,
+                        ChecksumAlgorithm checksumAlgorithm) {
+                throw new UnsupportedOperationException("getChecksumSQLFromSql is not implemented");
+        }
 
         /**
          * Generate SQL for calculating checksum/hash of table data (backward compatibility).
@@ -145,6 +200,15 @@ public interface SqlQueryGenerator {
          */
         String getDistinctCountSQL(String schemaName, String tableName,
                         List<String> columns, String whereClause);
+
+        /**
+         * Generate SQL for counting distinct rows from a SQL relation source.
+         */
+        default String getDistinctCountSQLFromSql(String fromSql,
+                        List<String> columns,
+                        String whereClause) {
+                throw new UnsupportedOperationException("getDistinctCountSQLFromSql is not implemented");
+        }
 
         /**
          * Generate SQL for a full outer join between two tables.
@@ -288,6 +352,17 @@ public interface SqlQueryGenerator {
                         List<String> columns,
                         Map<String, DataType> columnDataTypes,
                         String whereClause);
+
+        /**
+         * Generate SQL for calculating row hashes from a SQL relation source.
+         */
+        default String getRowHashSQLFromSql(String fromSql,
+                        List<String> primaryKeys,
+                        List<String> columns,
+                        Map<String, DataType> columnDataTypes,
+                        String whereClause) {
+                throw new UnsupportedOperationException("getRowHashSQLFromSql is not implemented");
+        }
 
         /**
          * Generate SQL for join diff statistics (source/target/mismatch counts).

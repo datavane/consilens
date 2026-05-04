@@ -114,17 +114,20 @@ source:
   url: jdbc:mysql://localhost:3306/source_db
   username: user1
   password: password1
+  resource:
+    type: table
+    name: orders
 
 target:
   type: postgresql
   url: jdbc:postgresql://localhost:5432/target_db?currentSchema=public
   username: user2
   password: password2
+  resource:
+    type: table
+    name: orders
 
 comparison:
-  tables:
-    source: orders
-    target: orders
   keys:
     source:
       - order_id
@@ -154,17 +157,23 @@ source:
   url: jdbc:mysql://localhost:3306/database1?useSSL=false&serverTimezone=UTC
   username: user1
   password: password1
+  resource:
+    type: table
+    name: users
 
 target:
   type: postgresql
   url: jdbc:postgresql://localhost:5432/database2?currentSchema=public&ssl=false&ApplicationName=consilens
   username: user2
   password: password2
+  resource:
+    type: sql
+    path: |
+      SELECT id, email, name, phone, created_at, updated_at
+      FROM customers
+      WHERE status = 'active'
 
 comparison:
-  tables:
-    source: users
-    target: customers
   keys:
     source:
       - id
@@ -183,9 +192,8 @@ comparison:
       - created_at
   extraColumns:
     - updated_at
-  where:
+  filters:
     source: "status = 'active'"
-    target: "status = 'active'"
 
 strategy:
   mode: checksum

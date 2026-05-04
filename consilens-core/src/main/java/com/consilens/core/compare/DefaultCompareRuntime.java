@@ -7,6 +7,7 @@ import com.consilens.connector.api.model.ComparisonSpec;
 import com.consilens.connector.api.model.KeySpec;
 import com.consilens.connector.api.model.PredicateSpec;
 import com.consilens.connector.api.model.SchemaDescriptor;
+import com.consilens.connector.api.model.UpdateWindow;
 import com.consilens.connector.api.config.ReadOptions;
 import com.consilens.connector.api.normalization.DefaultNormalizationSpecValidator;
 import com.consilens.connector.api.planner.CompareRequest;
@@ -15,6 +16,7 @@ import com.consilens.connector.api.spi.ConnectorAdapter;
 import com.consilens.connector.api.spi.ConnectorRegistry;
 import com.consilens.core.compare.executor.ChecksumPlanExecutor;
 import com.consilens.core.compare.executor.JoinPlanExecutor;
+import com.consilens.core.compare.executor.StreamingMergePlanExecutor;
 import com.consilens.core.compare.registry.DefaultConnectorRegistry;
 import com.consilens.core.diff.DiffResult;
 import lombok.extern.slf4j.Slf4j;
@@ -63,18 +65,25 @@ public class DefaultCompareRuntime implements CompareRuntime {
             sourceDataset = sourceConnector.openDataset(sourceConfig.getResource(), sourceConfig.getReadOptions());
             targetDataset = targetConnector.openDataset(targetConfig.getResource(), targetConfig.getReadOptions());
 
+            validateDorisPartitionRequirement("source", request.getSourceFilter(), sourceDataset);
+            validateDorisPartitionRequirement("target", request.getTargetFilter(), targetDataset);
+
             CompareSegment sourceSegment = buildSegment(
                     sourceDataset,
                     request.getSource(),
                     request.getSourceKeySpec(),
                     request.getSourceComparisons(),
-                    request.getSourceFilter());
+                    request.getSourceFilter(),
+                    "source",
+                    request.getRealtimeSpec() != null ? request.getRealtimeSpec().getSourceWindow() : null);
             CompareSegment targetSegment = buildSegment(
                     targetDataset,
                     request.getTarget(),
                     request.getTargetKeySpec(),
                     request.getTargetComparisons(),
-                    request.getTargetFilter());
+                    request.getTargetFilter(),
+                    "target",
+                    request.getRealtimeSpec() != null ? request.getRealtimeSpec().getTargetWindow() : null);
 
             ComparePlan plan = comparePlanner.plan(request, sourceDataset, targetDataset);
             log.info("Selected compare plan: {}", plan.getPlanType());
@@ -102,14 +111,22 @@ public class DefaultCompareRuntime implements CompareRuntime {
                                         ConnectorConfig config,
                                         KeySpec keySpec,
                                         ComparisonSpec comparisons,
-                                        PredicateSpec filter) {
+                                        PredicateSpec filter,
+                                        String side,
+                                        UpdateWindow updateWindow) {
+        SchemaDescriptor schema = dataset.getSchema();
         return CompareSegment.builder()
                 .dataset(dataset)
                 .resource(config.getResource())
                 .keySpec(keySpec)
                 .comparisons(comparisons)
                 .filter(filter)
-                .schema(dataset.getSchema())
+                .schema(schema)
+                .side(side)
+                .updateWindow(updateWindow)
+                .snapshot(dataset.getSnapshotProvider()
+                        .map(provider -> provider.createSnapshot(config.getReadOptions()))
+                        .orElse(null))
                 .build();
     }
 
@@ -135,6 +152,39 @@ public class DefaultCompareRuntime implements CompareRuntime {
         if (request.getNormalizationSpec() != null) {
             new DefaultNormalizationSpecValidator().validate(request.getNormalizationSpec());
         }
+    }
+
+    private void validateDorisPartitionRequirement(String side,
+                                                   PredicateSpec filter,
+                                                   DatasetHandle dataset) {
+        if (dataset == null || dataset.getMetadata() == null || dataset.getMetadata().getAttributes() == null) {
+            return;
+        }
+        Map<String, Object> attributes = dataset.getMetadata().getAttributes();
+        String databaseType = stringValue(attributes.get("databaseType"));
+        boolean partitioned = Boolean.TRUE.equals(attributes.get("partitioned"));
+        if (!"doris".equalsIgnoreCase(databaseType) || !partitioned) {
+            return;
+        }
+        @SuppressWarnings("unchecked")
+        List<String> partitionKeys = attributes.get("partitionKeys") instanceof List
+                ? (List<String>) attributes.get("partitionKeys")
+                : List.of();
+        boolean resolved = false;
+        if (filter != null && filter.getExpression() != null && !partitionKeys.isEmpty()) {
+            String normalizedFilter = filter.getExpression().toLowerCase(java.util.Locale.ROOT);
+            resolved = partitionKeys.stream()
+                    .allMatch(key -> normalizedFilter.contains(key.toLowerCase(java.util.Locale.ROOT)));
+        }
+        if (!resolved) {
+            throw new ConnectorException("Doris " + side
+                    + " table is partitioned but no partition predicate can be resolved. "
+                    + "Please include partition keys in comparison.filters." + side + ".");
+        }
+    }
+
+    private String stringValue(Object value) {
+        return value instanceof String ? (String) value : null;
     }
 
     private ConnectorConfig withNormalization(ConnectorConfig config, CompareRequest request, String side) {
@@ -171,6 +221,7 @@ public class DefaultCompareRuntime implements CompareRuntime {
         List<PlanExecutor<?>> result = new ArrayList<>();
         result.add(new JoinPlanExecutor());
         result.add(new ChecksumPlanExecutor());
+        result.add(new StreamingMergePlanExecutor());
         return result;
     }
 }

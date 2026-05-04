@@ -89,10 +89,7 @@ public class StarRocksSqlQueryGenerator extends BaseSqlQueryGenerator {
             }
             sql.append(")) as row_checksum FROM ");
 
-            if (schemaName != null && !schemaName.isEmpty()) {
-                sql.append(capabilityProvider.quote(schemaName)).append(".");
-            }
-            sql.append(capabilityProvider.quote(tableName));
+            sql.append(buildRelationRef(schemaName, tableName));
 
             if (whereClause != null && !whereClause.trim().isEmpty()) {
                 sql.append(" WHERE ").append(whereClause);
@@ -133,10 +130,7 @@ public class StarRocksSqlQueryGenerator extends BaseSqlQueryGenerator {
         }
         sql.append(")) as row_hash FROM ");
 
-        if (schemaName != null && !schemaName.isEmpty()) {
-            sql.append(capabilityProvider.quote(schemaName)).append(".");
-        }
-        sql.append(capabilityProvider.quote(tableName));
+        sql.append(buildRelationRef(schemaName, tableName));
 
         if (whereClause != null && !whereClause.trim().isEmpty()) {
             sql.append(" WHERE ").append(whereClause);

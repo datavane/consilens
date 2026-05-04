@@ -23,6 +23,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -76,6 +77,27 @@ class DiffServiceTest {
         assertEquals(Map.of("timezone", "UTC", "comparisonMode", "DATE_ONLY"), rules.get(0).getParams());
     }
 
+    @Test
+    void shouldNotParseCustomSqlAsTablePathInDiffContext() {
+        TestableDiffService service = new TestableDiffService(new RecordingLifecycle(false), request -> DiffResult.empty(
+                com.consilens.connector.api.model.TablePath.of("source_table"),
+                com.consilens.connector.api.model.TablePath.of("target_table")));
+        CliConfiguration config = createConfig();
+        config.getSource().setResource(ConnectionConfig.ResourceConfig.builder()
+                .type("sql")
+                .path("SELECT id, name FROM source_table")
+                .build());
+        config.getTarget().setResource(ConnectionConfig.ResourceConfig.builder()
+                .type("sql")
+                .path("SELECT id, name FROM target_table")
+                .build());
+
+        DiffContext context = service.exposeDiffContext(config);
+
+        assertNull(context.getSourceTablePath());
+        assertNull(context.getTargetTablePath());
+    }
+
     private CliConfiguration createConfig() {
         return CliConfiguration.builder()
                 .source(ConnectionConfig.builder()
@@ -93,7 +115,6 @@ class DiffServiceTest {
                         .resource(ConnectionConfig.ResourceConfig.builder().type("table").name("target_table").build())
                         .build())
                 .comparison(ComparisonConfig.builder()
-                        .tables(StringPairConfig.builder().source("source_table").target("target_table").build())
                         .keys(ListPairConfig.builder().source(List.of("id")).target(List.of("id")).build())
                         .fields(ListPairConfig.builder().source(List.of("name")).target(List.of("name")).build())
                         .build())
@@ -126,6 +147,10 @@ class DiffServiceTest {
         @Override
         protected DiffLifecycle buildLifecycle(CliConfiguration config) {
             return lifecycle;
+        }
+
+        private DiffContext exposeDiffContext(CliConfiguration config) {
+            return buildDiffContext(config);
         }
     }
 

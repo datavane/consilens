@@ -58,6 +58,9 @@ public class CliConfiguration {
     @JsonProperty("normalization")
     private NormalizationConfig normalization;
 
+    @JsonProperty("realtime")
+    private RealtimeConfig realtime;
+
     @JsonProperty("result")
     private ResultConfig result;
 
@@ -267,6 +270,9 @@ public class CliConfiguration {
 
         if (normalization != null) {
             normalization.validate();
+        }
+        if (realtime != null) {
+            realtime.validate("realtime");
         }
 
         validateResultSinks();

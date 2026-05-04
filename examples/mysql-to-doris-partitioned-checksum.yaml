@@ -1,0 +1,62 @@
+# Doris 分区表比对配置 - 下游 Doris 必须带分区过滤条件
+# 目标：避免只按 id 命中 Doris 分区表导致全表扫描。
+
+source:
+  type: mysql
+  name: source-mysql-to-doris
+  connection:
+    url: jdbc:mysql://localhost:3306/test
+    username: ${env.MYSQL_USER}
+    password: ${env.MYSQL_PASSWORD}
+  resource:
+    type: table
+    name: performance_test_table
+
+target:
+  type: doris
+  name: target-doris-partitioned
+  connection:
+    url: jdbc:mysql://localhost:9030/test
+    username: ${env.DORIS_USER}
+    password: ${env.DORIS_PASSWORD}
+  resource:
+    type: table
+    name: performance_test_table
+
+comparison:
+  keys:
+    source:
+      - record_id
+    target:
+      - record_id
+
+  fields:
+    source:
+      - col_int
+      - col_decimal
+      - amount
+      - status
+      - updated_at
+    target:
+      - col_int
+      - col_decimal
+      - amount
+      - status
+      - updated_at
+
+  filters:
+    source: "dt >= '2026-05-01' AND dt < '2026-05-02'"
+    target: "dt >= '2026-05-01' AND dt < '2026-05-02'"
+
+strategy:
+  mode: checksum
+  algorithm: xor
+  bisectionFactor: 8
+  bisectionThreshold: 8000
+  batchSize: 1000
+  enableProfiling: true
+
+result:
+  sinks:
+    - format: console
+      type: result

@@ -3,6 +3,7 @@ package com.consilens.cli.service;
 import com.consilens.cli.model.CliConfiguration;
 import com.consilens.cli.model.CliDiffResult;
 import com.consilens.cli.model.ComparisonConfig;
+import com.consilens.cli.model.ConnectionConfig;
 import com.consilens.cli.model.TableMetadata;
 import com.consilens.cli.model.normalization.NormalizationConfig;
 import com.consilens.cli.model.normalization.TypeNormalizationRule;
@@ -45,6 +46,8 @@ import java.util.Map;
  */
 @Slf4j
 public class DiffService {
+
+    private final CompareRequestFactory compareRequestFactory = new CompareRequestFactory();
 
     /**
      * Perform data diff operation based on configuration using core algorithms.
@@ -124,37 +127,14 @@ public class DiffService {
     protected DiffContext buildDiffContext(CliConfiguration config) {
         TablePath sourcePath = null;
         TablePath targetPath = null;
-        List<String> sourceColumnNames = new ArrayList<>();
-        List<String> targetColumnNames = new ArrayList<>();
+        List<String> sourceColumnNames = compareRequestFactory.sourceColumns(config);
+        List<String> targetColumnNames = compareRequestFactory.targetColumns(config);
 
-        if (config.getComparison() != null) {
-            if (config.getComparison().getTables() != null) {
-                String sourceTable = config.getComparison().getTables().getSource();
-                String targetTable = config.getComparison().getTables().getTarget();
-                if (sourceTable != null) sourcePath = TablePath.of(sourceTable);
-                if (targetTable != null) targetPath = TablePath.of(targetTable);
-            }
-            // Merge key columns + configured fields to form the full column list for DDL
-            if (config.getComparison().getKeys() != null) {
-                List<String> srcKeys = config.getComparison().getKeys().getSource();
-                List<String> tgtKeys = config.getComparison().getKeys().getTarget();
-                if (srcKeys != null) sourceColumnNames.addAll(srcKeys);
-                if (tgtKeys != null) targetColumnNames.addAll(tgtKeys);
-            }
-            if (config.getComparison().getFields() != null) {
-                List<String> srcCols = config.getComparison().getFields().getSource();
-                List<String> tgtCols = config.getComparison().getFields().getTarget();
-                if (srcCols != null) {
-                    for (String c : srcCols) {
-                        if (!sourceColumnNames.contains(c)) sourceColumnNames.add(c);
-                    }
-                }
-                if (tgtCols != null) {
-                    for (String c : tgtCols) {
-                        if (!targetColumnNames.contains(c)) targetColumnNames.add(c);
-                    }
-                }
-            }
+        if (isTableResource(config.getSource())) {
+            sourcePath = resolveTablePath(config.getSource().getResource());
+        }
+        if (isTableResource(config.getTarget())) {
+            targetPath = resolveTablePath(config.getTarget().getResource());
         }
         return DiffContext.builder()
                 .sourceTablePath(sourcePath)
@@ -210,15 +190,10 @@ public class DiffService {
      * Determine key columns for sorting based on source/target priority.
      */
     private List<String> determineSortKeyColumns(CliConfiguration config) {
-        List<String> sourceKeyColumns = config.getComparison().getKeys().getSource();
-        List<String> targetKeyColumns = config.getComparison().getKeys().getTarget();
-
+        List<String> sourceKeyColumns = compareRequestFactory.logicalSortKeys(config);
         if (sourceKeyColumns != null && !sourceKeyColumns.isEmpty()) {
             log.debug("Using source key columns for sorting: {}", sourceKeyColumns);
             return sourceKeyColumns;
-        } else if (targetKeyColumns != null && !targetKeyColumns.isEmpty()) {
-            log.debug("Using target key columns for sorting: {}", targetKeyColumns);
-            return targetKeyColumns;
         } else {
             log.debug("No key columns found, will use first column for sorting");
             return new ArrayList<>();
@@ -230,44 +205,14 @@ public class DiffService {
      */
     private TableMetadata createTableMetadata(CliConfiguration config) {
         log.debug("Creating TableMetadata from config: sourceTable={}, targetTable={}",
-                config.getComparison().getTables().getSource(), config.getComparison().getTables().getTarget());
+                resourceDisplayName(config.getSource()), resourceDisplayName(config.getTarget()));
 
-        // Build column lists for each table
-        List<String> sourceColumns = new ArrayList<>();
-        List<String> targetColumns = new ArrayList<>();
-
-        // Add key columns
-        if (config.getComparison().getKeys().getSource() != null) {
-            sourceColumns.addAll(config.getComparison().getKeys().getSource());
-            log.debug("Added source keyColumns: {}", config.getComparison().getKeys().getSource());
-        }
-        if (config.getComparison().getKeys().getTarget() != null) {
-            targetColumns.addAll(config.getComparison().getKeys().getTarget());
-            log.debug("Added target keyColumns: {}", config.getComparison().getKeys().getTarget());
-        }
-
-        // Add configured comparison fields
-        if (config.getComparison().getFields() != null
-                && config.getComparison().getFields().getSource() != null) {
-            sourceColumns.addAll(config.getComparison().getFields().getSource());
-            log.debug("Added source fields: {}", config.getComparison().getFields().getSource());
-        }
-        if (config.getComparison().getFields() != null
-                && config.getComparison().getFields().getTarget() != null) {
-            targetColumns.addAll(config.getComparison().getFields().getTarget());
-            log.debug("Added target fields: {}", config.getComparison().getFields().getTarget());
-        }
-
-        // Add extra columns
-        if (config.getComparison().getExtraColumns() != null) {
-            sourceColumns.addAll(config.getComparison().getExtraColumns());
-            targetColumns.addAll(config.getComparison().getExtraColumns());
-            log.debug("Added extraColumns: {}", config.getComparison().getExtraColumns());
-        }
+        List<String> sourceColumns = compareRequestFactory.sourceColumns(config);
+        List<String> targetColumns = compareRequestFactory.targetColumns(config);
 
         TableMetadata metadata = TableMetadata.builder()
-                .sourceTable(config.getComparison().getTables().getSource())
-                .targetTable(config.getComparison().getTables().getTarget())
+                .sourceTable(resourceDisplayName(config.getSource()))
+                .targetTable(resourceDisplayName(config.getTarget()))
                 .sourceColumns(sourceColumns)
                 .targetColumns(targetColumns)
                 .build();
@@ -318,62 +263,7 @@ public class DiffService {
     }
 
     private CompareRequest toCompareRequest(CliConfiguration config) {
-        ComparisonConfig comparison = config.getComparison();
-        return CompareRequest.builder()
-                .source(ConnectorConfigMapper.toConnectorConfig(config.getSource(), comparison.getTables().getSource()))
-                .target(ConnectorConfigMapper.toConnectorConfig(config.getTarget(), comparison.getTables().getTarget()))
-                .sourceKeySpec(toKeySpec(comparison.getKeys().getSource()))
-                .targetKeySpec(toKeySpec(comparison.getKeys().getTarget()))
-                .sourceComparisons(toComparisonSpec(comparison.getFields() != null
-                        ? comparison.getFields().getSource()
-                        : null))
-                .targetComparisons(toComparisonSpec(comparison.getFields() != null
-                        ? comparison.getFields().getTarget()
-                        : null))
-                .sourceFilter(toPredicateSpec(comparison.getFilters() != null
-                        ? comparison.getFilters().getSource()
-                        : null))
-                .targetFilter(toPredicateSpec(comparison.getFilters() != null
-                        ? comparison.getFilters().getTarget()
-                        : null))
-                .normalizationSpec(toNormalizationSpec(config.getNormalization()))
-                .strategyPreference(toStrategyPreference(config))
-                .executionOptions(toExecutionOptions(config))
-                .build();
-    }
-
-    private ConnectorConfig toConnectorConfig(com.consilens.cli.model.ConnectionConfig connectionConfig, String tableName) {
-        return ConnectorConfigMapper.toConnectorConfig(connectionConfig, tableName);
-    }
-
-    private ResourceLocator toResourceLocator(com.consilens.cli.model.ConnectionConfig connectionConfig, String tableName) {
-        return ConnectorConfigMapper.toResourceLocator(connectionConfig, tableName);
-    }
-
-    private ReadOptions toReadOptions(Map<String, Object> readOptions) {
-        return ConnectorConfigMapper.toReadOptions(readOptions);
-    }
-
-    private KeySpec toKeySpec(List<String> fields) {
-        return KeySpec.builder()
-                .fields(fields != null ? List.copyOf(fields) : Collections.emptyList())
-                .build();
-    }
-
-    private ComparisonSpec toComparisonSpec(List<String> fields) {
-        return ComparisonSpec.builder()
-                .fields(fields != null ? List.copyOf(fields) : Collections.emptyList())
-                .build();
-    }
-
-    private PredicateSpec toPredicateSpec(String expression) {
-        if (expression == null || expression.trim().isEmpty()) {
-            return null;
-        }
-        return PredicateSpec.builder()
-                .type("sql")
-                .expression(expression)
-                .build();
+        return compareRequestFactory.create(config);
     }
 
     private CompareStrategyPreference toStrategyPreference(CliConfiguration config) {
@@ -394,6 +284,31 @@ public class DiffService {
                 .preferredPlans(preferredPlans)
                 .allowFallback(allowFallback)
                 .build();
+    }
+
+    private boolean isTableResource(ConnectionConfig connectionConfig) {
+        return connectionConfig != null
+                && connectionConfig.getResource() != null
+                && connectionConfig.getResource().getType() != null
+                && "table".equalsIgnoreCase(connectionConfig.getResource().getType());
+    }
+
+    private TablePath resolveTablePath(ConnectionConfig.ResourceConfig resource) {
+        String value = resource.getName() != null && !resource.getName().isBlank()
+                ? resource.getName()
+                : resource.getPath();
+        return value != null ? TablePath.of(value) : null;
+    }
+
+    private String resourceDisplayName(ConnectionConfig connectionConfig) {
+        if (connectionConfig == null || connectionConfig.getResource() == null) {
+            return "";
+        }
+        ConnectionConfig.ResourceConfig resource = connectionConfig.getResource();
+        if (resource.getName() != null && !resource.getName().isBlank()) {
+            return resource.getName();
+        }
+        return resource.getPath() != null ? resource.getPath() : "";
     }
 
     private CompareExecutionOptions toExecutionOptions(CliConfiguration config) {
@@ -593,22 +508,23 @@ public class DiffService {
         log.info("Performing dry run for diff operation with strategy: {}, algorithm: {}",
                 config.getStrategyMode(), config.getAlgorithm());
         ConnectorProbeService probeService = new ConnectorProbeService();
-        ComparisonConfig comparison = config.getComparison();
-
-        ConnectorConfig sourceConfig = ConnectorConfigMapper.toConnectorConfig(config.getSource(), comparison.getTables().getSource());
-        ConnectorConfig targetConfig = ConnectorConfigMapper.toConnectorConfig(config.getTarget(), comparison.getTables().getTarget());
+        CompareRequest request = compareRequestFactory.create(config);
 
         try {
             long sourceRowCount = probeService.countRows(
-                    sourceConfig,
-                    toKeySpec(comparison.getKeys().getSource()),
-                    toComparisonSpec(comparison.getFields() != null ? comparison.getFields().getSource() : null),
-                    toPredicateSpec(comparison.getFilters() != null ? comparison.getFilters().getSource() : null));
+                    request.getSource(),
+                    request.getSourceKeySpec(),
+                    request.getSourceComparisons(),
+                    request.getSourceFilter(),
+                    "source",
+                    request.getRealtimeSpec() != null ? request.getRealtimeSpec().getSourceWindow() : null);
             long targetRowCount = probeService.countRows(
-                    targetConfig,
-                    toKeySpec(comparison.getKeys().getTarget()),
-                    toComparisonSpec(comparison.getFields() != null ? comparison.getFields().getTarget() : null),
-                    toPredicateSpec(comparison.getFilters() != null ? comparison.getFilters().getTarget() : null));
+                    request.getTarget(),
+                    request.getTargetKeySpec(),
+                    request.getTargetComparisons(),
+                    request.getTargetFilter(),
+                    "target",
+                    request.getRealtimeSpec() != null ? request.getRealtimeSpec().getTargetWindow() : null);
 
             log.info("Dry run completed - Source rows: {}, Target rows: {}", sourceRowCount, targetRowCount);
 

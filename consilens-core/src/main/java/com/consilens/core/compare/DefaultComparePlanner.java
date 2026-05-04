@@ -9,6 +9,7 @@ import com.consilens.connector.api.planner.CompareRequest;
 import com.consilens.connector.api.planner.CompareStrategyPreference;
 import com.consilens.core.compare.plan.PushdownChecksumPlan;
 import com.consilens.core.compare.plan.ServerJoinPlan;
+import com.consilens.core.compare.plan.StreamingMergePlan;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -28,10 +29,17 @@ public class DefaultComparePlanner implements ComparePlanner {
             availablePlans.add(new PushdownChecksumPlan(executionSettings));
         }
 
-        if (sameExecutionDomain(source, target)
+        if (!hasSqlResource(source, target)
+                && sameExecutionDomain(source, target)
                 && sourceCapabilities.supports(ConnectorCapability.SERVER_SIDE_JOIN)
                 && targetCapabilities.supports(ConnectorCapability.SERVER_SIDE_JOIN)) {
             availablePlans.add(new ServerJoinPlan(executionSettings));
+        }
+
+        if (availablePlans.isEmpty()) {
+            if (supportsStreaming(source) && supportsStreaming(target)) {
+                availablePlans.add(new StreamingMergePlan(executionSettings));
+            }
         }
 
         if (availablePlans.isEmpty()) {
@@ -62,6 +70,23 @@ public class DefaultComparePlanner implements ComparePlanner {
         String sourceExecutionDomain = sourceMetadata.getExecutionDomainId();
         String targetExecutionDomain = targetMetadata.getExecutionDomainId();
         return sourceExecutionDomain != null && sourceExecutionDomain.equals(targetExecutionDomain);
+    }
+
+    private boolean supportsStreaming(DatasetHandle datasetHandle) {
+        return datasetHandle != null && datasetHandle.getRecordScanner().isPresent();
+    }
+
+    private boolean hasSqlResource(DatasetHandle source, DatasetHandle target) {
+        return isSqlResource(source) || isSqlResource(target);
+    }
+
+    private boolean isSqlResource(DatasetHandle datasetHandle) {
+        DatasetMetadata metadata = datasetHandle != null ? datasetHandle.getMetadata() : null;
+        if (metadata == null || metadata.getAttributes() == null) {
+            return false;
+        }
+        Object resourceType = metadata.getAttributes().get("resourceType");
+        return resourceType instanceof String && "sql".equalsIgnoreCase((String) resourceType);
     }
 
     private ComparePlan resolvePreferredPlan(CompareStrategyPreference preference, List<ComparePlan> availablePlans) {

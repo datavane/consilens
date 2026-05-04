@@ -26,19 +26,23 @@ class ConfigurationManagerTest {
                 "    \"type\": \"mysql\",\n" +
                 "    \"url\": \"jdbc:mysql://localhost:3306/test\",\n" +
                 "    \"username\": \"root\",\n" +
-                "    \"password\": \"123456\"\n" +
+                "    \"password\": \"123456\",\n" +
+                "    \"resource\": {\n" +
+                "      \"type\": \"table\",\n" +
+                "      \"name\": \"performance_test_table\"\n" +
+                "    }\n" +
                 "  },\n" +
                 "  \"target\": {\n" +
                 "    \"type\": \"postgresql\",\n" +
                 "    \"url\": \"jdbc:postgresql://localhost:5432/postgres?currentSchema=public\",\n" +
                 "    \"username\": \"postgres\",\n" +
-                "    \"password\": \"123456\"\n" +
+                "    \"password\": \"123456\",\n" +
+                "    \"resource\": {\n" +
+                "      \"type\": \"table\",\n" +
+                "      \"name\": \"performance_test_table\"\n" +
+                "    }\n" +
                 "  },\n" +
                 "  \"comparison\": {\n" +
-                "    \"tables\": {\n" +
-                "      \"source\": \"performance_test_table\",\n" +
-                "      \"target\": \"performance_test_table\"\n" +
-                "    },\n" +
                 "    \"keys\": {\n" +
                 "      \"source\": [\"record_id\"],\n" +
                 "      \"target\": [\"record_id\"]\n" +
@@ -97,7 +101,7 @@ class ConfigurationManagerTest {
 
         assertNotNull(config);
         assertEquals("xor", config.getAlgorithm());
-        assertEquals("performance_test_table", config.getComparison().getTables().getSource());
+        assertEquals("performance_test_table", config.getSource().getResource().getName());
         assertEquals(1, config.getResult().getSinks().size());
         assertNotNull(config.getResult().getSinks().get(0).getProperties());
         assertEquals("json", configurationManager.detectFormat(configFile.toString()));
@@ -111,19 +115,23 @@ class ConfigurationManagerTest {
                 "    \"type\": \"mysql\",\n" +
                 "    \"url\": \"${env.SOURCE_URL}\",\n" +
                 "    \"username\": \"${env.DB_USER}\",\n" +
-                "    \"password\": \"${env.DB_PASSWORD}\"\n" +
+                "    \"password\": \"${env.DB_PASSWORD}\",\n" +
+                "    \"resource\": {\n" +
+                "      \"type\": \"table\",\n" +
+                "      \"name\": \"${env.TABLE_NAME}\"\n" +
+                "    }\n" +
                 "  },\n" +
                 "  \"target\": {\n" +
                 "    \"type\": \"postgresql\",\n" +
                 "    \"url\": \"${env.TARGET_URL}\",\n" +
                 "    \"username\": \"${env.DB_USER}\",\n" +
-                "    \"password\": \"${env.DB_PASSWORD}\"\n" +
+                "    \"password\": \"${env.DB_PASSWORD}\",\n" +
+                "    \"resource\": {\n" +
+                "      \"type\": \"table\",\n" +
+                "      \"name\": \"${env.TABLE_NAME}\"\n" +
+                "    }\n" +
                 "  },\n" +
                 "  \"comparison\": {\n" +
-                "    \"tables\": {\n" +
-                "      \"source\": \"${env.TABLE_NAME}\",\n" +
-                "      \"target\": \"${env.TABLE_NAME}\"\n" +
-                "    },\n" +
                 "    \"keys\": {\n" +
                 "      \"source\": [\"record_id\"],\n" +
                 "      \"target\": [\"record_id\"]\n" +
@@ -186,7 +194,7 @@ class ConfigurationManagerTest {
         CliConfiguration config = configurationManager.loadConfiguration(configFile.toString(), false);
 
         assertEquals("jdbc:mysql://localhost:3306/test", config.getSource().getUrl());
-        assertEquals("performance_test_table", config.getComparison().getTables().getSource());
+        assertEquals("performance_test_table", config.getSource().getResource().getName());
         assertEquals("root", config.getSource().getUsername());
         assertTrue(config.getResult().getSinks().get(0).getProperties().contains("dv_job_execution_result"));
         assertTrue(config.getResult().getSinks().get(0).getProperties().contains("${sourceRowCount}"));
@@ -200,15 +208,18 @@ class ConfigurationManagerTest {
                 "  url: ${env.SOURCE_URL}\n" +
                 "  username: ${env.DB_USER}\n" +
                 "  password: ${env.DB_PASSWORD}\n" +
+                "  resource:\n" +
+                "    type: table\n" +
+                "    name: ${env.TABLE_NAME}\n" +
                 "target:\n" +
                 "  type: postgresql\n" +
                 "  url: ${env.TARGET_URL}\n" +
                 "  username: ${env.DB_USER}\n" +
                 "  password: ${env.DB_PASSWORD}\n" +
+                "  resource:\n" +
+                "    type: table\n" +
+                "    name: ${env.TABLE_NAME}\n" +
                 "comparison:\n" +
-                "  tables:\n" +
-                "    source: ${env.TABLE_NAME}\n" +
-                "    target: ${env.TABLE_NAME}\n" +
                 "  keys:\n" +
                 "    source:\n" +
                 "      - record_id\n" +
@@ -241,7 +252,7 @@ class ConfigurationManagerTest {
         CliConfiguration config = configurationManager.loadConfiguration(configFile.toString(), false);
 
         assertEquals("jdbc:postgresql://localhost:5432/postgres?currentSchema=public", config.getTarget().getUrl());
-        assertEquals("performance_test_table", config.getComparison().getTables().getTarget());
+        assertEquals("performance_test_table", config.getTarget().getResource().getName());
     }
 
     @Test
@@ -252,15 +263,18 @@ class ConfigurationManagerTest {
                 "  url: ${env.SOURCE_URL}\n" +
                 "  username: root\n" +
                 "  password: 123456\n" +
+                "  resource:\n" +
+                "    type: table\n" +
+                "    name: performance_test_table\n" +
                 "target:\n" +
                 "  type: postgresql\n" +
                 "  url: jdbc:postgresql://localhost:5432/postgres?currentSchema=public\n" +
                 "  username: postgres\n" +
                 "  password: 123456\n" +
+                "  resource:\n" +
+                "    type: table\n" +
+                "    name: performance_test_table\n" +
                 "comparison:\n" +
-                "  tables:\n" +
-                "    source: performance_test_table\n" +
-                "    target: performance_test_table\n" +
                 "  keys:\n" +
                 "    source:\n" +
                 "      - record_id\n" +
@@ -286,15 +300,18 @@ class ConfigurationManagerTest {
                 "  url: jdbc:mysql://localhost:3306/test\n" +
                 "  username: root\n" +
                 "  password: 123456\n" +
+                "  resource:\n" +
+                "    type: table\n" +
+                "    name: performance_test_table\n" +
                 "target:\n" +
                 "  type: postgresql\n" +
                 "  url: jdbc:postgresql://localhost:5432/postgres?currentSchema=public\n" +
                 "  username: postgres\n" +
                 "  password: 123456\n" +
+                "  resource:\n" +
+                "    type: table\n" +
+                "    name: performance_test_table\n" +
                 "comparison:\n" +
-                "  tables:\n" +
-                "    source: performance_test_table\n" +
-                "    target: performance_test_table\n" +
                 "  keys:\n" +
                 "    source:\n" +
                 "      - record_id\n" +
@@ -328,15 +345,18 @@ class ConfigurationManagerTest {
                 "  url: jdbc:mysql://localhost:3306/test\n" +
                 "  username: root\n" +
                 "  password: 123456\n" +
+                "  resource:\n" +
+                "    type: table\n" +
+                "    name: performance_test_table\n" +
                 "target:\n" +
                 "  type: postgresql\n" +
                 "  url: jdbc:postgresql://localhost:5432/postgres?currentSchema=public\n" +
                 "  username: postgres\n" +
                 "  password: 123456\n" +
+                "  resource:\n" +
+                "    type: table\n" +
+                "    name: performance_test_table\n" +
                 "comparison:\n" +
-                "  tables:\n" +
-                "    source: performance_test_table\n" +
-                "    target: performance_test_table\n" +
                 "  keys:\n" +
                 "    source:\n" +
                 "      - record_id\n" +

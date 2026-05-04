@@ -59,6 +59,8 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Properties;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.Set;
 import java.util.function.Function;
 
@@ -66,6 +68,8 @@ import java.util.function.Function;
 public class JdbcDatasetHandle implements DatasetHandle, RelationalDatasetSupport {
 
     private static final int DEFAULT_STREAM_FETCH_SIZE = 1000;
+    private static final Pattern DORIS_PARTITION_PATTERN = Pattern.compile("PARTITION\\s+BY\\s+.*?\\(([^\\)]*)\\)",
+            Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
 
     private final String connectorName;
     private final ResourceLocator resource;
@@ -198,6 +202,9 @@ public class JdbcDatasetHandle implements DatasetHandle, RelationalDatasetSuppor
 
     @Override
     public TablePath getTablePath() {
+        if (isSqlResource(resource)) {
+            throw new ConnectorException("SQL resource does not expose a physical TablePath");
+        }
         return resolveTablePath(resource);
     }
 
@@ -215,6 +222,9 @@ public class JdbcDatasetHandle implements DatasetHandle, RelationalDatasetSuppor
         attributes.put("databaseType", connectorType);
         attributes.put("resourceType", resource != null ? resource.getType() : null);
         attributes.put("connectorName", connectorName);
+        if ("doris".equalsIgnoreCase(connectorType) && !isSqlResource(resource)) {
+            attributes.putAll(discoverDorisPartitionAttributes(resource));
+        }
 
         return DatasetMetadata.builder()
                 .logicalName(resource != null ? (resource.getName() != null ? resource.getName() : resource.getPath()) : null)
@@ -295,6 +305,16 @@ public class JdbcDatasetHandle implements DatasetHandle, RelationalDatasetSuppor
     }
 
     private SchemaDescriptor discoverSchema() {
+        if (isSqlResource(resource)) {
+            String sql = requireSqlResource();
+            log.debug("Discovering JDBC schema for SQL resource");
+            try (Connection jdbcConnection = openConnection()) {
+                return discoverSchemaFromSqlResultSet(jdbcConnection, sql);
+            } catch (SQLException e) {
+                throw new ConnectorException("Failed to discover JDBC schema for SQL resource", e);
+            }
+        }
+
         TablePath tablePath = resolveTablePath(resource);
         log.debug("Discovering JDBC schema for {}", tablePath.getFullPath());
         try (Connection jdbcConnection = openConnection();
@@ -351,39 +371,50 @@ public class JdbcDatasetHandle implements DatasetHandle, RelationalDatasetSuppor
                 null);
         try (PreparedStatement statement = jdbcConnection.prepareStatement(sql);
              ResultSet resultSet = statement.executeQuery()) {
-            ResultSetMetaData resultSetMetaData = resultSet.getMetaData();
-            List<FieldDescriptor> fields = new ArrayList<>();
-            Map<String, FieldDescriptor> fieldMap = new LinkedHashMap<>();
-            for (int index = 1; index <= resultSetMetaData.getColumnCount(); index++) {
-                String columnName = resultSetMetaData.getColumnLabel(index);
-                String typeName = resultSetMetaData.getColumnTypeName(index);
-                TypeDescriptor typeDescriptor = dialect.getDataTypeHandler().convertToTypeDescriptor(typeName).toBuilder()
-                        .nullable(resultSetMetaData.isNullable(index) != ResultSetMetaData.columnNoNulls)
-                        .build();
-                FieldDescriptor field = FieldDescriptor.builder()
-                        .name(columnName)
-                        .canonicalType(LegacyTypeMapper.toCanonicalType(typeDescriptor))
-                        .typeDescriptor(typeDescriptor)
-                        .nativeType(ConnectorNativeType.builder().name(typeName).declaration(typeName).build())
-                        .nullable(typeDescriptor.isNullable())
-                        .ordinal(index)
-                        .attributes(Map.of("sourceType", typeName))
-                        .build();
-                fields.add(field);
-                fieldMap.put(columnName, field);
-            }
-            return SchemaDescriptor.builder()
-                    .fields(List.copyOf(fields))
-                    .fieldMap(fieldMap)
-                    .build();
+            return toSchemaDescriptor(resultSet.getMetaData());
         }
+    }
+
+    private SchemaDescriptor discoverSchemaFromSqlResultSet(Connection jdbcConnection, String sqlResource) throws SQLException {
+        String sql = "SELECT * FROM (" + sqlResource + ") consilens_schema WHERE 1 = 0";
+        try (PreparedStatement statement = jdbcConnection.prepareStatement(sql);
+             ResultSet resultSet = statement.executeQuery()) {
+            return toSchemaDescriptor(resultSet.getMetaData());
+        }
+    }
+
+    private SchemaDescriptor toSchemaDescriptor(ResultSetMetaData resultSetMetaData) throws SQLException {
+        List<FieldDescriptor> fields = new ArrayList<>();
+        Map<String, FieldDescriptor> fieldMap = new LinkedHashMap<>();
+        for (int index = 1; index <= resultSetMetaData.getColumnCount(); index++) {
+            String columnName = resultSetMetaData.getColumnLabel(index);
+            String typeName = resultSetMetaData.getColumnTypeName(index);
+            TypeDescriptor typeDescriptor = dialect.getDataTypeHandler().convertToTypeDescriptor(typeName).toBuilder()
+                    .nullable(resultSetMetaData.isNullable(index) != ResultSetMetaData.columnNoNulls)
+                    .build();
+            FieldDescriptor field = FieldDescriptor.builder()
+                    .name(columnName)
+                    .canonicalType(LegacyTypeMapper.toCanonicalType(typeDescriptor))
+                    .typeDescriptor(typeDescriptor)
+                    .nativeType(ConnectorNativeType.builder().name(typeName).declaration(typeName).build())
+                    .nullable(typeDescriptor.isNullable())
+                    .ordinal(index)
+                    .attributes(Map.of("sourceType", typeName))
+                    .build();
+            fields.add(field);
+            fieldMap.put(columnName, field);
+        }
+        return SchemaDescriptor.builder()
+                .fields(List.copyOf(fields))
+                .fieldMap(fieldMap)
+                .build();
     }
 
     private CloseableIterator<CanonicalRecord> scanRecords(CompareSegment segment) {
         SchemaDescriptor schemaDescriptor = segment.getSchema() != null ? segment.getSchema() : getSchema();
         List<String> selectColumns = selectColumns(segment, schemaDescriptor);
-        TablePath tablePath = resolveTablePath(resource);
-        String sql = buildScanSql(segment, schemaDescriptor, selectColumns, tablePath);
+        TablePath tablePath = isSqlResource(resource) ? null : resolveTablePath(resource);
+        String sql = buildScanSql(segment, selectColumns, tablePath);
         Connection jdbcConnection = null;
         PreparedStatement statement = null;
         ResultSet resultSet = null;
@@ -393,35 +424,48 @@ public class JdbcDatasetHandle implements DatasetHandle, RelationalDatasetSuppor
             statement = jdbcConnection.prepareStatement(sql);
             applyReadOptions(statement);
             resultSet = statement.executeQuery();
-            log.debug("Started JDBC ordered scan for {} with SQL: {}", tablePath.getFullPath(), sql);
+            log.debug("Started JDBC ordered scan for {} with SQL: {}", resourceDisplayName(), sql);
             return new JdbcRecordIterator(jdbcConnection, statement, resultSet, selectColumns, segment, schemaDescriptor);
         } catch (SQLException e) {
             closeQuietly(resultSet);
             closeQuietly(statement);
             closeQuietly(jdbcConnection);
-            throw new ConnectorException("Failed to scan JDBC dataset " + tablePath.getFullPath(), e);
+            throw new ConnectorException("Failed to scan JDBC dataset " + resourceDisplayName(), e);
         }
     }
 
     private SegmentDigest digestSegment(CompareSegment segment, HashOptions options) {
         SchemaDescriptor schemaDescriptor = segment.getSchema() != null ? segment.getSchema() : getSchema();
+        TablePath tablePath = isSqlResource(resource) ? null : resolveTablePath(resource);
         List<String> keyColumns = keyColumns(segment);
         List<String> comparisonColumns = comparisonColumns(segment.getComparisons(), schemaDescriptor, keyColumns);
         List<String> checksumColumns = new ArrayList<>(keyColumns);
         checksumColumns.addAll(comparisonColumns);
-        String whereClause = buildWhereClause(segment, keyColumns);
-        TablePath tablePath = resolveTablePath(resource);
-        String sql = dialect.getSqlQueryGenerator().getChecksumSQL(
-                tablePath.getSchema().orElse(null),
-                tablePath.getTableName(),
-                keyColumns,
-                checksumColumns,
-                columnTypes(schemaDescriptor, checksumColumns),
-                whereClause,
-                resolveChecksumAlgorithm(options));
+        String sql;
+        if (!isSqlResource(resource)) {
+            String whereClause = buildWhereClause(segment, keyColumns);
+            sql = dialect.getSqlQueryGenerator().getChecksumSQL(
+                    tablePath.getSchema().orElse(null),
+                    tablePath.getTableName(),
+                    keyColumns,
+                    checksumColumns,
+                     columnTypes(schemaDescriptor, checksumColumns),
+                     whereClause,
+                    resolveChecksumAlgorithm(options));
+        } else {
+            List<String> digestColumns = selectColumns(segment, schemaDescriptor);
+            String scanSql = buildScanSql(segment, digestColumns, tablePath, false);
+            sql = dialect.getSqlQueryGenerator().getChecksumSQLFromSql(
+                    scanSql,
+                    keyColumns,
+                    digestColumns,
+                    columnTypes(schemaDescriptor, digestColumns),
+                    null,
+                    resolveChecksumAlgorithm(options));
+        }
         long startTime = System.currentTimeMillis();
-        log.info("Executing checksum pushdown for {}", tablePath.getFullPath());
-        log.debug("Checksum SQL for {}: {}", tablePath.getFullPath(), sql);
+        log.info("Executing checksum pushdown for {}", resourceDisplayName());
+        log.debug("Checksum SQL for {}: {}", resourceDisplayName(), sql);
         try (Connection jdbcConnection = openConnection();
              PreparedStatement statement = jdbcConnection.prepareStatement(sql);
              ResultSet resultSet = statement.executeQuery()) {
@@ -433,19 +477,28 @@ public class JdbcDatasetHandle implements DatasetHandle, RelationalDatasetSuppor
                     .digest(readString(resultSet, "checksum", 2))
                     .build();
             log.info("Completed checksum pushdown for {} in {} ms (rows={})",
-                    tablePath.getFullPath(),
+                    resourceDisplayName(),
                     System.currentTimeMillis() - startTime,
                     digest.getRowCount());
             return digest;
         } catch (SQLException e) {
-            throw new ConnectorException("Failed to hash JDBC dataset " + tablePath.getFullPath(), e);
+            throw new ConnectorException("Failed to hash JDBC dataset " + resourceDisplayName(), e);
         }
     }
 
     private String buildScanSql(CompareSegment segment,
-                                SchemaDescriptor schemaDescriptor,
                                 List<String> selectColumns,
                                 TablePath tablePath) {
+        return buildScanSql(segment, selectColumns, tablePath, true);
+    }
+
+    private String buildScanSql(CompareSegment segment,
+                                List<String> selectColumns,
+                                TablePath tablePath,
+                                boolean includeOrderBy) {
+        if (isSqlResource(resource)) {
+            return buildSqlResourceScanSql(segment, selectColumns, requireSqlResource(), includeOrderBy);
+        }
         List<String> selectExpressions = new ArrayList<>();
         for (String column : selectColumns) {
             selectExpressions.add(dialect.getCapabilityProvider().quote(column));
@@ -462,6 +515,35 @@ public class JdbcDatasetHandle implements DatasetHandle, RelationalDatasetSuppor
             sql = sql + " " + dialect.getSqlQueryGenerator().getLimitClause(split.getOffset(), split.getLimit());
         }
         return sql;
+    }
+
+    private String buildSqlResourceScanSql(CompareSegment segment,
+                                           List<String> selectColumns,
+                                           String sqlResource,
+                                           boolean includeOrderBy) {
+        List<String> selectExpressions = new ArrayList<>();
+        for (String column : selectColumns) {
+            selectExpressions.add(dialect.getCapabilityProvider().quote(column));
+        }
+        List<String> keyColumns = keyColumns(segment);
+        StringBuilder sql = new StringBuilder();
+        sql.append("SELECT ").append(String.join(", ", selectExpressions))
+                .append(" FROM (").append(sqlResource).append(") consilens_base");
+        String whereClause = buildWhereClause(segment, keyColumns);
+        if (whereClause != null && !whereClause.isBlank()) {
+            sql.append(" WHERE ").append(whereClause);
+        }
+        if (includeOrderBy && !keyColumns.isEmpty()) {
+            sql.append(" ORDER BY ");
+            sql.append(String.join(", ", keyColumns.stream()
+                    .map(dialect.getCapabilityProvider()::quote)
+                    .toArray(String[]::new)));
+        }
+        if (segment.getSplit() instanceof OffsetLimitSplit) {
+            OffsetLimitSplit split = (OffsetLimitSplit) segment.getSplit();
+            sql.append(" ").append(dialect.getSqlQueryGenerator().getLimitClause(split.getOffset(), split.getLimit()));
+        }
+        return sql.toString();
     }
 
     private CanonicalRecord readRecord(ResultSet resultSet,
@@ -619,19 +701,15 @@ public class JdbcDatasetHandle implements DatasetHandle, RelationalDatasetSuppor
     }
 
     private String buildWhereClause(CompareSegment segment, List<String> keyColumns) {
-        List<String> predicates = new ArrayList<>();
-        if (segment.getFilter() != null
-                && segment.getFilter().getExpression() != null
-                && !segment.getFilter().getExpression().trim().isEmpty()) {
-            predicates.add("(" + segment.getFilter().getExpression().trim() + ")");
-        }
         SegmentSplit split = segment.getSplit();
-        if (split instanceof KeyRangeSplit) {
-            predicates.add(buildKeyRangePredicate((KeyRangeSplit) split, keyColumns));
-        } else if (split != null && !(split instanceof OffsetLimitSplit)) {
+        if (split != null && !(split instanceof KeyRangeSplit) && !(split instanceof OffsetLimitSplit)) {
             throw new ConnectorException("Unsupported JDBC split type: " + split.getClass().getSimpleName());
         }
-        return predicates.isEmpty() ? null : String.join(" AND ", predicates);
+        return new WhereClauseBuilder(dialect)
+                .addBaseFilter(segment.getFilter())
+                .addUpdateWindow(segment.getUpdateWindow())
+                .addSplit(segment.getSplit(), keyColumns)
+                .build();
     }
 
     private String buildKeyRangePredicate(KeyRangeSplit split, List<String> keyColumns) {
@@ -665,6 +743,28 @@ public class JdbcDatasetHandle implements DatasetHandle, RelationalDatasetSuppor
         throw new ConnectorException("JDBC resource requires resource.name or resource.path");
     }
 
+    private boolean isSqlResource(ResourceLocator locator) {
+        return locator != null
+                && locator.getType() != null
+                && "sql".equalsIgnoreCase(locator.getType())
+                && locator.getPath() != null
+                && !locator.getPath().trim().isEmpty();
+    }
+
+    private String requireSqlResource() {
+        if (!isSqlResource(resource)) {
+            throw new ConnectorException("JDBC resource is not configured as SQL");
+        }
+        return resource.getPath().trim();
+    }
+
+    private String resourceDisplayName() {
+        if (isSqlResource(resource)) {
+            return "sql-resource";
+        }
+        return resolveTablePath(resource).getFullPath();
+    }
+
     private ChecksumAlgorithm resolveChecksumAlgorithm(HashOptions options) {
         return options != null
                 ? ChecksumAlgorithm.fromString(options.getAlgorithm())
@@ -690,6 +790,55 @@ public class JdbcDatasetHandle implements DatasetHandle, RelationalDatasetSuppor
             Number number = (Number) resultSet.getObject(fallbackIndex);
             return number != null ? number.longValue() : 0L;
         }
+    }
+
+    private Map<String, Object> discoverDorisPartitionAttributes(ResourceLocator resourceLocator) {
+        Map<String, Object> attributes = new LinkedHashMap<>();
+        if (resourceLocator == null) {
+            return attributes;
+        }
+        TablePath tablePath;
+        try {
+            tablePath = resolveTablePath(resourceLocator);
+        } catch (Exception e) {
+            return attributes;
+        }
+        try {
+            Properties properties = buildConnectionProperties(connection, new Properties());
+            try (Connection jdbcConnection = DriverManager.getConnection(requireJdbcUrl(), properties);
+                 PreparedStatement statement = jdbcConnection.prepareStatement("SHOW CREATE TABLE " + tablePath.getFullPath());
+                 ResultSet resultSet = statement.executeQuery()) {
+                if (!resultSet.next()) {
+                    return attributes;
+                }
+                String ddl = resultSet.getMetaData().getColumnCount() >= 2
+                        ? resultSet.getString(2)
+                        : resultSet.getString(1);
+                if (ddl == null) {
+                    return attributes;
+                }
+                if (ddl.toUpperCase(Locale.ROOT).contains("PARTITION BY")) {
+                    attributes.put("partitioned", Boolean.TRUE);
+                }
+                Matcher matcher = DORIS_PARTITION_PATTERN.matcher(ddl);
+                if (matcher.find()) {
+                    String[] columns = matcher.group(1).split(",");
+                    List<String> keys = new ArrayList<>();
+                    for (String column : columns) {
+                        String normalized = column.replace("`", "").replace("\"", "").trim();
+                        if (!normalized.isEmpty()) {
+                            keys.add(normalized);
+                        }
+                    }
+                    if (!keys.isEmpty()) {
+                        attributes.put("partitionKeys", keys);
+                    }
+                }
+            }
+        } catch (Exception e) {
+            log.debug("Failed to discover Doris partition metadata for {}", tablePath.getFullPath(), e);
+        }
+        return attributes;
     }
 
     private String readString(ResultSet resultSet, String columnLabel, int fallbackIndex) throws SQLException {

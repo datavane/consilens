@@ -74,10 +74,7 @@ public class PrestoSqlQueryGenerator extends BaseSqlQueryGenerator {
         }
 
         sql.append(" FROM ");
-        if (schemaName != null && !schemaName.isEmpty()) {
-            sql.append(capabilityProvider.quote(schemaName)).append(".");
-        }
-        sql.append(capabilityProvider.quote(tableName));
+        sql.append(buildRelationRef(schemaName, tableName));
 
         if (whereClause != null && !whereClause.trim().isEmpty()) {
             sql.append(" WHERE ").append(whereClause);
@@ -120,10 +117,7 @@ public class PrestoSqlQueryGenerator extends BaseSqlQueryGenerator {
         sql.append("))))) AS row_hash");
 
         sql.append(" FROM ");
-        if (schemaName != null && !schemaName.isEmpty()) {
-            sql.append(capabilityProvider.quote(schemaName)).append(".");
-        }
-        sql.append(capabilityProvider.quote(tableName));
+        sql.append(buildRelationRef(schemaName, tableName));
 
         if (whereClause != null && !whereClause.trim().isEmpty()) {
             sql.append(" WHERE ").append(whereClause);

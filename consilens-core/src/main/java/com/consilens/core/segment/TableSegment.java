@@ -43,6 +43,8 @@ public class TableSegment {
 
     private TablePath tablePath;
 
+    private RelationSource relationSource;
+
     // Column definitions
     private List<String> keyColumns;
 
@@ -95,6 +97,25 @@ public class TableSegment {
     public List<String> getExtraColumns() {
         return extraColumns != null ? java.util.Collections.unmodifiableList(extraColumns)
                 : java.util.Collections.emptyList();
+    }
+
+    public boolean hasRelationSource() {
+        return relationSource != null
+                && relationSource.getFromSql() != null
+                && !relationSource.getFromSql().trim().isEmpty();
+    }
+
+    public String getRelationFromSql() {
+        return hasRelationSource() ? relationSource.getFromSql().trim() : null;
+    }
+
+    public String getDisplayName() {
+        if (hasRelationSource()
+                && relationSource.getDisplayName() != null
+                && !relationSource.getDisplayName().trim().isEmpty()) {
+            return relationSource.getDisplayName().trim();
+        }
+        return tablePath != null ? tablePath.getFullPath() : "<unknown>";
     }
 
     /**
@@ -517,7 +538,7 @@ public class TableSegment {
      */
     public void validate() {
 
-        if (tablePath == null || tablePath.isEmpty()) {
+        if (!hasRelationSource() && (tablePath == null || tablePath.isEmpty())) {
             throw new IllegalArgumentException("Table path cannot be null or empty");
         }
 
@@ -637,5 +658,11 @@ public class TableSegment {
             this.limit = limit;
             this.offset = offset;
         }
+    }
+
+    @Value
+    public static class RelationSource {
+        String fromSql;
+        String displayName;
     }
 }

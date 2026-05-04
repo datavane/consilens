@@ -88,10 +88,8 @@ public class ConfigValidateCommand implements Runnable {
             // Comparison
             if (config.getComparison() != null) {
                 System.out.println("  Comparison:");
-                if (config.getComparison().getTables() != null) {
-                    System.out.println("    Source table : " + nvl(config.getComparison().getTables().getSource()));
-                    System.out.println("    Target table : " + nvl(config.getComparison().getTables().getTarget()));
-                }
+                System.out.println("    Source resource : " + describeResource(config.getSource()));
+                System.out.println("    Target resource : " + describeResource(config.getTarget()));
                 if (config.getComparison().getKeys() != null) {
                     System.out.println("    Source keys  : " + nvl(config.getComparison().getKeys().getSource()));
                     System.out.println("    Target keys  : " + nvl(config.getComparison().getKeys().getTarget()));
@@ -165,7 +163,7 @@ public class ConfigValidateCommand implements Runnable {
         try {
             System.out.print("  Testing source connection (" + config.getSource().getUrl() + ") ... ");
             new ConnectorProbeService().verifyAccessible(
-                    ConnectorConfigMapper.toConnectorConfig(config.getSource(), config.getComparison().getTables().getSource()));
+                    ConnectorConfigMapper.toConnectorConfig(config.getSource()));
             System.out.println("✓ OK");
         } catch (Exception e) {
             System.out.println("✗ FAILED");
@@ -180,7 +178,7 @@ public class ConfigValidateCommand implements Runnable {
         try {
             System.out.print("  Testing target connection (" + config.getTarget().getUrl() + ") ... ");
             new ConnectorProbeService().verifyAccessible(
-                    ConnectorConfigMapper.toConnectorConfig(config.getTarget(), config.getComparison().getTables().getTarget()));
+                    ConnectorConfigMapper.toConnectorConfig(config.getTarget()));
             System.out.println("✓ OK");
         } catch (Exception e) {
             System.out.println("✗ FAILED");
@@ -203,5 +201,16 @@ public class ConfigValidateCommand implements Runnable {
 
     private String nvl(Object value) {
         return value == null ? "(not set)" : value.toString();
+    }
+
+    private String describeResource(com.consilens.cli.model.ConnectionConfig connectionConfig) {
+        if (connectionConfig == null || connectionConfig.getResource() == null) {
+            return "(not set)";
+        }
+        com.consilens.cli.model.ConnectionConfig.ResourceConfig resource = connectionConfig.getResource();
+        String location = resource.getName() != null && !resource.getName().isBlank()
+                ? resource.getName()
+                : resource.getPath();
+        return nvl(resource.getType()) + ":" + nvl(location);
     }
 }

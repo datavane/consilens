@@ -1,5 +1,6 @@
 package com.consilens.connector.mysql;
 
+import com.consilens.common.enums.ChecksumAlgorithm;
 import com.consilens.connector.api.model.DataType;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -66,6 +67,26 @@ class MySQLSqlQueryGeneratorTest {
         assertTrue(sql.contains("MD5(GROUP_CONCAT"));
         assertTrue(sql.contains("CONCAT_WS"));
         assertTrue(sql.contains("ORDER BY"));
+    }
+
+    @Test
+    void testGetChecksumSQLFromSqlUsesSubquerySource() {
+        Map<String, DataType> types = new HashMap<>();
+        types.put("id", DataType.INTEGER);
+        types.put("name", DataType.VARCHAR);
+
+        String sql = generator.getChecksumSQLFromSql(
+                "SELECT id, name FROM orders",
+                List.of("id"),
+                List.of("id", "name"),
+                types,
+                "id >= 100",
+                ChecksumAlgorithm.CONCAT);
+
+        assertTrue(sql.contains("FROM (SELECT id, name FROM orders) consilens_sql_source"));
+        assertTrue(sql.contains("WHERE id >= 100"));
+        assertFalse(sql.contains("CREATE TEMPORARY"));
+        assertFalse(sql.contains("`(SELECT"));
     }
 
     @Test

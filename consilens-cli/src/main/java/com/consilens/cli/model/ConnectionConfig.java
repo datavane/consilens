@@ -87,7 +87,10 @@ public class ConnectionConfig {
     public void validate(String fieldName) throws ValidationException {
         ValidationFramework.forContext(fieldName)
                 .notEmpty(type, fieldName + ".type")
+                .validate(resource, fieldName + ".resource", java.util.Objects::nonNull, fieldName + ".resource 配置不能为空")
                 .throwIfInvalid();
+
+        resource.validate(fieldName + ".resource");
 
         if (requiresJdbcValidation()) {
             ValidationFramework.forContext(fieldName)
@@ -209,6 +212,49 @@ public class ConnectionConfig {
         @JsonAnyGetter
         public Map<String, Object> getOptions() {
             return options;
+        }
+
+        public void validate(String fieldName) throws ValidationException {
+            ValidationFramework.forContext(fieldName)
+                    .notEmpty(type, fieldName + ".type")
+                    .throwIfInvalid();
+
+            String normalizedType = type.trim().toLowerCase(Locale.ROOT);
+            switch (normalizedType) {
+                case "table":
+                    if (isBlank(name) && isBlank(path)) {
+                        throw ValidationException.simple("CONFIGURATION_VALIDATION",
+                                fieldName + " type=table 时必须配置 name 或 path");
+                    }
+                    break;
+                case "sql":
+                    if (isBlank(path)) {
+                        throw ValidationException.simple("CONFIGURATION_VALIDATION",
+                                fieldName + " type=sql 时必须配置 path");
+                    }
+                    validateTrustedSql(fieldName + ".path", path);
+                    break;
+                default:
+                    throw ValidationException.simple("CONFIGURATION_VALIDATION",
+                            fieldName + ".type 仅支持 table 或 sql");
+            }
+        }
+
+        private void validateTrustedSql(String fieldName, String sql) {
+            String value = sql.trim();
+            if (!(value.regionMatches(true, 0, "select ", 0, 7)
+                    || value.regionMatches(true, 0, "with ", 0, 5))) {
+                throw ValidationException.simple("CONFIGURATION_VALIDATION",
+                        fieldName + " 必须是 SELECT 或 WITH 开头的查询");
+            }
+            if (value.contains(";") || value.contains("--") || value.contains("/*") || value.contains("*/")) {
+                throw ValidationException.simple("CONFIGURATION_VALIDATION",
+                        fieldName + " 包含不允许的 SQL 片段");
+            }
+        }
+
+        private boolean isBlank(String value) {
+            return value == null || value.trim().isEmpty();
         }
     }
 }

@@ -1,0 +1,69 @@
+# 自定义 SQL 比对配置 - MySQL SQL 结果集 vs PostgreSQL SQL 结果集
+# 目标：验证 resource.type=sql 与 table 同级，并优先走 checksum。
+# 适用场景：上下游字段名不同、下游存在计算列时，先在 SQL 中统一成同一组逻辑列。
+
+source:
+  type: mysql
+  name: source-mysql-custom-sql
+  connection:
+    url: jdbc:mysql://localhost:3306/test
+    username: ${env.MYSQL_USER}
+    password: ${env.MYSQL_PASSWORD}
+  resource:
+    type: sql
+    path: |
+      SELECT *
+      FROM performance_test_table
+
+target:
+  type: postgresql
+  name: target-postgresql-custom-sql
+  connection:
+    url: jdbc:postgresql://localhost:5432/postgres?currentSchema=public
+    username: ${env.PG_USER}
+    password: ${env.PG_PASSWORD}
+  resource:
+    type: sql
+    path: |
+      SELECT *
+      FROM performance_test_table
+
+comparison:
+  keys:
+    source:
+      - record_id
+    target:
+      - record_id
+
+  fields:
+    source:
+      - col_tinyint
+      - col_int
+      - col_decimal
+      - amount
+      - status
+      - updated_at
+    target:
+      - col_tinyint
+      - col_int
+      - col_decimal
+      - amount
+      - status
+      - updated_at
+
+#  filters:
+#    source: "updated_at >= '2026-01-01 00:00:00'"
+#    target: "updated_at >= '2026-01-01 00:00:00'"
+
+strategy:
+  mode: checksum
+  algorithm: xor
+  bisectionFactor: 8
+  bisectionThreshold: 8000
+  batchSize: 1000
+  enableProfiling: true
+
+result:
+  sinks:
+    - format: console
+      type: result

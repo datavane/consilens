@@ -36,13 +36,20 @@ public abstract class BaseSqlQueryGenerator implements SqlQueryGenerator {
     public String getCountSQL(String schemaName, String tableName, String whereClause) {
         StringBuilder sql = new StringBuilder();
         sql.append("SELECT COUNT(*) FROM ");
+        sql.append(buildRelationRef(schemaName, tableName));
 
-        // Only add schema if it's not null and not empty
-        if (schemaName != null && !schemaName.trim().isEmpty()) {
-            sql.append(capabilityProvider.quote(schemaName)).append(".");
+        if (whereClause != null && !whereClause.trim().isEmpty()) {
+            sql.append(" WHERE ").append(whereClause);
         }
 
-        sql.append(capabilityProvider.quote(tableName));
+        return sql.toString();
+    }
+
+    @Override
+    public String getCountSQLFromSql(String fromSql, String whereClause) {
+        StringBuilder sql = new StringBuilder();
+        sql.append("SELECT COUNT(*) FROM ");
+        sql.append(buildSqlRelationRef(fromSql));
 
         if (whereClause != null && !whereClause.trim().isEmpty()) {
             sql.append(" WHERE ").append(whereClause);
@@ -60,10 +67,31 @@ public abstract class BaseSqlQueryGenerator implements SqlQueryGenerator {
         sql.append("SELECT ");
         sql.append(String.join(", ", selectExpressions));
         sql.append(" FROM ");
-        if (schemaName != null && !schemaName.trim().isEmpty()) {
-            sql.append(capabilityProvider.quote(schemaName)).append(".");
+        sql.append(buildRelationRef(schemaName, tableName));
+
+        if (whereClause != null && !whereClause.trim().isEmpty()) {
+            sql.append(" WHERE ").append(whereClause);
         }
-        sql.append(capabilityProvider.quote(tableName));
+
+        if (orderByColumns != null && !orderByColumns.isEmpty()) {
+            sql.append(" ORDER BY ");
+            sql.append(String.join(", ",
+                    orderByColumns.stream().map(capabilityProvider::quote).toArray(String[]::new)));
+        }
+
+        return sql.toString();
+    }
+
+    @Override
+    public String getSelectSQLFromSql(String fromSql,
+            List<String> selectExpressions,
+            String whereClause,
+            List<String> orderByColumns) {
+        StringBuilder sql = new StringBuilder();
+        sql.append("SELECT ");
+        sql.append(String.join(", ", selectExpressions));
+        sql.append(" FROM ");
+        sql.append(buildSqlRelationRef(fromSql));
 
         if (whereClause != null && !whereClause.trim().isEmpty()) {
             sql.append(" WHERE ").append(whereClause);
@@ -89,10 +117,42 @@ public abstract class BaseSqlQueryGenerator implements SqlQueryGenerator {
         sql.append("SELECT ");
         sql.append(String.join(", ", selectExpressions));
         sql.append(" FROM ");
-        if (schemaName != null && !schemaName.trim().isEmpty()) {
-            sql.append(capabilityProvider.quote(schemaName)).append(".");
+        sql.append(buildRelationRef(schemaName, tableName));
+
+        String keyPredicate = buildKeyPredicate(keyColumns, primaryKeys);
+        boolean hasKeyPredicate = keyPredicate != null && !keyPredicate.isEmpty();
+        boolean hasWhereClause = whereClause != null && !whereClause.trim().isEmpty();
+
+        if (hasKeyPredicate) {
+            sql.append(" WHERE ").append(keyPredicate);
+            if (hasWhereClause) {
+                sql.append(" AND (").append(whereClause).append(")");
+            }
+        } else if (hasWhereClause) {
+            sql.append(" WHERE ").append(whereClause);
         }
-        sql.append(capabilityProvider.quote(tableName));
+
+        if (orderByColumns != null && !orderByColumns.isEmpty()) {
+            sql.append(" ORDER BY ");
+            sql.append(String.join(", ",
+                    orderByColumns.stream().map(capabilityProvider::quote).toArray(String[]::new)));
+        }
+
+        return sql.toString();
+    }
+
+    @Override
+    public String getSelectByKeysSQLFromSql(String fromSql,
+            List<String> selectExpressions,
+            List<String> keyColumns,
+            List<List<Object>> primaryKeys,
+            String whereClause,
+            List<String> orderByColumns) {
+        StringBuilder sql = new StringBuilder();
+        sql.append("SELECT ");
+        sql.append(String.join(", ", selectExpressions));
+        sql.append(" FROM ");
+        sql.append(buildSqlRelationRef(fromSql));
 
         String keyPredicate = buildKeyPredicate(keyColumns, primaryKeys);
         boolean hasKeyPredicate = keyPredicate != null && !keyPredicate.isEmpty();
@@ -131,10 +191,31 @@ public abstract class BaseSqlQueryGenerator implements SqlQueryGenerator {
             sql.append(getMin ? "MIN(" : "MAX(").append(column).append(")");
         }
         sql.append(" FROM ");
-        if (schemaName != null && !schemaName.trim().isEmpty()) {
-            sql.append(capabilityProvider.quote(schemaName)).append(".");
+        sql.append(buildRelationRef(schemaName, tableName));
+
+        if (whereClause != null && !whereClause.trim().isEmpty()) {
+            sql.append(" WHERE ").append(whereClause);
         }
-        sql.append(capabilityProvider.quote(tableName));
+
+        return sql.toString();
+    }
+
+    @Override
+    public String getMinMaxKeySQLFromSql(String fromSql,
+            List<String> keyColumns,
+            boolean getMin,
+            String whereClause) {
+        StringBuilder sql = new StringBuilder();
+        sql.append("SELECT ");
+        for (int i = 0; i < keyColumns.size(); i++) {
+            if (i > 0) {
+                sql.append(", ");
+            }
+            String column = capabilityProvider.quote(keyColumns.get(i));
+            sql.append(getMin ? "MIN(" : "MAX(").append(column).append(")");
+        }
+        sql.append(" FROM ");
+        sql.append(buildSqlRelationRef(fromSql));
 
         if (whereClause != null && !whereClause.trim().isEmpty()) {
             sql.append(" WHERE ").append(whereClause);
@@ -149,10 +230,22 @@ public abstract class BaseSqlQueryGenerator implements SqlQueryGenerator {
         sql.append("SELECT COUNT(DISTINCT ");
         sql.append(String.join(", ", columns.stream().map(capabilityProvider::quote).toArray(String[]::new)));
         sql.append(") FROM ");
-        if (schemaName != null && !schemaName.trim().isEmpty()) {
-            sql.append(capabilityProvider.quote(schemaName)).append(".");
+        sql.append(buildRelationRef(schemaName, tableName));
+
+        if (whereClause != null && !whereClause.trim().isEmpty()) {
+            sql.append(" WHERE ").append(whereClause);
         }
-        sql.append(capabilityProvider.quote(tableName));
+
+        return sql.toString();
+    }
+
+    @Override
+    public String getDistinctCountSQLFromSql(String fromSql, List<String> columns, String whereClause) {
+        StringBuilder sql = new StringBuilder();
+        sql.append("SELECT COUNT(DISTINCT ");
+        sql.append(String.join(", ", columns.stream().map(capabilityProvider::quote).toArray(String[]::new)));
+        sql.append(") FROM ");
+        sql.append(buildSqlRelationRef(fromSql));
 
         if (whereClause != null && !whereClause.trim().isEmpty()) {
             sql.append(" WHERE ").append(whereClause);
@@ -374,14 +467,39 @@ public abstract class BaseSqlQueryGenerator implements SqlQueryGenerator {
 
     private String buildTableRef(String schemaName, String tableName, String alias) {
         StringBuilder ref = new StringBuilder();
-        if (schemaName != null && !schemaName.trim().isEmpty()) {
-            ref.append(capabilityProvider.quote(schemaName)).append(".");
-        }
-        ref.append(capabilityProvider.quote(tableName));
+        ref.append(buildRelationRef(schemaName, tableName));
         if (alias != null && !alias.trim().isEmpty()) {
             ref.append(" ").append(alias);
         }
         return ref.toString();
+    }
+
+    protected String buildRelationRef(String schemaName, String tableName) {
+        if (isSqlRelationRef(tableName)) {
+            return tableName;
+        }
+        StringBuilder ref = new StringBuilder();
+        if (schemaName != null && !schemaName.trim().isEmpty()) {
+            ref.append(capabilityProvider.quote(schemaName)).append(".");
+        }
+        ref.append(capabilityProvider.quote(tableName));
+        return ref.toString();
+    }
+
+    protected String buildSqlRelationRef(String fromSql) {
+        return "(" + stripTrailingSemicolon(fromSql) + ") consilens_sql_source";
+    }
+
+    protected boolean isSqlRelationRef(String tableName) {
+        return tableName != null && tableName.trim().startsWith("(");
+    }
+
+    protected String stripTrailingSemicolon(String sql) {
+        String normalized = sql != null ? sql.trim() : "";
+        while (normalized.endsWith(";")) {
+            normalized = normalized.substring(0, normalized.length() - 1).trim();
+        }
+        return normalized;
     }
 
     private String columnRef(String alias, String column) {
@@ -538,10 +656,7 @@ public abstract class BaseSqlQueryGenerator implements SqlQueryGenerator {
         }
         StringBuilder sql = new StringBuilder();
         sql.append("(SELECT * FROM ");
-        if (schemaName != null && !schemaName.trim().isEmpty()) {
-            sql.append(capabilityProvider.quote(schemaName)).append(".");
-        }
-        sql.append(capabilityProvider.quote(tableName));
+        sql.append(buildRelationRef(schemaName, tableName));
         sql.append(" WHERE ").append(whereClause).append(") ").append(alias);
         return sql.toString();
     }
@@ -701,5 +816,26 @@ public abstract class BaseSqlQueryGenerator implements SqlQueryGenerator {
         
         // For CONCAT algorithm or null, delegate to the original method
         return getChecksumSQL(schemaName, tableName, keyColumns, columns, columnDataTypes, whereClause);
+    }
+
+    @Override
+    public String getChecksumSQLFromSql(String fromSql,
+            List<String> keyColumns,
+            List<String> columns,
+            Map<String, DataType> columnDataTypes,
+            String whereClause,
+            ChecksumAlgorithm checksumAlgorithm) {
+        return getChecksumSQL(null, buildSqlRelationRef(fromSql), keyColumns, columns,
+                columnDataTypes, whereClause, checksumAlgorithm);
+    }
+
+    @Override
+    public String getRowHashSQLFromSql(String fromSql,
+            List<String> primaryKeys,
+            List<String> columns,
+            Map<String, DataType> columnDataTypes,
+            String whereClause) {
+        return getRowHashSQL(null, buildSqlRelationRef(fromSql), primaryKeys, columns,
+                columnDataTypes, whereClause);
     }
 }

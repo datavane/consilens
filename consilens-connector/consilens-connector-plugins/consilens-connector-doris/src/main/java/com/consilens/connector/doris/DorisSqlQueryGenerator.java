@@ -91,10 +91,7 @@ public class DorisSqlQueryGenerator extends BaseSqlQueryGenerator {
             sql.append(")) as row_checksum ");
 
             sql.append("FROM ");
-            if (schemaName != null && !schemaName.isEmpty()) {
-                sql.append(capabilityProvider.quote(schemaName)).append(".");
-            }
-            sql.append(capabilityProvider.quote(tableName));
+            sql.append(buildRelationRef(schemaName, tableName));
 
             if (whereClause != null && !whereClause.trim().isEmpty()) {
                 sql.append(" WHERE ").append(whereClause);
@@ -133,10 +130,7 @@ public class DorisSqlQueryGenerator extends BaseSqlQueryGenerator {
         sql.append(")) AS row_hash");
 
         sql.append(" FROM ");
-        if (schemaName != null && !schemaName.isEmpty()) {
-            sql.append(capabilityProvider.quote(schemaName)).append(".");
-        }
-        sql.append(capabilityProvider.quote(tableName));
+        sql.append(buildRelationRef(schemaName, tableName));
 
         if (whereClause != null && !whereClause.trim().isEmpty()) {
             sql.append(" WHERE ").append(whereClause);

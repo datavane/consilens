@@ -4,6 +4,7 @@ import com.consilens.cli.config.ConfigurationManager;
 import com.consilens.cli.model.CliConfiguration;
 import com.consilens.cli.model.CliDiffResult;
 import com.consilens.cli.service.DiffService;
+import com.consilens.cli.service.RealtimeCompareRunner;
 
 import lombok.extern.slf4j.Slf4j;
 import picocli.CommandLine.Command;
@@ -29,9 +30,19 @@ public class DiffCommand implements Runnable {
     @Option(names = {"--verbose"}, description = "Enable verbose logging")
     private boolean verbose;
 
+    @Option(names = {"--realtime-once"}, description = "Run realtime compare for a single computed window")
+    private boolean realtimeOnce;
+
+    @Option(names = {"--realtime-loop"}, description = "Run realtime compare as a long-lived process")
+    private boolean realtimeLoop;
+
     @Override
     public void run() {
         try {
+            if (realtimeOnce && realtimeLoop) {
+                throw new IllegalArgumentException("--realtime-once and --realtime-loop cannot be used together.");
+            }
+
             ConfigurationManager configurationManager = new ConfigurationManager();
             DiffService diffService = new DiffService();
 
@@ -42,9 +53,9 @@ public class DiffCommand implements Runnable {
                 log.info("  Strategy: {}", config.getStrategyMode());
                 log.info("  Algorithm: {}", config.getAlgorithm());
                 log.info("  Source: {}", config.getSource().getUrl());
-                log.info("  Source Table: {}", config.getComparison().getTables().getSource());
+                log.info("  Source Resource: {}", resourceDisplay(config.getSource()));
                 log.info("  Target: {}", config.getTarget().getUrl());
-                log.info("  Target Table: {}", config.getComparison().getTables().getTarget());
+                log.info("  Target Resource: {}", resourceDisplay(config.getTarget()));
                 log.info("  Source Key Columns: {}", config.getComparison().getKeys().getSource());
                 log.info("  Target Key Columns: {}", config.getComparison().getKeys().getTarget());
                 if (config.getComparison().getFields() != null
@@ -65,6 +76,12 @@ public class DiffCommand implements Runnable {
             if (dryRun) {
                 log.info("Performing dry run (validation only)...");
                 result = diffService.performDryRun(config);
+            } else if (realtimeLoop) {
+                log.info("Starting realtime long-running compare loop...");
+                result = new RealtimeCompareRunner().runLoop(config);
+            } else if (realtimeOnce) {
+                log.info("Starting realtime run-once compare...");
+                result = new RealtimeCompareRunner().runOnce(config);
             } else {
                 log.info("Starting diff operation...");
                 log.info("This may take a while depending on table sizes and strategy chosen.");
@@ -113,5 +130,16 @@ public class DiffCommand implements Runnable {
                 log.info("Operation duration: " + result.getDurationMs() + " ms");
             }
         }
+    }
+
+    private String resourceDisplay(com.consilens.cli.model.ConnectionConfig connectionConfig) {
+        if (connectionConfig == null || connectionConfig.getResource() == null) {
+            return "(not set)";
+        }
+        com.consilens.cli.model.ConnectionConfig.ResourceConfig resource = connectionConfig.getResource();
+        String location = resource.getName() != null && !resource.getName().isBlank()
+                ? resource.getName()
+                : resource.getPath();
+        return resource.getType() + ":" + location;
     }
 }

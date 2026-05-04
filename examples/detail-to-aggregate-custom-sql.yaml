@@ -1,0 +1,68 @@
+# 明细表 vs 聚合表比对配置
+# 目标：用 source 自定义 SQL 将明细表聚合后，与 target 聚合结果表做 checksum 比对。
+
+source:
+  type: mysql
+  name: source-mysql-detail-aggregate
+  connection:
+    url: jdbc:mysql://localhost:3306/test
+    username: ${env.MYSQL_USER}
+    password: ${env.MYSQL_PASSWORD}
+  resource:
+    type: sql
+    path: |
+      SELECT DATE(created_at) AS biz_date,
+        status,
+        COUNT(*) AS order_count,
+        SUM(amount) AS total_amount,
+        MAX(updated_at) AS updated_at
+      FROM performance_test_table
+      WHERE deleted = 0
+      GROUP BY DATE(created_at), status
+
+target:
+  type: postgresql
+  name: target-postgresql-aggregate
+  connection:
+    url: jdbc:postgresql://localhost:5432/postgres?currentSchema=public
+    username: ${env.PG_USER}
+    password: ${env.PG_PASSWORD}
+  resource:
+    type: table
+    name: daily_order_summary
+
+comparison:
+  keys:
+    source:
+      - biz_date
+      - status
+    target:
+      - biz_date
+      - status
+
+  fields:
+    source:
+      - order_count
+      - total_amount
+      - updated_at
+    target:
+      - order_count
+      - total_amount
+      - updated_at
+
+  filters:
+    source: "biz_date >= '2026-05-01' AND biz_date < '2026-05-02'"
+    target: "biz_date >= '2026-05-01' AND biz_date < '2026-05-02'"
+
+strategy:
+  mode: checksum
+  algorithm: xor
+  bisectionFactor: 4
+  bisectionThreshold: 5000
+  batchSize: 1000
+  enableProfiling: true
+
+result:
+  sinks:
+    - format: console
+      type: result

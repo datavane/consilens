@@ -362,12 +362,7 @@ public abstract class AbstractDatabaseAdapter implements DatabaseAdapter {
     public TableSegment.ChecksumResult countAndBounds(TableSegment segment) {
         try {
             // Build simple count query without expensive checksum calculation
-            String schemaName = segment.getTablePath().getSchema().orElse(null);
-            String tableName = segment.getTablePath().getTableName();
-            String whereClause = segment.buildWhereClause();
-
-            String countQuery = dialect.getSqlQueryGenerator()
-                    .getCountSQL(schemaName, tableName, whereClause);
+            String countQuery = buildCountQuery(segment);
 
             log.debug("Executing count query (without checksum): {}", countQuery);
 
@@ -406,8 +401,6 @@ public abstract class AbstractDatabaseAdapter implements DatabaseAdapter {
      */
     protected String buildChecksumQuery(TableSegment segment, List<String> columns) {
         // Use the database dialect to generate the appropriate checksum SQL
-        String schemaName = segment.getTablePath().getSchema().orElse(null);
-        String tableName = segment.getTablePath().getTableName();
         String whereClause = segment.buildWhereClause();
 
         // Extract column data types from the schema
@@ -417,6 +410,9 @@ public abstract class AbstractDatabaseAdapter implements DatabaseAdapter {
         if (segment.getSchema().isPresent()) {
             tableSchema = segment.getSchema().get();
         } else {
+            if (segment.hasRelationSource()) {
+                throw new IllegalStateException("Schema is required for SQL relation segment: " + segment.getDisplayName());
+            }
             // Fetch schema from database
             List<String> tablePathComponents = segment.getTablePath().getComponents();
             tableSchema = getTableSchema(tablePathComponents);
@@ -432,9 +428,21 @@ public abstract class AbstractDatabaseAdapter implements DatabaseAdapter {
         List<String> keyColumns = segment.getKeyColumns();
 
         log.info("Building checksum query for table: {}, keyColumns: {}, columns: {}, where: {}, checksumAlgorithm: {}",
-                tableName, keyColumns, columns, whereClause, this.checksumAlgorithm);
+                segment.getDisplayName(), keyColumns, columns, whereClause, this.checksumAlgorithm);
 
-        return dialect.getSqlQueryGenerator().getChecksumSQL(schemaName, tableName, keyColumns, columns, 
+        if (segment.hasRelationSource()) {
+            return dialect.getSqlQueryGenerator().getChecksumSQLFromSql(
+                    segment.getRelationFromSql(),
+                    keyColumns,
+                    columns,
+                    columnDataTypes,
+                    whereClause,
+                    this.checksumAlgorithm);
+        }
+
+        String schemaName = segment.getTablePath().getSchema().orElse(null);
+        String tableName = segment.getTablePath().getTableName();
+        return dialect.getSqlQueryGenerator().getChecksumSQL(schemaName, tableName, keyColumns, columns,
                 columnDataTypes, whereClause, this.checksumAlgorithm);
     }
 
@@ -562,11 +570,16 @@ public abstract class AbstractDatabaseAdapter implements DatabaseAdapter {
             return null;
         }
 
-        String schemaName = segment.getTablePath().getSchema().orElse(null);
-        String tableName = segment.getTablePath().getTableName();
         String whereClause = segment.buildWhereClause();
-        String sql = dialect.getSqlQueryGenerator()
-                .getMinMaxKeySQL(schemaName, tableName, segment.getKeyColumns(), getMin, whereClause);
+        String sql = segment.hasRelationSource()
+                ? dialect.getSqlQueryGenerator().getMinMaxKeySQLFromSql(
+                        segment.getRelationFromSql(), segment.getKeyColumns(), getMin, whereClause)
+                : dialect.getSqlQueryGenerator().getMinMaxKeySQL(
+                        segment.getTablePath().getSchema().orElse(null),
+                        segment.getTablePath().getTableName(),
+                        segment.getKeyColumns(),
+                        getMin,
+                        whereClause);
 
         try {
             List<Object[]> results = query(sql, Object[].class);
@@ -692,17 +705,10 @@ public abstract class AbstractDatabaseAdapter implements DatabaseAdapter {
 
     @Override
     public String buildKeySamplingQuery(TableSegment segment, long offset, long limit) {
-        String schemaName = segment.getTablePath().getSchema().orElse(null);
-        String tableName = segment.getTablePath().getTableName();
         List<String> keyColumns = segment.getKeyColumns();
         String whereClause = segment.buildWhereClause();
 
-        String baseSelect = dialect.getSqlQueryGenerator().getSelectSQL(
-                schemaName,
-                tableName,
-                keyColumns,
-                whereClause,
-                keyColumns);
+        String baseSelect = selectSql(segment, keyColumns, whereClause, keyColumns);
 
         String limitClause = dialect.getSqlQueryGenerator().getLimitClause(offset, limit);
         return baseSelect + " " + limitClause;
@@ -714,8 +720,6 @@ public abstract class AbstractDatabaseAdapter implements DatabaseAdapter {
             throw new IllegalArgumentException("lastKey is required for keyset sampling");
         }
 
-        String schemaName = segment.getTablePath().getSchema().orElse(null);
-        String tableName = segment.getTablePath().getTableName();
         List<String> keyColumns = segment.getKeyColumns();
         String baseWhere = segment.buildWhereClause();
 
@@ -731,12 +735,7 @@ public abstract class AbstractDatabaseAdapter implements DatabaseAdapter {
             whereClause = keysetClause;
         }
 
-        String baseSelect = dialect.getSqlQueryGenerator().getSelectSQL(
-                schemaName,
-                tableName,
-                keyColumns,
-                whereClause,
-                keyColumns);
+        String baseSelect = selectSql(segment, keyColumns, whereClause, keyColumns);
 
         String limitClause = dialect.getSqlQueryGenerator().getLimitClause(0, limit);
         return baseSelect + " " + limitClause;
@@ -744,9 +743,12 @@ public abstract class AbstractDatabaseAdapter implements DatabaseAdapter {
 
     @Override
     public String buildCountQuery(TableSegment segment) {
+        String whereClause = segment.buildWhereClause();
+        if (segment.hasRelationSource()) {
+            return dialect.getSqlQueryGenerator().getCountSQLFromSql(segment.getRelationFromSql(), whereClause);
+        }
         String schemaName = segment.getTablePath().getSchema().orElse(null);
         String tableName = segment.getTablePath().getTableName();
-        String whereClause = segment.buildWhereClause();
         return dialect.getSqlQueryGenerator().getCountSQL(schemaName, tableName, whereClause);
     }
 
@@ -767,6 +769,50 @@ public abstract class AbstractDatabaseAdapter implements DatabaseAdapter {
             clause.append("(").append(andClause).append(")");
         }
         return clause.toString();
+    }
+
+    private String selectSql(TableSegment segment,
+                             List<String> selectExpressions,
+                             String whereClause,
+                             List<String> orderByColumns) {
+        if (segment.hasRelationSource()) {
+            return dialect.getSqlQueryGenerator().getSelectSQLFromSql(
+                    segment.getRelationFromSql(),
+                    selectExpressions,
+                    whereClause,
+                    orderByColumns);
+        }
+        return dialect.getSqlQueryGenerator().getSelectSQL(
+                segment.getTablePath().getSchema().orElse(null),
+                segment.getTablePath().getTableName(),
+                selectExpressions,
+                whereClause,
+                orderByColumns);
+    }
+
+    private String selectByKeysSql(TableSegment segment,
+                                   List<String> selectExpressions,
+                                   List<String> keyColumns,
+                                   List<List<Object>> primaryKeys,
+                                   String whereClause,
+                                   List<String> orderByColumns) {
+        if (segment.hasRelationSource()) {
+            return dialect.getSqlQueryGenerator().getSelectByKeysSQLFromSql(
+                    segment.getRelationFromSql(),
+                    selectExpressions,
+                    keyColumns,
+                    primaryKeys,
+                    whereClause,
+                    orderByColumns);
+        }
+        return dialect.getSqlQueryGenerator().getSelectByKeysSQL(
+                segment.getTablePath().getSchema().orElse(null),
+                segment.getTablePath().getTableName(),
+                selectExpressions,
+                keyColumns,
+                primaryKeys,
+                whereClause,
+                orderByColumns);
     }
 
     private String quoteColumn(String column) {
@@ -806,21 +852,12 @@ public abstract class AbstractDatabaseAdapter implements DatabaseAdapter {
      * Build SELECT query for specific primary keys.
      */
     protected String buildSelectQueryByKeys(TableSegment segment, Set<List<Object>> primaryKeys) {
-        String schemaName = segment.getTablePath().getSchema().orElse(null);
-        String tableName = segment.getTablePath().getTableName();
         List<String> relevantColumns = segment.getRelevantColumns();
         List<String> keyColumns = segment.getKeyColumns();
         String whereClause = segment.buildWhereClause();
         List<List<Object>> keys = new ArrayList<>(primaryKeys);
 
-        return dialect.getSqlQueryGenerator().getSelectByKeysSQL(
-                schemaName,
-                tableName,
-                relevantColumns,
-                keyColumns,
-                keys,
-                whereClause,
-                keyColumns);
+        return selectByKeysSql(segment, relevantColumns, keyColumns, keys, whereClause, keyColumns);
     }
 
     /**
@@ -862,22 +899,13 @@ public abstract class AbstractDatabaseAdapter implements DatabaseAdapter {
             selectColumns.add(dialect.getDataTypeHandler().normalizeColumn(column, dataType) + 
                     " AS " + quote(column));
         }
-        String schemaName = segment.getTablePath().getSchema().orElse(null);
-        String tableName = segment.getTablePath().getTableName();
         String whereClause = segment.buildWhereClause();
         List<List<Object>> keys = new ArrayList<>(primaryKeys);
 
-        String sql = dialect.getSqlQueryGenerator().getSelectByKeysSQL(
-                schemaName,
-                tableName,
-                selectColumns,
-                keyColumns,
-                keys,
-                whereClause,
-                keyColumns);
+        String sql = selectByKeysSql(segment, selectColumns, keyColumns, keys, whereClause, keyColumns);
 
         log.debug("Generated normalized query by keys for table: {}, keys: {}", 
-                segment.getTablePath().getTableName(), primaryKeys.size());
+                segment.getDisplayName(), primaryKeys.size());
         
         return sql;
     }
@@ -918,19 +946,12 @@ public abstract class AbstractDatabaseAdapter implements DatabaseAdapter {
                     " AS " + quote(column));
         }
 
-        String schemaName = segment.getTablePath().getSchema().orElse(null);
-        String tableName = segment.getTablePath().getTableName();
         String whereClause = segment.buildWhereClause();
 
-        String sql = dialect.getSqlQueryGenerator().getSelectSQL(
-                schemaName,
-                tableName,
-                selectColumns,
-                whereClause,
-                keyColumns);
+        String sql = selectSql(segment, selectColumns, whereClause, keyColumns);
         
         log.debug("Generated normalized query for table: {}", 
-                segment.getTablePath().getTableName());
+                segment.getDisplayName());
         
         return sql;
     }
@@ -942,15 +963,8 @@ public abstract class AbstractDatabaseAdapter implements DatabaseAdapter {
     protected String buildSelectQuery(TableSegment segment) {
         List<String> relevantColumns = segment.getRelevantColumns();
         List<String> keyColumns = segment.getKeyColumns();
-        String schemaName = segment.getTablePath().getSchema().orElse(null);
-        String tableName = segment.getTablePath().getTableName();
         String whereClause = segment.buildWhereClause();
-        return dialect.getSqlQueryGenerator().getSelectSQL(
-                schemaName,
-                tableName,
-                relevantColumns,
-                whereClause,
-                keyColumns);
+        return selectSql(segment, relevantColumns, whereClause, keyColumns);
     }
 
     /**
@@ -1035,8 +1049,6 @@ public abstract class AbstractDatabaseAdapter implements DatabaseAdapter {
      * Build the SQL query for row-hash based local comparison.
      */
     protected String buildRowHashQuery(TableSegment segment) {
-        String schemaName = segment.getTablePath().getSchema().orElse(null);
-        String tableName = segment.getTablePath().getTableName();
         List<String> primaryKeys = segment.getKeyColumns();
         List<String> columns = segment.getRelevantColumns();
         String whereClause = segment.buildWhereClause();
@@ -1047,6 +1059,9 @@ public abstract class AbstractDatabaseAdapter implements DatabaseAdapter {
         if (segment.getSchema().isPresent()) {
             tableSchema = segment.getSchema().get();
         } else {
+            if (segment.hasRelationSource()) {
+                throw new IllegalStateException("Schema is required for SQL relation segment: " + segment.getDisplayName());
+            }
             List<String> tablePathComponents = segment.getTablePath().getComponents();
             tableSchema = getTableSchema(tablePathComponents);
             segment.withSchema(tableSchema);
@@ -1059,10 +1074,22 @@ public abstract class AbstractDatabaseAdapter implements DatabaseAdapter {
 
         // Log only table name, key/column counts, and where clause — not the full column list
         log.debug("Building row-hash query for table: {}, primaryKeys: {} columns, dataColumns: {} columns, where: {}",
-                tableName, primaryKeys.size(), columns.size(), whereClause != null ? "present" : "none");
+                segment.getDisplayName(), primaryKeys.size(), columns.size(), whereClause != null ? "present" : "none");
 
-        String sql = dialect.getSqlQueryGenerator().getRowHashSQL(schemaName, tableName, primaryKeys,
-                columns, columnDataTypes, whereClause);
+        String sql = segment.hasRelationSource()
+                ? dialect.getSqlQueryGenerator().getRowHashSQLFromSql(
+                        segment.getRelationFromSql(),
+                        primaryKeys,
+                        columns,
+                        columnDataTypes,
+                        whereClause)
+                : dialect.getSqlQueryGenerator().getRowHashSQL(
+                        segment.getTablePath().getSchema().orElse(null),
+                        segment.getTablePath().getTableName(),
+                        primaryKeys,
+                        columns,
+                        columnDataTypes,
+                        whereClause);
         log.info("Generated row-hash query: {}", sql);
 
         return sql;

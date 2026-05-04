@@ -71,6 +71,20 @@ class JdbcDatasetHandleTest {
         assertTrue(handle.getMetadata().getCapabilities().supports(ConnectorCapability.SERVER_SIDE_JOIN));
     }
 
+    @Test
+    void shouldExposeSqlResourceTypeInMetadata() {
+        JdbcDatasetHandle handle = new JdbcDatasetHandle(
+                "mysql",
+                "mysql",
+                ignored -> stubDialect(),
+                Map.of("url", "jdbc:mysql://localhost:3306/test"),
+                ResourceLocator.builder().type("sql").path("SELECT id FROM orders").build(),
+                ReadOptions.builder().build());
+
+        assertEquals("sql", handle.getMetadata().getAttributes().get("resourceType"));
+        assertEquals("SELECT id FROM orders", handle.getMetadata().getLogicalName());
+    }
+
     private DatabaseDialect stubDialect() {
         return (DatabaseDialect) Proxy.newProxyInstance(
                 DatabaseDialect.class.getClassLoader(),

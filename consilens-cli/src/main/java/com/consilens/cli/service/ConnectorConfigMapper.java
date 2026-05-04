@@ -13,28 +13,26 @@ public final class ConnectorConfigMapper {
     private ConnectorConfigMapper() {
     }
 
-    public static ConnectorConfig toConnectorConfig(ConnectionConfig connectionConfig, String tableName) {
+    public static ConnectorConfig toConnectorConfig(ConnectionConfig connectionConfig) {
         return ConnectorConfig.builder()
                 .type(connectionConfig.getType())
                 .name(connectionConfig.getName())
                 .connection(connectionConfig.toConnectionMap())
-                .resource(toResourceLocator(connectionConfig, tableName))
+                .resource(toResourceLocator(connectionConfig))
                 .readOptions(toReadOptions(connectionConfig.getReadOptions()))
                 .build();
     }
 
-    public static ResourceLocator toResourceLocator(ConnectionConfig connectionConfig, String tableName) {
-        if (connectionConfig.getResource() != null) {
-            return ResourceLocator.builder()
-                    .type(connectionConfig.getResource().getType())
-                    .name(connectionConfig.getResource().getName())
-                    .path(connectionConfig.getResource().getPath())
-                    .options(connectionConfig.getResource().getOptions())
-                    .build();
+    public static ResourceLocator toResourceLocator(ConnectionConfig connectionConfig) {
+        ConnectionConfig.ResourceConfig resource = connectionConfig.getResource();
+        if (resource == null) {
+            return null;
         }
         return ResourceLocator.builder()
-                .type("table")
-                .name(tableName)
+                .type(resource.getType())
+                .name(resource.getName())
+                .path(resource.getPath())
+                .options(resource.getOptions())
                 .build();
     }
 
