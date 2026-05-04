@@ -1,7 +1,5 @@
 # 实时自定义 SQL 比对配置 - SQL 结果集走 checksum
-# 启动方式：
-#   单窗口：./consilens diff --config examples/realtime-custom-sql-mysql-vs-postgres-checksum.yaml --realtime-once
-#   长驻：  ./consilens diff --config examples/realtime-custom-sql-mysql-vs-postgres-checksum.yaml --realtime-loop
+# 启动方式：./consilens diff --config examples/realtime-custom-sql-mysql-vs-postgres-checksum.yaml
 
 source:
   type: mysql

@@ -30,19 +30,9 @@ public class DiffCommand implements Runnable {
     @Option(names = {"--verbose"}, description = "Enable verbose logging")
     private boolean verbose;
 
-    @Option(names = {"--realtime-once"}, description = "Run realtime compare for a single computed window")
-    private boolean realtimeOnce;
-
-    @Option(names = {"--realtime-loop"}, description = "Run realtime compare as a long-lived process")
-    private boolean realtimeLoop;
-
     @Override
     public void run() {
         try {
-            if (realtimeOnce && realtimeLoop) {
-                throw new IllegalArgumentException("--realtime-once and --realtime-loop cannot be used together.");
-            }
-
             ConfigurationManager configurationManager = new ConfigurationManager();
             DiffService diffService = new DiffService();
 
@@ -76,12 +66,9 @@ public class DiffCommand implements Runnable {
             if (dryRun) {
                 log.info("Performing dry run (validation only)...");
                 result = diffService.performDryRun(config);
-            } else if (realtimeLoop) {
+            } else if (config.getRealtime() != null && Boolean.TRUE.equals(config.getRealtime().getEnabled())) {
                 log.info("Starting realtime long-running compare loop...");
                 result = new RealtimeCompareRunner().runLoop(config);
-            } else if (realtimeOnce) {
-                log.info("Starting realtime run-once compare...");
-                result = new RealtimeCompareRunner().runOnce(config);
             } else {
                 log.info("Starting diff operation...");
                 log.info("This may take a while depending on table sizes and strategy chosen.");

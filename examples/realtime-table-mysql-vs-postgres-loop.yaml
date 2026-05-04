@@ -1,5 +1,5 @@
 # 实时长驻比对配置 - MySQL 表 vs PostgreSQL 表
-# 启动方式：./consilens diff --config examples/realtime-table-mysql-vs-postgres-loop.yaml --realtime-loop
+# 启动方式：./consilens diff --config examples/realtime-table-mysql-vs-postgres-loop.yaml
 # 目标：按 updated_at 滚动窗口持续比对，checkpoint 持久化到 PostgreSQL 表。
 
 source:

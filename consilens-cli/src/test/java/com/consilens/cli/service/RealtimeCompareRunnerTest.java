@@ -18,7 +18,6 @@ import java.time.ZoneOffset;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class RealtimeCompareRunnerTest {
@@ -26,14 +25,14 @@ class RealtimeCompareRunnerTest {
     @Test
     void shouldAdvanceCheckpointOnSuccessfulRun() throws Exception {
         InMemoryCheckpointStore checkpointStore = new InMemoryCheckpointStore();
-        RecordingDiffService diffService = new RecordingDiffService(false);
+        RecordingDiffService diffService = new RecordingDiffService(false, true);
         RealtimeCompareRunner runner = new RealtimeCompareRunner(
                 diffService,
                 new CompareRequestFactory(),
                 Clock.fixed(Instant.parse("2026-05-03T10:00:00Z"), ZoneOffset.UTC),
                 config -> checkpointStore);
 
-        runner.runOnce(baseConfig());
+        runner.runLoop(baseConfig());
 
         CompareCheckpoint checkpoint = checkpointStore.load(new CompareRequestFactory().create(baseConfig()).getRealtimeSpec().getTaskId()).orElseThrow();
         assertEquals(Instant.parse("2026-05-03T09:55:00Z"), checkpoint.getWatermark());
@@ -52,14 +51,15 @@ class RealtimeCompareRunnerTest {
                 Instant.parse("2026-05-03T09:10:00Z"),
                 Instant.parse("2026-05-03T09:40:00Z"));
         RealtimeCompareRunner runner = new RealtimeCompareRunner(
-                new RecordingDiffService(true),
+                new RecordingDiffService(true, true),
                 new CompareRequestFactory(),
                 Clock.fixed(Instant.parse("2026-05-03T10:00:00Z"), ZoneOffset.UTC),
                 config -> checkpointStore);
 
-        assertThrows(Exception.class, () -> runner.runOnce(baseConfig()));
+        CliDiffResult result = runner.runLoop(baseConfig());
 
         CompareCheckpoint checkpoint = checkpointStore.load(taskId).orElseThrow();
+        assertEquals(0, result.getTotalDifferences());
         assertEquals(Instant.parse("2026-05-03T09:40:00Z"), checkpoint.getWatermark());
         assertEquals("failed", checkpoint.getStatus());
     }
@@ -118,7 +118,6 @@ class RealtimeCompareRunnerTest {
                         .windowSize("PT10M")
                         .overlap("PT30M")
                         .checkpointStore(CheckpointStoreConfig.builder().type("memory").name("ignored").build())
-                        .runOnce(true)
                         .build())
                 .build();
     }
@@ -126,7 +125,7 @@ class RealtimeCompareRunnerTest {
     private static final class RecordingDiffService extends DiffService {
 
         private final boolean fail;
-        private final boolean interruptBeforeFailure;
+        private final boolean interruptAfterCall;
         private String lastSourceFilter;
         private String lastTargetFilter;
         private int invocations;
@@ -135,9 +134,9 @@ class RealtimeCompareRunnerTest {
             this(fail, false);
         }
 
-        private RecordingDiffService(boolean fail, boolean interruptBeforeFailure) {
+        private RecordingDiffService(boolean fail, boolean interruptAfterCall) {
             this.fail = fail;
-            this.interruptBeforeFailure = interruptBeforeFailure;
+            this.interruptAfterCall = interruptAfterCall;
         }
 
         @Override
@@ -145,10 +144,10 @@ class RealtimeCompareRunnerTest {
             invocations++;
             lastSourceFilter = config.getComparison().getFilters().getSource();
             lastTargetFilter = config.getComparison().getFilters().getTarget();
+            if (interruptAfterCall) {
+                Thread.currentThread().interrupt();
+            }
             if (fail) {
-                if (interruptBeforeFailure) {
-                    Thread.currentThread().interrupt();
-                }
                 throw new Exception("boom");
             }
             return CliDiffResult.builder()

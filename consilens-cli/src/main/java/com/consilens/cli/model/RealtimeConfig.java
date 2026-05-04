@@ -35,9 +35,6 @@ public class RealtimeConfig {
     @JsonProperty("checkpointStore")
     private CheckpointStoreConfig checkpointStore;
 
-    @JsonProperty("runOnce")
-    private Boolean runOnce;
-
     @JsonProperty("interval")
     private String interval;
 

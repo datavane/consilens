@@ -50,15 +50,9 @@ public class RealtimeCompareRunner {
         this.checkpointStoreFactory = checkpointStoreFactory != null ? checkpointStoreFactory : this::createCheckpointStoreInternal;
     }
 
-    public CliDiffResult runOnce(CliConfiguration config) throws Exception {
-        try (CheckpointStore checkpointStore = checkpointStoreFactory.create(config)) {
-            return runOnce(config, checkpointStore);
-        }
-    }
-
     public CliDiffResult runLoop(CliConfiguration config) throws Exception {
         if (config.getRealtime() == null || !Boolean.TRUE.equals(config.getRealtime().getEnabled())) {
-            throw new IllegalStateException("realtime.enabled must be true when using --realtime-loop");
+            throw new IllegalStateException("realtime.enabled must be true");
         }
         Duration interval = config.getRealtime().getInterval() != null && !config.getRealtime().getInterval().isBlank()
                 ? Duration.parse(config.getRealtime().getInterval())
@@ -67,7 +61,7 @@ public class RealtimeCompareRunner {
         try (CheckpointStore checkpointStore = checkpointStoreFactory.create(config)) {
             while (!Thread.currentThread().isInterrupted()) {
                 try {
-                    lastResult = runOnce(config, checkpointStore);
+                    lastResult = runIteration(config, checkpointStore);
                 } catch (Exception e) {
                     log.error("Realtime compare iteration failed; next iteration will continue after interval", e);
                 }
@@ -82,9 +76,9 @@ public class RealtimeCompareRunner {
         return lastResult != null ? lastResult : emptyResult(config);
     }
 
-    private CliDiffResult runOnce(CliConfiguration config, CheckpointStore checkpointStore) throws Exception {
+    private CliDiffResult runIteration(CliConfiguration config, CheckpointStore checkpointStore) throws Exception {
         if (config.getRealtime() == null || !Boolean.TRUE.equals(config.getRealtime().getEnabled())) {
-            throw new IllegalStateException("realtime.enabled must be true when using --realtime-once");
+            throw new IllegalStateException("realtime.enabled must be true");
         }
 
         Duration watermarkDelay = Duration.parse(config.getRealtime().getWatermarkDelay());
