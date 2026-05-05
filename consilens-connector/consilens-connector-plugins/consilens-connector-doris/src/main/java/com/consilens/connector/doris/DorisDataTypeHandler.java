@@ -9,6 +9,7 @@ import com.consilens.conncetor.base.BaseDataTypeHandler;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Doris data type handler.
@@ -288,7 +289,8 @@ public class DorisDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeDate(String quotedCol) {
-        return "COALESCE(DATE_FORMAT(" + quotedCol + ", '%Y-%m-%d'), '')";
+        return "COALESCE(DATE_FORMAT(" + quotedCol + ", '" + resolveDorisTemporalFormat("date",
+                "%Y-%m-%d", "%Y-%m-%d") + "'), '')";
     }
 
     /**
@@ -296,7 +298,14 @@ public class DorisDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeTime(String quotedCol) {
-        return "COALESCE(DATE_FORMAT(" + quotedCol + ", '%H:%i:%s'), '')";
+        return "COALESCE(DATE_FORMAT(" + quotedCol + ", '" + resolveDorisTemporalFormat("time",
+                "%H:%i:%s", "%H:%i:%s") + "'), '')";
+    }
+
+    @Override
+    protected String normalizeTimeWithTimezone(String quotedCol) {
+        return "COALESCE(DATE_FORMAT(" + quotedCol + ", '" + resolveDorisTemporalFormat("time_with_timezone",
+                "%H:%i:%s", "%H:%i:%s") + "'), '')";
     }
 
     /**
@@ -306,7 +315,14 @@ public class DorisDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeDateTime(String quotedCol) {
-        return "COALESCE(DATE_FORMAT(" + quotedCol + ", '%Y-%m-%d %H:%i:%s'), '')";
+        String expression = quotedCol;
+        String targetTimezone = getTimezone("datetime", null);
+        if (targetTimezone != null && !targetTimezone.isBlank()) {
+            expression = "CONVERT_TZ(" + quotedCol + ", @@session.time_zone, '"
+                    + resolveDorisTimezone("datetime", "+00:00") + "')";
+        }
+        return "COALESCE(DATE_FORMAT(" + expression + ", '" + resolveDorisTemporalFormat("datetime",
+                "%Y-%m-%d %H:%i:%s", "%Y-%m-%d") + "'), '')";
     }
 
     /**
@@ -319,8 +335,9 @@ public class DorisDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeTimestamp(String quotedCol) {
-        // Convert to UTC timezone, then format
-        return "COALESCE(DATE_FORMAT(CONVERT_TZ(" + quotedCol + ", @@session.time_zone, '+00:00'), '%Y-%m-%d %H:%i:%s'), '')";
+        return "COALESCE(DATE_FORMAT(CONVERT_TZ(" + quotedCol + ", @@session.time_zone, '"
+                + resolveDorisTimezone("timestamp", "+00:00") + "'), '" + resolveDorisTemporalFormat("timestamp",
+                "%Y-%m-%d %H:%i:%s", "%Y-%m-%d") + "'), '')";
     }
 
     /**
@@ -329,8 +346,35 @@ public class DorisDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeTimestampWithTimezone(String quotedCol) {
-        // Convert to UTC timezone, then format
-        return "COALESCE(DATE_FORMAT(CONVERT_TZ(" + quotedCol + ", @@session.time_zone, '+00:00'), '%Y-%m-%d %H:%i:%s'), '')";
+        return "COALESCE(DATE_FORMAT(CONVERT_TZ(" + quotedCol + ", @@session.time_zone, '"
+                + resolveDorisTimezone("timestamp_with_timezone", "+00:00") + "'), '" + resolveDorisTemporalFormat("timestamp_with_timezone",
+                "%Y-%m-%d %H:%i:%s", "%Y-%m-%d") + "'), '')";
+    }
+
+    private String resolveDorisTimezone(String dataTypeName, String defaultTimezone) {
+        String timezone = getTimezone(dataTypeName, defaultTimezone);
+        if ("UTC".equalsIgnoreCase(timezone)) {
+            return "+00:00";
+        }
+        return escapeSqlLiteral(timezone);
+    }
+
+    private String resolveDorisTemporalFormat(String dataTypeName, String defaultFormat, String dateOnlyDefaultFormat) {
+        return getNativeTemporalFormat("Doris", dataTypeName, defaultFormat, dateOnlyDefaultFormat,
+                dorisTemporalTokens(dataTypeName));
+    }
+
+    private Set<String> dorisTemporalTokens(String dataTypeName) {
+        Set<String> dateTokens = temporalTokens("%Y", "%y", "%m", "%c", "%d", "%e");
+        Set<String> timeTokens = temporalTokens("%H", "%h", "%I", "%i", "%s", "%S", "%f", "%p", "%r", "%T");
+        if ("date".equals(dataTypeName)) {
+            return dateTokens;
+        }
+        if ("time".equals(dataTypeName) || "time_with_timezone".equals(dataTypeName)) {
+            return timeTokens;
+        }
+        dateTokens.addAll(timeTokens);
+        return dateTokens;
     }
 
     /**

@@ -1,9 +1,13 @@
 package com.consilens.connector.sqlserver;
 
 import com.consilens.common.type.TypeDescriptor;
+import com.consilens.connector.api.ConnectorException;
 import com.consilens.connector.api.model.DataType;
+import com.consilens.conncetor.base.jdbc.JdbcDatasetHandle;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -30,7 +34,29 @@ class SQLServerDataTypeHandlerTest {
     @Test
     void testNormalizeColumn_Timestamp() {
         String result = handler.normalizeColumn("created_at", DataType.DATETIME);
-        assertEquals("COALESCE(CONVERT(NVARCHAR, [created_at], 120), '')", result);
+        assertEquals("COALESCE(FORMAT([created_at], 'yyyy-MM-dd HH:mm:ss'), '')", result);
+    }
+
+    @Test
+    void testNormalizeColumn_DateTimeWithConfiguredNativeFormatAndTimezone() {
+        JdbcDatasetHandle.JdbcTypeNormalizationRule rule = new JdbcDatasetHandle.JdbcTypeNormalizationRule();
+        rule.setFormat("yyyy/MM/dd HH:mm:ss");
+        rule.setTimezone("+08:00");
+        handler = new SQLServerDataTypeHandler(capabilityProvider, Map.of("datetime", rule));
+
+        String result = handler.normalizeColumn("created_at", DataType.DATETIME);
+
+        assertEquals("COALESCE(FORMAT(SWITCHOFFSET([created_at], '+08:00'), 'yyyy/MM/dd HH:mm:ss'), '')",
+                result);
+    }
+
+    @Test
+    void testNormalizeColumn_RejectsNonNativeDateTimeFormat() {
+        JdbcDatasetHandle.JdbcTypeNormalizationRule rule = new JdbcDatasetHandle.JdbcTypeNormalizationRule();
+        rule.setFormat("YYYY-MM-DD");
+        handler = new SQLServerDataTypeHandler(capabilityProvider, Map.of("datetime", rule));
+
+        assertThrows(ConnectorException.class, () -> handler.normalizeColumn("created_at", DataType.DATETIME));
     }
 
     @Test

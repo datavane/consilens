@@ -10,6 +10,7 @@ import lombok.extern.slf4j.Slf4j;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * StarRocks data type handler.
@@ -277,7 +278,8 @@ public class StarRocksDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeDate(String quotedCol) {
-        return "COALESCE(DATE_FORMAT(" + quotedCol + ", '%Y-%m-%d'), '')";
+        return "COALESCE(DATE_FORMAT(" + quotedCol + ", '" + resolveStarRocksTemporalFormat("date",
+                "%Y-%m-%d", "%Y-%m-%d") + "'), '')";
     }
 
     /**
@@ -285,7 +287,14 @@ public class StarRocksDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeTime(String quotedCol) {
-        return "COALESCE(DATE_FORMAT(" + quotedCol + ", '%H:%i:%s'), '')";
+        return "COALESCE(DATE_FORMAT(" + quotedCol + ", '" + resolveStarRocksTemporalFormat("time",
+                "%H:%i:%s", "%H:%i:%s") + "'), '')";
+    }
+
+    @Override
+    protected String normalizeTimeWithTimezone(String quotedCol) {
+        return "COALESCE(DATE_FORMAT(" + quotedCol + ", '" + resolveStarRocksTemporalFormat("time_with_timezone",
+                "%H:%i:%s", "%H:%i:%s") + "'), '')";
     }
 
     /**
@@ -296,8 +305,11 @@ public class StarRocksDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeDateTime(String quotedCol) {
-        // StarRocks DATETIME is timezone-aware, convert to UTC
-        return "COALESCE(DATE_FORMAT(CONVERT_TZ(" + quotedCol + ", 'Asia/Shanghai', '+00:00'), '%Y-%m-%d %H:%i:%s'), '')";
+        String sourceTimezone = resolveStarRocksSourceTimezone("Asia/Shanghai");
+        String targetTimezone = resolveStarRocksTimezone("datetime", "+00:00");
+        return "COALESCE(DATE_FORMAT(CONVERT_TZ(" + quotedCol + ", '" + sourceTimezone + "', '"
+                + targetTimezone + "'), '" + resolveStarRocksTemporalFormat("datetime",
+                "%Y-%m-%d %H:%i:%s", "%Y-%m-%d") + "'), '')";
     }
 
     /**
@@ -310,8 +322,11 @@ public class StarRocksDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeTimestamp(String quotedCol) {
-        // Convert to UTC timezone, then format
-        return "COALESCE(DATE_FORMAT(CONVERT_TZ(" + quotedCol + ", 'Asia/Shanghai', '+00:00'), '%Y-%m-%d %H:%i:%s'), '')";
+        String sourceTimezone = resolveStarRocksSourceTimezone("Asia/Shanghai");
+        String targetTimezone = resolveStarRocksTimezone("timestamp", "+00:00");
+        return "COALESCE(DATE_FORMAT(CONVERT_TZ(" + quotedCol + ", '" + sourceTimezone + "', '"
+                + targetTimezone + "'), '" + resolveStarRocksTemporalFormat("timestamp",
+                "%Y-%m-%d %H:%i:%s", "%Y-%m-%d") + "'), '')";
     }
 
     /**
@@ -320,8 +335,39 @@ public class StarRocksDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeTimestampWithTimezone(String quotedCol) {
-        // Convert to UTC timezone, then format
-        return "COALESCE(DATE_FORMAT(CONVERT_TZ(" + quotedCol + ", @@session.time_zone, '+00:00'), '%Y-%m-%d %H:%i:%s'), '')";
+        return "COALESCE(DATE_FORMAT(CONVERT_TZ(" + quotedCol + ", @@session.time_zone, '"
+                + resolveStarRocksTimezone("timestamp_with_timezone", "+00:00") + "'), '" + resolveStarRocksTemporalFormat("timestamp_with_timezone",
+                "%Y-%m-%d %H:%i:%s", "%Y-%m-%d") + "'), '')";
+    }
+
+    private String resolveStarRocksSourceTimezone(String defaultTimezone) {
+        return escapeSqlLiteral(defaultTimezone);
+    }
+
+    private String resolveStarRocksTimezone(String dataTypeName, String defaultTimezone) {
+        String timezone = getTimezone(dataTypeName, defaultTimezone);
+        if ("UTC".equalsIgnoreCase(timezone)) {
+            return "+00:00";
+        }
+        return escapeSqlLiteral(timezone);
+    }
+
+    private String resolveStarRocksTemporalFormat(String dataTypeName, String defaultFormat, String dateOnlyDefaultFormat) {
+        return getNativeTemporalFormat("StarRocks", dataTypeName, defaultFormat, dateOnlyDefaultFormat,
+                starRocksTemporalTokens(dataTypeName));
+    }
+
+    private Set<String> starRocksTemporalTokens(String dataTypeName) {
+        Set<String> dateTokens = temporalTokens("%Y", "%y", "%m", "%c", "%d", "%e");
+        Set<String> timeTokens = temporalTokens("%H", "%h", "%I", "%i", "%s", "%S", "%f", "%p", "%r", "%T");
+        if ("date".equals(dataTypeName)) {
+            return dateTokens;
+        }
+        if ("time".equals(dataTypeName) || "time_with_timezone".equals(dataTypeName)) {
+            return timeTokens;
+        }
+        dateTokens.addAll(timeTokens);
+        return dateTokens;
     }
 
     /**

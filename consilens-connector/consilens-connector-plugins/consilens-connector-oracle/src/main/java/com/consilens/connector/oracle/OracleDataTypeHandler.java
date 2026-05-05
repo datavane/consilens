@@ -6,6 +6,7 @@ import com.consilens.connector.api.model.DataType;
 import com.consilens.conncetor.base.BaseDataTypeHandler;
 
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Oracle data type handler.
@@ -256,7 +257,8 @@ public class OracleDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeDate(String quotedCol) {
-        return "COALESCE(TO_CHAR(" + quotedCol + ", 'YYYY-MM-DD'), '')";
+        return "COALESCE(TO_CHAR(" + quotedCol + ", '" + resolveOracleTemporalFormat("date",
+                "YYYY-MM-DD", "YYYY-MM-DD") + "'), '')";
     }
 
     /**
@@ -264,7 +266,19 @@ public class OracleDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeTime(String quotedCol) {
-        return "COALESCE(TO_CHAR(" + quotedCol + ", 'HH24:MI:SS'), '')";
+        return "COALESCE(TO_CHAR(" + quotedCol + ", '" + resolveOracleTemporalFormat("time",
+                "HH24:MI:SS", "HH24:MI:SS") + "'), '')";
+    }
+
+    @Override
+    protected String normalizeTimeWithTimezone(String quotedCol) {
+        String expression = quotedCol;
+        String targetTimezone = getTimezone("time_with_timezone", null);
+        if (targetTimezone != null && !targetTimezone.isBlank()) {
+            expression = quotedCol + " AT TIME ZONE '" + resolveOracleTimezone("time_with_timezone", "UTC") + "'";
+        }
+        return "COALESCE(TO_CHAR(" + expression + ", '" + resolveOracleTemporalFormat("time_with_timezone",
+                "HH24:MI:SS", "HH24:MI:SS") + "'), '')";
     }
 
     /**
@@ -274,7 +288,14 @@ public class OracleDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeDateTime(String quotedCol) {
-        return "COALESCE(TO_CHAR(" + quotedCol + ", 'YYYY-MM-DD HH24:MI:SS'), '')";
+        String expression = quotedCol;
+        String targetTimezone = getTimezone("datetime", null);
+        if (targetTimezone != null && !targetTimezone.isBlank()) {
+            expression = "CAST(" + quotedCol + " AS TIMESTAMP WITH TIME ZONE) AT TIME ZONE '"
+                    + resolveOracleTimezone("datetime", "UTC") + "'";
+        }
+        return "COALESCE(TO_CHAR(" + expression + ", '" + resolveOracleTemporalFormat("datetime",
+                "YYYY-MM-DD HH24:MI:SS", "YYYY-MM-DD") + "'), '')";
     }
 
     /**
@@ -287,8 +308,9 @@ public class OracleDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeTimestamp(String quotedCol) {
-        // Convert to UTC timezone, then format
-        return "COALESCE(TO_CHAR(CAST(" + quotedCol + " AS TIMESTAMP WITH TIME ZONE) AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'), '')";
+        return "COALESCE(TO_CHAR(CAST(" + quotedCol + " AS TIMESTAMP WITH TIME ZONE) AT TIME ZONE '"
+                + resolveOracleTimezone("timestamp", "UTC") + "', '" + resolveOracleTemporalFormat("timestamp",
+                "YYYY-MM-DD HH24:MI:SS", "YYYY-MM-DD") + "'), '')";
     }
 
     /**
@@ -297,8 +319,32 @@ public class OracleDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeTimestampWithTimezone(String quotedCol) {
-        // Convert to UTC timezone, then format
-        return "COALESCE(TO_CHAR(" + quotedCol + " AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'), '')";
+        return "COALESCE(TO_CHAR(" + quotedCol + " AT TIME ZONE '"
+                + resolveOracleTimezone("timestamp_with_timezone", "UTC") + "', '" + resolveOracleTemporalFormat("timestamp_with_timezone",
+                "YYYY-MM-DD HH24:MI:SS", "YYYY-MM-DD") + "'), '')";
+    }
+
+    private String resolveOracleTimezone(String dataTypeName, String defaultTimezone) {
+        return escapeSqlLiteral(getTimezone(dataTypeName, defaultTimezone));
+    }
+
+    private String resolveOracleTemporalFormat(String dataTypeName, String defaultFormat, String dateOnlyDefaultFormat) {
+        return getNativeTemporalFormat("Oracle", dataTypeName, defaultFormat, dateOnlyDefaultFormat,
+                oracleTemporalTokens(dataTypeName));
+    }
+
+    private Set<String> oracleTemporalTokens(String dataTypeName) {
+        Set<String> dateTokens = temporalTokens("YYYY", "YY", "MONTH", "MON", "MM", "DD");
+        Set<String> timeTokens = temporalTokens("HH24", "HH12", "HH", "MI", "SS", "FF", "FF1", "FF2", "FF3",
+                "FF4", "FF5", "FF6", "FF7", "FF8", "FF9", "AM", "PM");
+        if ("date".equals(dataTypeName)) {
+            return dateTokens;
+        }
+        if ("time".equals(dataTypeName) || "time_with_timezone".equals(dataTypeName)) {
+            return timeTokens;
+        }
+        dateTokens.addAll(timeTokens);
+        return dateTokens;
     }
 
     /**

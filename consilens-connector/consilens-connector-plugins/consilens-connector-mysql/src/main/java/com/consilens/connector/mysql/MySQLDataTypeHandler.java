@@ -7,6 +7,7 @@ import com.consilens.conncetor.base.BaseDataTypeHandler;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.Map;
+import java.util.Set;
 
 /**
  * MySQL data type handler.
@@ -417,6 +418,12 @@ public class MySQLDataTypeHandler extends BaseDataTypeHandler {
                 "%H:%i:%s", "%H:%i:%s") + "'), '')";
     }
 
+    @Override
+    protected String normalizeTimeWithTimezone(String quotedCol) {
+        return "COALESCE(TIME_FORMAT(" + quotedCol + ", '" + resolveMySqlTemporalFormat("time_with_timezone",
+                "%H:%i:%s", "%H:%i:%s") + "'), '')";
+    }
+
     /**
      * MySQL-specific datetime normalization: YYYY-MM-DD HH:MM:SS format.
      * CRITICAL: Convert to UTC timezone to ensure cross-database consistency.
@@ -462,8 +469,8 @@ public class MySQLDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeTimestampWithTimezone(String quotedCol) {
-        String targetTimezone = resolveMySqlTimezone("timestamp", "+00:00");
-        String format = resolveMySqlTemporalFormat("timestamp", "%Y-%m-%d %H:%i:%s", "%Y-%m-%d");
+        String targetTimezone = resolveMySqlTimezone("timestamp_with_timezone", "+00:00");
+        String format = resolveMySqlTemporalFormat("timestamp_with_timezone", "%Y-%m-%d %H:%i:%s", "%Y-%m-%d");
         return "COALESCE(DATE_FORMAT(CONVERT_TZ(" + quotedCol + ", @@session.time_zone, '"
                 + targetTimezone + "'), '" + format + "'), '')";
     }
@@ -513,42 +520,21 @@ public class MySQLDataTypeHandler extends BaseDataTypeHandler {
     }
 
     private String resolveMySqlTemporalFormat(String dataTypeName, String defaultFormat, String dateOnlyDefaultFormat) {
-        String configuredFormat = getFormat(dataTypeName, null);
-        String effectiveDefault = isDateOnlyComparison(dataTypeName) ? dateOnlyDefaultFormat : defaultFormat;
-        if (configuredFormat == null || configuredFormat.isBlank()) {
-            return effectiveDefault;
-        }
-        return toMySqlDateFormat(configuredFormat, effectiveDefault);
+        return getNativeTemporalFormat("MySQL", dataTypeName, defaultFormat, dateOnlyDefaultFormat,
+                mySqlTemporalTokens(dataTypeName));
     }
 
-    private String toMySqlDateFormat(String javaFormat, String fallbackFormat) {
-        if (!isSupportedJavaTemporalFormat(javaFormat)) {
-            log.warn("Unsupported MySQL temporal format '{}', falling back to '{}'", javaFormat, fallbackFormat);
-            return fallbackFormat;
+    private Set<String> mySqlTemporalTokens(String dataTypeName) {
+        Set<String> dateTokens = temporalTokens("%Y", "%y", "%m", "%c", "%d", "%e");
+        Set<String> timeTokens = temporalTokens("%H", "%h", "%I", "%i", "%s", "%S", "%f", "%p", "%r", "%T");
+        if ("date".equals(dataTypeName)) {
+            return dateTokens;
         }
-        return javaFormat
-                .replace("yyyy", "%Y")
-                .replace("MM", "%m")
-                .replace("dd", "%d")
-                .replace("HH", "%H")
-                .replace("mm", "%i")
-                .replace("ss", "%s");
-    }
-
-    private boolean isSupportedJavaTemporalFormat(String format) {
-        String residual = format
-                .replace("yyyy", "")
-                .replace("MM", "")
-                .replace("dd", "")
-                .replace("HH", "")
-                .replace("mm", "")
-                .replace("ss", "")
-                .replace("-", "")
-                .replace(":", "")
-                .replace(" ", "")
-                .replace("/", "")
-                .replace("T", "");
-        return residual.isEmpty();
+        if ("time".equals(dataTypeName) || "time_with_timezone".equals(dataTypeName)) {
+            return timeTokens;
+        }
+        dateTokens.addAll(timeTokens);
+        return dateTokens;
     }
 
     @Override

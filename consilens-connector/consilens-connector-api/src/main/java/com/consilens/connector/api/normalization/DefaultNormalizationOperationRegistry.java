@@ -29,7 +29,7 @@ public class DefaultNormalizationOperationRegistry implements NormalizationOpera
                 setOf("integer", "decimal", "float"),
                 setOf("precision", "rounding")));
         result.put("format_datetime", definition("format_datetime",
-                setOf("date", "time", "datetime", "timestamp"),
+                setOf("date", "time", "time_with_timezone", "datetime", "timestamp", "timestamp_with_timezone"),
                 setOf("format", "timezone", "comparisonMode")));
         result.put("encode", definition("encode",
                 setOf("binary"),

@@ -14,7 +14,8 @@ public class DefaultNormalizationSpecValidator implements NormalizationSpecValid
 
     private static final Set<String> SUPPORTED_TYPES = new HashSet<>(Arrays.asList(
             "string", "integer", "decimal", "float", "date", "time",
-            "datetime", "timestamp", "boolean", "binary", "json"));
+            "time_with_timezone", "datetime", "timestamp", "timestamp_with_timezone",
+            "boolean", "binary", "json"));
 
     private static final Set<String> SUPPORTED_BINARY_FORMATS = new HashSet<>(Arrays.asList("hex", "base64"));
     private static final Set<String> SUPPORTED_TEMPORAL_COMPARISON_MODES = new HashSet<>(

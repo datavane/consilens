@@ -6,6 +6,7 @@ import com.consilens.connector.api.model.DataType;
 import com.consilens.conncetor.base.BaseDataTypeHandler;
 
 import java.util.Map;
+import java.util.Set;
 
 /**
  * SQL Server data type handler.
@@ -256,7 +257,8 @@ public class SQLServerDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeDate(String quotedCol) {
-        return "COALESCE(CONVERT(NVARCHAR, " + quotedCol + ", 23), '')";
+        return "COALESCE(FORMAT(" + quotedCol + ", '" + resolveSqlServerTemporalFormat("date",
+                "yyyy-MM-dd", "yyyy-MM-dd") + "'), '')";
     }
 
     /**
@@ -264,7 +266,14 @@ public class SQLServerDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeTime(String quotedCol) {
-        return "COALESCE(CONVERT(NVARCHAR, " + quotedCol + ", 108), '')";
+        return "COALESCE(FORMAT(" + quotedCol + ", '" + resolveSqlServerTemporalFormat("time",
+                "HH:mm:ss", "HH:mm:ss") + "'), '')";
+    }
+
+    @Override
+    protected String normalizeTimeWithTimezone(String quotedCol) {
+        return "COALESCE(FORMAT(" + quotedCol + ", '" + resolveSqlServerTemporalFormat("time_with_timezone",
+                "HH:mm:ss", "HH:mm:ss") + "'), '')";
     }
 
     /**
@@ -274,7 +283,13 @@ public class SQLServerDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeDateTime(String quotedCol) {
-        return "COALESCE(CONVERT(NVARCHAR, " + quotedCol + ", 120), '')";
+        String expression = quotedCol;
+        String targetTimezone = getTimezone("datetime", null);
+        if (targetTimezone != null && !targetTimezone.isBlank()) {
+            expression = "SWITCHOFFSET(" + quotedCol + ", '" + resolveSqlServerTimezone("datetime", "+00:00") + "')";
+        }
+        return "COALESCE(FORMAT(" + expression + ", '" + resolveSqlServerTemporalFormat("datetime",
+                "yyyy-MM-dd HH:mm:ss", "yyyy-MM-dd") + "'), '')";
     }
 
     /**
@@ -287,8 +302,9 @@ public class SQLServerDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeTimestamp(String quotedCol) {
-        // Convert to UTC timezone, then format
-        return "COALESCE(CONVERT(NVARCHAR, SWITCHOFFSET(" + quotedCol + ", '+00:00'), 120), '')";
+        return "COALESCE(FORMAT(SWITCHOFFSET(" + quotedCol + ", '" + resolveSqlServerTimezone("timestamp", "+00:00")
+                + "'), '" + resolveSqlServerTemporalFormat("timestamp",
+                "yyyy-MM-dd HH:mm:ss", "yyyy-MM-dd") + "'), '')";
     }
 
     /**
@@ -297,8 +313,35 @@ public class SQLServerDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeTimestampWithTimezone(String quotedCol) {
-        // Convert to UTC timezone, then format
-        return "COALESCE(CONVERT(NVARCHAR, SWITCHOFFSET(" + quotedCol + ", '+00:00'), 120), '')";
+        return "COALESCE(FORMAT(SWITCHOFFSET(" + quotedCol + ", '" + resolveSqlServerTimezone("timestamp_with_timezone", "+00:00")
+                + "'), '" + resolveSqlServerTemporalFormat("timestamp_with_timezone",
+                "yyyy-MM-dd HH:mm:ss", "yyyy-MM-dd") + "'), '')";
+    }
+
+    private String resolveSqlServerTimezone(String dataTypeName, String defaultTimezone) {
+        String timezone = getTimezone(dataTypeName, defaultTimezone);
+        if ("UTC".equalsIgnoreCase(timezone)) {
+            return "+00:00";
+        }
+        return escapeSqlLiteral(timezone);
+    }
+
+    private String resolveSqlServerTemporalFormat(String dataTypeName, String defaultFormat, String dateOnlyDefaultFormat) {
+        return getNativeTemporalFormat("SQL Server", dataTypeName, defaultFormat, dateOnlyDefaultFormat,
+                sqlServerTemporalTokens(dataTypeName));
+    }
+
+    private Set<String> sqlServerTemporalTokens(String dataTypeName) {
+        Set<String> dateTokens = temporalTokens("yyyy", "yy", "MMMM", "MMM", "MM", "M", "dd", "d");
+        Set<String> timeTokens = temporalTokens("HH", "H", "hh", "h", "mm", "m", "ss", "s", "fff", "ff", "f", "tt");
+        if ("date".equals(dataTypeName)) {
+            return dateTokens;
+        }
+        if ("time".equals(dataTypeName) || "time_with_timezone".equals(dataTypeName)) {
+            return timeTokens;
+        }
+        dateTokens.addAll(timeTokens);
+        return dateTokens;
     }
 
     /**

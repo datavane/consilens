@@ -347,7 +347,7 @@ public class DiffService {
         }
         List<NormalizationRule> result = new ArrayList<>();
         for (Map.Entry<String, TypeNormalizationRule> entry : rules.entrySet()) {
-            String canonicalType = normalizeType(entry.getKey());
+            String canonicalType = NormalizationTypeMapper.toMatchType(entry.getKey());
             TypeNormalizationRule rule = entry.getValue();
             if (canonicalType == null || rule == null) {
                 continue;
@@ -424,54 +424,6 @@ public class DiffService {
                 .operation(operation)
                 .params(params)
                 .build();
-    }
-
-    private String normalizeType(String type) {
-        if (type == null || type.trim().isEmpty()) {
-            return null;
-        }
-        switch (type.trim().toLowerCase()) {
-            case "char":
-            case "varchar":
-            case "text":
-            case "clob":
-            case "longvarchar":
-            case "string":
-                return "string";
-            case "tinyint":
-            case "smallint":
-            case "integer":
-            case "int":
-            case "bigint":
-                return "integer";
-            case "decimal":
-            case "numeric":
-                return "decimal";
-            case "float":
-            case "double":
-            case "real":
-                return "float";
-            case "date":
-                return "date";
-            case "time":
-                return "time";
-            case "datetime":
-                return "datetime";
-            case "timestamp":
-                return "timestamp";
-            case "boolean":
-            case "bit":
-                return "boolean";
-            case "binary":
-            case "varbinary":
-            case "blob":
-                return "binary";
-            case "json":
-            case "jsonb":
-                return "json";
-            default:
-                return type.trim().toLowerCase();
-        }
     }
 
     private long resolveBisectionThreshold(CliConfiguration config) {

@@ -9,6 +9,7 @@ import com.consilens.conncetor.base.BaseDataTypeHandler;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * ClickHouse data type handler.
@@ -331,7 +332,8 @@ public class ClickHouseDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeDate(String quotedCol) {
-        return "COALESCE(formatDateTime(" + quotedCol + ", '%Y-%m-%d'), '')";
+        return "COALESCE(formatDateTime(" + quotedCol + ", '" + resolveClickHouseTemporalFormat("date",
+                "%Y-%m-%d", "%Y-%m-%d") + "'), '')";
     }
 
     /**
@@ -339,7 +341,14 @@ public class ClickHouseDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeTime(String quotedCol) {
-        return "COALESCE(formatDateTime(" + quotedCol + ", '%H:%M:%S'), '')";
+        return "COALESCE(formatDateTime(" + quotedCol + ", '" + resolveClickHouseTemporalFormat("time",
+                "%H:%M:%S", "%H:%M:%S") + "'), '')";
+    }
+
+    @Override
+    protected String normalizeTimeWithTimezone(String quotedCol) {
+        return "COALESCE(formatDateTime(" + quotedCol + ", '" + resolveClickHouseTemporalFormat("time_with_timezone",
+                "%H:%M:%S", "%H:%M:%S") + "'), '')";
     }
 
     /**
@@ -349,7 +358,8 @@ public class ClickHouseDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeDateTime(String quotedCol) {
-        return "COALESCE(formatDateTime(" + quotedCol + ", '%Y-%m-%d %H:%M:%S'), '')";
+        return "COALESCE(formatDateTime(" + quotedCol + ", '" + resolveClickHouseTemporalFormat("datetime",
+                "%Y-%m-%d %H:%M:%S", "%Y-%m-%d") + "'), '')";
     }
 
     /**
@@ -362,8 +372,9 @@ public class ClickHouseDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeTimestamp(String quotedCol) {
-        // Convert to UTC timezone, then format
-        return "COALESCE(formatDateTime(toTimeZone(" + quotedCol + ", 'UTC'), '%Y-%m-%d %H:%M:%S'), '')";
+        return "COALESCE(formatDateTime(toTimeZone(" + quotedCol + ", '"
+                + resolveClickHouseTimezone("timestamp", "UTC") + "'), '" + resolveClickHouseTemporalFormat("timestamp",
+                "%Y-%m-%d %H:%M:%S", "%Y-%m-%d") + "'), '')";
     }
 
     /**
@@ -372,8 +383,31 @@ public class ClickHouseDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeTimestampWithTimezone(String quotedCol) {
-        // Convert to UTC timezone, then format
-        return "COALESCE(formatDateTime(toTimeZone(" + quotedCol + ", 'UTC'), '%Y-%m-%d %H:%M:%S'), '')";
+        return "COALESCE(formatDateTime(toTimeZone(" + quotedCol + ", '"
+                + resolveClickHouseTimezone("timestamp_with_timezone", "UTC") + "'), '" + resolveClickHouseTemporalFormat("timestamp_with_timezone",
+                "%Y-%m-%d %H:%M:%S", "%Y-%m-%d") + "'), '')";
+    }
+
+    private String resolveClickHouseTimezone(String dataTypeName, String defaultTimezone) {
+        return escapeSqlLiteral(getTimezone(dataTypeName, defaultTimezone));
+    }
+
+    private String resolveClickHouseTemporalFormat(String dataTypeName, String defaultFormat, String dateOnlyDefaultFormat) {
+        return getNativeTemporalFormat("ClickHouse", dataTypeName, defaultFormat, dateOnlyDefaultFormat,
+                clickHouseTemporalTokens(dataTypeName));
+    }
+
+    private Set<String> clickHouseTemporalTokens(String dataTypeName) {
+        Set<String> dateTokens = temporalTokens("%Y", "%y", "%m", "%d", "%e", "%F");
+        Set<String> timeTokens = temporalTokens("%H", "%I", "%M", "%S", "%f", "%p", "%R", "%T");
+        if ("date".equals(dataTypeName)) {
+            return dateTokens;
+        }
+        if ("time".equals(dataTypeName) || "time_with_timezone".equals(dataTypeName)) {
+            return timeTokens;
+        }
+        dateTokens.addAll(timeTokens);
+        return dateTokens;
     }
 
     /**

@@ -2,6 +2,7 @@ package com.consilens.conncetor.base;
 
 import com.consilens.common.type.TypeDescriptor;
 import com.consilens.connector.api.CapabilityProvider;
+import com.consilens.connector.api.ConnectorException;
 import com.consilens.connector.api.DataTypeHandler;
 import com.consilens.connector.api.LegacyTypeMapper;
 import com.consilens.connector.api.model.DataType;
@@ -9,6 +10,8 @@ import lombok.extern.slf4j.Slf4j;
 
 import java.lang.reflect.Method;
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -99,6 +102,89 @@ public class BaseDataTypeHandler implements DataTypeHandler {
         return DATE_ONLY_COMPARISON_MODES.contains(getComparisonMode(dataTypeName, "EXACT"));
     }
 
+    protected String getNativeTemporalFormat(String connectorName,
+                                             String dataTypeName,
+                                             String defaultFormat,
+                                             String dateOnlyDefaultFormat,
+                                             Set<String> allowedTokens) {
+        String configuredFormat = getFormat(dataTypeName, null);
+        String effectiveDefault = isDateOnlyComparison(dataTypeName) ? dateOnlyDefaultFormat : defaultFormat;
+        String format = configuredFormat == null || configuredFormat.isBlank()
+                ? effectiveDefault
+                : configuredFormat.trim();
+        validateNativeTemporalFormat(connectorName, dataTypeName, format, allowedTokens);
+        return escapeSqlLiteral(format);
+    }
+
+    protected Set<String> temporalTokens(String... tokens) {
+        Set<String> result = new HashSet<>();
+        for (String token : tokens) {
+            result.add(token);
+        }
+        return result;
+    }
+
+    protected void validateNativeTemporalFormat(String connectorName,
+                                                String dataTypeName,
+                                                String format,
+                                                Set<String> allowedTokens) {
+        if (format == null || format.isBlank()) {
+            throw new ConnectorException("Temporal format for " + connectorName + " " + dataTypeName
+                    + " must not be empty");
+        }
+        if (allowedTokens == null || allowedTokens.isEmpty()) {
+            throw new ConnectorException("Temporal format validation tokens for " + connectorName + " "
+                    + dataTypeName + " must not be empty");
+        }
+
+        List<String> tokens = new ArrayList<>(allowedTokens);
+        tokens.sort(Comparator.comparingInt(String::length).reversed());
+
+        boolean matchedToken = false;
+        int index = 0;
+        while (index < format.length()) {
+            char ch = format.charAt(index);
+            String matched = matchToken(format, index, tokens);
+            if (matched != null) {
+                matchedToken = true;
+                index += matched.length();
+                continue;
+            }
+            if (ch == '%') {
+                throw new ConnectorException("Unsupported temporal format '" + format + "' for " + connectorName
+                        + " " + dataTypeName + " at token starting '" + format.substring(index) + "'");
+            }
+            if (!isTemporalFormatLiteral(ch)) {
+                throw new ConnectorException("Unsupported temporal format literal '" + ch + "' in '" + format
+                        + "' for " + connectorName + " " + dataTypeName);
+            }
+            index++;
+        }
+
+        if (!matchedToken) {
+            throw new ConnectorException("Temporal format '" + format + "' for " + connectorName + " "
+                    + dataTypeName + " must contain at least one supported token");
+        }
+    }
+
+    private String matchToken(String format, int index, List<String> tokens) {
+        for (String token : tokens) {
+            if (token.startsWith("%")) {
+                if (format.startsWith(token, index)) {
+                    return token;
+                }
+            } else if (format.startsWith(token, index)) {
+                return token;
+            }
+        }
+        return null;
+    }
+
+    private boolean isTemporalFormatLiteral(char ch) {
+        return Character.isDigit(ch) || ch == '-' || ch == '/' || ch == ':' || ch == ' '
+                || ch == 'T' || ch == '.' || ch == '_' || ch == ',' || ch == '\'' || ch == '"';
+    }
+
     protected String escapeSqlLiteral(String value) {
         return value == null ? null : value.replace("'", "''");
     }
@@ -109,7 +195,7 @@ public class BaseDataTypeHandler implements DataTypeHandler {
         }
 
         try {
-            Object rule = normalizationConfig.get(dataTypeName);
+            Object rule = findRule(dataTypeName);
             if (rule == null) {
                 return null;
             }
@@ -120,6 +206,25 @@ public class BaseDataTypeHandler implements DataTypeHandler {
             log.debug("Failed to get normalization config '{}' for type '{}': {}", getterName, dataTypeName, e.getMessage());
             return null;
         }
+    }
+
+    private Object findRule(String dataTypeName) {
+        Object rule = normalizationConfig.get(dataTypeName);
+        if (rule != null) {
+            return rule;
+        }
+        String fallback = fallbackRuleKey(dataTypeName);
+        return fallback != null ? normalizationConfig.get(fallback) : null;
+    }
+
+    private String fallbackRuleKey(String dataTypeName) {
+        if ("timestamp_with_timezone".equals(dataTypeName)) {
+            return "timestamp";
+        }
+        if ("time_with_timezone".equals(dataTypeName)) {
+            return "time";
+        }
+        return null;
     }
 
     @Override
@@ -170,6 +275,10 @@ public class BaseDataTypeHandler implements DataTypeHandler {
             case TIME:
                 log.debug("  -> Using normalizeTime");
                 return normalizeTime(quotedCol);
+
+            case TIME_WITH_TIME_ZONE:
+                log.debug("  -> Using normalizeTimeWithTimezone");
+                return normalizeTimeWithTimezone(quotedCol);
 
             case DATETIME:
                 log.debug("  -> Using normalizeDateTime");
@@ -268,6 +377,10 @@ public class BaseDataTypeHandler implements DataTypeHandler {
     protected String normalizeTime(String quotedCol) {
         // Generic fallback - databases should override this
         return "COALESCE(CAST(" + quotedCol + " AS VARCHAR), '')";
+    }
+
+    protected String normalizeTimeWithTimezone(String quotedCol) {
+        return normalizeTime(quotedCol);
     }
 
     /**

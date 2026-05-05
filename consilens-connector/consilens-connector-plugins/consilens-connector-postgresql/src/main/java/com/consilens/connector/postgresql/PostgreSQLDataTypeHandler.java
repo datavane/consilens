@@ -10,6 +10,7 @@ import lombok.extern.slf4j.Slf4j;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * PostgreSQL data type handler.
@@ -443,6 +444,17 @@ public class PostgreSQLDataTypeHandler extends BaseDataTypeHandler {
                 "HH24:MI:SS", "HH24:MI:SS") + "'), '')";
     }
 
+    @Override
+    protected String normalizeTimeWithTimezone(String quotedCol) {
+        String expression = quotedCol;
+        String targetTimezone = getTimezone("time_with_timezone", null);
+        if (targetTimezone != null && !targetTimezone.isBlank()) {
+            expression = quotedCol + " AT TIME ZONE '" + escapeSqlLiteral(targetTimezone) + "'";
+        }
+        return "COALESCE(TO_CHAR(" + expression + ", '" + resolvePostgreSqlTemporalFormat("time_with_timezone",
+                "HH24:MI:SS", "HH24:MI:SS") + "'), '')";
+    }
+
     /**
      * PostgreSQL-specific datetime normalization: YYYY-MM-DD HH24:MI:SS format.
      * 
@@ -494,9 +506,9 @@ public class PostgreSQLDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeTimestampWithTimezone(String quotedCol) {
-        String targetTimezone = escapeSqlLiteral(getTimezone("timestamp", "UTC"));
+        String targetTimezone = escapeSqlLiteral(getTimezone("timestamp_with_timezone", "UTC"));
         return "COALESCE(TO_CHAR(" + quotedCol + " AT TIME ZONE '" + targetTimezone + "', '"
-                + resolvePostgreSqlTemporalFormat("timestamp", "YYYY-MM-DD HH24:MI:SS", "YYYY-MM-DD") + "'), '')";
+                + resolvePostgreSqlTemporalFormat("timestamp_with_timezone", "YYYY-MM-DD HH24:MI:SS", "YYYY-MM-DD") + "'), '')";
     }
 
     /**
@@ -517,42 +529,21 @@ public class PostgreSQLDataTypeHandler extends BaseDataTypeHandler {
     }
 
     private String resolvePostgreSqlTemporalFormat(String dataTypeName, String defaultFormat, String dateOnlyDefaultFormat) {
-        String configuredFormat = getFormat(dataTypeName, null);
-        String effectiveDefault = isDateOnlyComparison(dataTypeName) ? dateOnlyDefaultFormat : defaultFormat;
-        if (configuredFormat == null || configuredFormat.isBlank()) {
-            return effectiveDefault;
-        }
-        return toPostgreSqlDateFormat(configuredFormat, effectiveDefault);
+        return getNativeTemporalFormat("PostgreSQL", dataTypeName, defaultFormat, dateOnlyDefaultFormat,
+                postgreSqlTemporalTokens(dataTypeName));
     }
 
-    private String toPostgreSqlDateFormat(String javaFormat, String fallbackFormat) {
-        if (!isSupportedJavaTemporalFormat(javaFormat)) {
-            log.warn("Unsupported PostgreSQL temporal format '{}', falling back to '{}'", javaFormat, fallbackFormat);
-            return fallbackFormat;
+    private Set<String> postgreSqlTemporalTokens(String dataTypeName) {
+        Set<String> dateTokens = temporalTokens("YYYY", "YY", "MONTH", "MON", "MM", "DD");
+        Set<String> timeTokens = temporalTokens("HH24", "HH12", "HH", "MI", "SS", "MS", "US", "AM", "PM");
+        if ("date".equals(dataTypeName)) {
+            return dateTokens;
         }
-        return javaFormat
-                .replace("yyyy", "YYYY")
-                .replace("MM", "MM")
-                .replace("dd", "DD")
-                .replace("HH", "HH24")
-                .replace("mm", "MI")
-                .replace("ss", "SS");
-    }
-
-    private boolean isSupportedJavaTemporalFormat(String format) {
-        String residual = format
-                .replace("yyyy", "")
-                .replace("MM", "")
-                .replace("dd", "")
-                .replace("HH", "")
-                .replace("mm", "")
-                .replace("ss", "")
-                .replace("-", "")
-                .replace(":", "")
-                .replace(" ", "")
-                .replace("/", "")
-                .replace("T", "");
-        return residual.isEmpty();
+        if ("time".equals(dataTypeName) || "time_with_timezone".equals(dataTypeName)) {
+            return timeTokens;
+        }
+        dateTokens.addAll(timeTokens);
+        return dateTokens;
     }
 
     @Override

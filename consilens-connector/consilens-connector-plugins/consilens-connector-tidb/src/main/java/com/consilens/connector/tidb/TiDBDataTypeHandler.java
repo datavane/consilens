@@ -6,6 +6,7 @@ import com.consilens.connector.api.model.DataType;
 import com.consilens.conncetor.base.BaseDataTypeHandler;
 
 import java.util.Map;
+import java.util.Set;
 
 /**
  * TiDB data type handler.
@@ -240,7 +241,8 @@ public class TiDBDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeDate(String quotedCol) {
-        return "COALESCE(DATE_FORMAT(" + quotedCol + ", '%Y-%m-%d'), '')";
+        return "COALESCE(DATE_FORMAT(" + quotedCol + ", '" + resolveTiDbTemporalFormat("date",
+                "%Y-%m-%d", "%Y-%m-%d") + "'), '')";
     }
 
     /**
@@ -248,7 +250,14 @@ public class TiDBDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeTime(String quotedCol) {
-        return "COALESCE(TIME_FORMAT(" + quotedCol + ", '%H:%i:%s'), '')";
+        return "COALESCE(TIME_FORMAT(" + quotedCol + ", '" + resolveTiDbTemporalFormat("time",
+                "%H:%i:%s", "%H:%i:%s") + "'), '')";
+    }
+
+    @Override
+    protected String normalizeTimeWithTimezone(String quotedCol) {
+        return "COALESCE(TIME_FORMAT(" + quotedCol + ", '" + resolveTiDbTemporalFormat("time_with_timezone",
+                "%H:%i:%s", "%H:%i:%s") + "'), '')";
     }
 
     /**
@@ -262,8 +271,9 @@ public class TiDBDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeDateTime(String quotedCol) {
-        // DATETIME: Convert to UTC assuming it's in session timezone
-        return "COALESCE(DATE_FORMAT(CONVERT_TZ(" + quotedCol + ", @@session.time_zone, '+00:00'), '%Y-%m-%d %H:%i:%s'), '')";
+        return "COALESCE(DATE_FORMAT(CONVERT_TZ(" + quotedCol + ", @@session.time_zone, '"
+                + resolveTiDbTimezone("datetime", "+00:00") + "'), '" + resolveTiDbTemporalFormat("datetime",
+                "%Y-%m-%d %H:%i:%s", "%Y-%m-%d") + "'), '')";
     }
 
     /**
@@ -272,8 +282,9 @@ public class TiDBDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeTimestamp(String quotedCol) {
-        // Same as normalizeDateTime for TiDB (MySQL-compatible)
-        return "COALESCE(DATE_FORMAT(CONVERT_TZ(" + quotedCol + ", @@session.time_zone, '+00:00'), '%Y-%m-%d %H:%i:%s'), '')";
+        return "COALESCE(DATE_FORMAT(CONVERT_TZ(" + quotedCol + ", @@session.time_zone, '"
+                + resolveTiDbTimezone("timestamp", "+00:00") + "'), '" + resolveTiDbTemporalFormat("timestamp",
+                "%Y-%m-%d %H:%i:%s", "%Y-%m-%d") + "'), '')";
     }
 
     /**
@@ -282,8 +293,35 @@ public class TiDBDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeTimestampWithTimezone(String quotedCol) {
-        // TiDB TIMESTAMP is already timezone-aware, same as normalizeTimestamp
-        return "COALESCE(DATE_FORMAT(CONVERT_TZ(" + quotedCol + ", @@session.time_zone, '+00:00'), '%Y-%m-%d %H:%i:%s'), '')";
+        return "COALESCE(DATE_FORMAT(CONVERT_TZ(" + quotedCol + ", @@session.time_zone, '"
+                + resolveTiDbTimezone("timestamp_with_timezone", "+00:00") + "'), '" + resolveTiDbTemporalFormat("timestamp_with_timezone",
+                "%Y-%m-%d %H:%i:%s", "%Y-%m-%d") + "'), '')";
+    }
+
+    private String resolveTiDbTimezone(String dataTypeName, String defaultTimezone) {
+        String timezone = getTimezone(dataTypeName, defaultTimezone);
+        if ("UTC".equalsIgnoreCase(timezone)) {
+            return "+00:00";
+        }
+        return escapeSqlLiteral(timezone);
+    }
+
+    private String resolveTiDbTemporalFormat(String dataTypeName, String defaultFormat, String dateOnlyDefaultFormat) {
+        return getNativeTemporalFormat("TiDB", dataTypeName, defaultFormat, dateOnlyDefaultFormat,
+                tiDbTemporalTokens(dataTypeName));
+    }
+
+    private Set<String> tiDbTemporalTokens(String dataTypeName) {
+        Set<String> dateTokens = temporalTokens("%Y", "%y", "%m", "%c", "%d", "%e");
+        Set<String> timeTokens = temporalTokens("%H", "%h", "%I", "%i", "%s", "%S", "%f", "%p", "%r", "%T");
+        if ("date".equals(dataTypeName)) {
+            return dateTokens;
+        }
+        if ("time".equals(dataTypeName) || "time_with_timezone".equals(dataTypeName)) {
+            return timeTokens;
+        }
+        dateTokens.addAll(timeTokens);
+        return dateTokens;
     }
 
     /**

@@ -1,6 +1,7 @@
 package com.consilens.connector.postgresql;
 
 import com.consilens.common.type.TypeDescriptor;
+import com.consilens.connector.api.ConnectorException;
 import com.consilens.connector.api.model.DataType;
 import com.consilens.conncetor.base.jdbc.JdbcDatasetHandle;
 import org.junit.jupiter.api.BeforeEach;
@@ -50,6 +51,28 @@ class PostgreSQLDataTypeHandlerTest {
         assertEquals(
                 "COALESCE(TO_CHAR(\"created_at\" AT TIME ZONE current_setting('TIMEZONE') AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD'), '')",
                 result);
+    }
+
+    @Test
+    void testNormalizeColumn_TimestampWithConfiguredNativeFormat() {
+        JdbcDatasetHandle.JdbcTypeNormalizationRule rule = new JdbcDatasetHandle.JdbcTypeNormalizationRule();
+        rule.setFormat("YYYY/MM/DD HH24:MI:SS");
+        handler = new PostgreSQLDataTypeHandler(capabilityProvider, Map.of("timestamp", rule));
+
+        String result = handler.normalizeColumn("created_at", DataType.TIMESTAMP);
+
+        assertEquals(
+                "COALESCE(TO_CHAR(\"created_at\" AT TIME ZONE current_setting('TIMEZONE') AT TIME ZONE 'UTC', 'YYYY/MM/DD HH24:MI:SS'), '')",
+                result);
+    }
+
+    @Test
+    void testNormalizeColumn_RejectsNonNativeTimestampFormat() {
+        JdbcDatasetHandle.JdbcTypeNormalizationRule rule = new JdbcDatasetHandle.JdbcTypeNormalizationRule();
+        rule.setFormat("yyyy-MM-dd");
+        handler = new PostgreSQLDataTypeHandler(capabilityProvider, Map.of("timestamp", rule));
+
+        assertThrows(ConnectorException.class, () -> handler.normalizeColumn("created_at", DataType.TIMESTAMP));
     }
 
     @Test

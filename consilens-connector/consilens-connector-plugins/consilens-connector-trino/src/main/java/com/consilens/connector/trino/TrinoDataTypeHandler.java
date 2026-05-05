@@ -9,6 +9,7 @@ import com.consilens.conncetor.base.BaseDataTypeHandler;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Trino data type handler.
@@ -257,7 +258,8 @@ public class TrinoDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeDate(String quotedCol) {
-        return "COALESCE(FORMAT_DATETIME(" + quotedCol + ", 'yyyy-MM-dd'), '')";
+        return "COALESCE(FORMAT_DATETIME(" + quotedCol + ", '" + resolveTrinoTemporalFormat("date",
+                "yyyy-MM-dd", "yyyy-MM-dd") + "'), '')";
     }
 
     /**
@@ -265,7 +267,16 @@ public class TrinoDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeTime(String quotedCol) {
-        return "COALESCE(CAST(" + quotedCol + " AS VARCHAR), '')";
+        return "COALESCE(FORMAT_DATETIME(CAST(CONCAT('1970-01-01 ', CAST(" + quotedCol
+                + " AS VARCHAR)) AS TIMESTAMP), '" + resolveTrinoTemporalFormat("time",
+                "HH:mm:ss", "HH:mm:ss") + "'), '')";
+    }
+
+    @Override
+    protected String normalizeTimeWithTimezone(String quotedCol) {
+        return "COALESCE(FORMAT_DATETIME(CAST(CONCAT('1970-01-01 ', CAST(" + quotedCol
+                + " AS VARCHAR)) AS TIMESTAMP), '" + resolveTrinoTemporalFormat("time_with_timezone",
+                "HH:mm:ss", "HH:mm:ss") + "'), '')";
     }
 
     /**
@@ -275,7 +286,8 @@ public class TrinoDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeDateTime(String quotedCol) {
-        return "COALESCE(FORMAT_DATETIME(" + quotedCol + ", 'yyyy-MM-dd HH:mm:ss'), '')";
+        return "COALESCE(FORMAT_DATETIME(" + quotedCol + ", '" + resolveTrinoTemporalFormat("datetime",
+                "yyyy-MM-dd HH:mm:ss", "yyyy-MM-dd") + "'), '')";
     }
 
     /**
@@ -288,8 +300,9 @@ public class TrinoDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeTimestamp(String quotedCol) {
-        // Convert to UTC timezone, then format
-        return "COALESCE(FORMAT_DATETIME(AT_TIMEZONE(" + quotedCol + ", 'UTC'), 'yyyy-MM-dd HH:mm:ss'), '')";
+        return "COALESCE(FORMAT_DATETIME(AT_TIMEZONE(" + quotedCol + ", '"
+                + resolveTrinoTimezone("timestamp", "UTC") + "'), '" + resolveTrinoTemporalFormat("timestamp",
+                "yyyy-MM-dd HH:mm:ss", "yyyy-MM-dd") + "'), '')";
     }
 
     /**
@@ -298,8 +311,31 @@ public class TrinoDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeTimestampWithTimezone(String quotedCol) {
-        // Convert to UTC timezone, then format
-        return "COALESCE(FORMAT_DATETIME(AT_TIMEZONE(" + quotedCol + ", 'UTC'), 'yyyy-MM-dd HH:mm:ss'), '')";
+        return "COALESCE(FORMAT_DATETIME(AT_TIMEZONE(" + quotedCol + ", '"
+                + resolveTrinoTimezone("timestamp_with_timezone", "UTC") + "'), '" + resolveTrinoTemporalFormat("timestamp_with_timezone",
+                "yyyy-MM-dd HH:mm:ss", "yyyy-MM-dd") + "'), '')";
+    }
+
+    private String resolveTrinoTimezone(String dataTypeName, String defaultTimezone) {
+        return escapeSqlLiteral(getTimezone(dataTypeName, defaultTimezone));
+    }
+
+    private String resolveTrinoTemporalFormat(String dataTypeName, String defaultFormat, String dateOnlyDefaultFormat) {
+        return getNativeTemporalFormat("Trino", dataTypeName, defaultFormat, dateOnlyDefaultFormat,
+                trinoTemporalTokens(dataTypeName));
+    }
+
+    private Set<String> trinoTemporalTokens(String dataTypeName) {
+        Set<String> dateTokens = temporalTokens("yyyy", "yy", "MMMM", "MMM", "MM", "M", "dd", "d");
+        Set<String> timeTokens = temporalTokens("HH", "H", "hh", "h", "mm", "m", "ss", "s", "SSS", "a");
+        if ("date".equals(dataTypeName)) {
+            return dateTokens;
+        }
+        if ("time".equals(dataTypeName) || "time_with_timezone".equals(dataTypeName)) {
+            return timeTokens;
+        }
+        dateTokens.addAll(timeTokens);
+        return dateTokens;
     }
 
     /**

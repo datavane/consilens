@@ -66,7 +66,8 @@ public enum DataType {
 
     public boolean isTemporal() {
         return this == DATE || this == TIME || this == TIMESTAMP ||
-                this == DATETIME;
+                this == DATETIME || this == TIMESTAMP_WITH_TIMEZONE ||
+                this == TIME_WITH_TIME_ZONE;
     }
 
     public boolean isBinary() {
