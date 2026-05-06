@@ -7,7 +7,6 @@ import com.consilens.connector.api.model.ComparisonSpec;
 import com.consilens.connector.api.model.KeySpec;
 import com.consilens.connector.api.model.PredicateSpec;
 import com.consilens.connector.api.model.SchemaDescriptor;
-import com.consilens.connector.api.model.UpdateWindow;
 import com.consilens.connector.api.config.ReadOptions;
 import com.consilens.connector.api.normalization.DefaultNormalizationSpecValidator;
 import com.consilens.connector.api.planner.CompareRequest;
@@ -74,16 +73,14 @@ public class DefaultCompareRuntime implements CompareRuntime {
                     request.getSourceKeySpec(),
                     request.getSourceComparisons(),
                     request.getSourceFilter(),
-                    "source",
-                    request.getRealtimeSpec() != null ? request.getRealtimeSpec().getSourceWindow() : null);
+                    "source");
             CompareSegment targetSegment = buildSegment(
                     targetDataset,
                     request.getTarget(),
                     request.getTargetKeySpec(),
                     request.getTargetComparisons(),
                     request.getTargetFilter(),
-                    "target",
-                    request.getRealtimeSpec() != null ? request.getRealtimeSpec().getTargetWindow() : null);
+                    "target");
 
             ComparePlan plan = comparePlanner.plan(request, sourceDataset, targetDataset);
             log.info("Selected compare plan: {}", plan.getPlanType());
@@ -112,8 +109,7 @@ public class DefaultCompareRuntime implements CompareRuntime {
                                         KeySpec keySpec,
                                         ComparisonSpec comparisons,
                                         PredicateSpec filter,
-                                        String side,
-                                        UpdateWindow updateWindow) {
+                                        String side) {
         SchemaDescriptor schema = dataset.getSchema();
         return CompareSegment.builder()
                 .dataset(dataset)
@@ -123,7 +119,6 @@ public class DefaultCompareRuntime implements CompareRuntime {
                 .filter(filter)
                 .schema(schema)
                 .side(side)
-                .updateWindow(updateWindow)
                 .snapshot(dataset.getSnapshotProvider()
                         .map(provider -> provider.createSnapshot(config.getReadOptions()))
                         .orElse(null))

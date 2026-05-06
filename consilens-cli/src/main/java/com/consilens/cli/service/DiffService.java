@@ -465,15 +465,13 @@ public class DiffService {
                     request.getSourceKeySpec(),
                     request.getSourceComparisons(),
                     request.getSourceFilter(),
-                    "source",
-                    request.getRealtimeSpec() != null ? request.getRealtimeSpec().getSourceWindow() : null);
+                    "source");
             long targetRowCount = probeService.countRows(
                     request.getTarget(),
                     request.getTargetKeySpec(),
                     request.getTargetComparisons(),
                     request.getTargetFilter(),
-                    "target",
-                    request.getRealtimeSpec() != null ? request.getRealtimeSpec().getTargetWindow() : null);
+                    "target");
 
             log.info("Dry run completed - Source rows: {}, Target rows: {}", sourceRowCount, targetRowCount);
 

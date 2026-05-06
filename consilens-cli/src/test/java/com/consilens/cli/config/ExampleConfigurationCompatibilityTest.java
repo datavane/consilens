@@ -21,8 +21,6 @@ class ExampleConfigurationCompatibilityTest {
             "examples/performance-test-mysql-vs-postgres.yaml",
             "examples/performance-test-mysql-vs-starrocks.yaml",
             "examples/custom-sql-mysql-vs-postgres-checksum.yaml",
-            "examples/realtime-table-mysql-vs-postgres-loop.yaml",
-            "examples/realtime-custom-sql-mysql-vs-postgres-checksum.yaml",
             "examples/mysql-to-doris-partitioned-checksum.yaml",
             "examples/detail-to-aggregate-custom-sql.yaml",
             "examples/performance-test-mysql-vs-postgres.json"

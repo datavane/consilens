@@ -4,7 +4,6 @@ import com.consilens.cli.config.ConfigurationManager;
 import com.consilens.cli.model.CliConfiguration;
 import com.consilens.cli.model.CliDiffResult;
 import com.consilens.cli.service.DiffService;
-import com.consilens.cli.service.RealtimeCompareRunner;
 
 import lombok.extern.slf4j.Slf4j;
 import picocli.CommandLine.Command;
@@ -66,9 +65,6 @@ public class DiffCommand implements Runnable {
             if (dryRun) {
                 log.info("Performing dry run (validation only)...");
                 result = diffService.performDryRun(config);
-            } else if (config.getRealtime() != null && Boolean.TRUE.equals(config.getRealtime().getEnabled())) {
-                log.info("Starting realtime long-running compare loop...");
-                result = new RealtimeCompareRunner().runLoop(config);
             } else {
                 log.info("Starting diff operation...");
                 log.info("This may take a while depending on table sizes and strategy chosen.");
