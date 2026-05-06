@@ -21,12 +21,14 @@ class ConfigurationManagerTest {
     @Test
     void shouldLoadJsonConfigurationFile() throws Exception {
         Path configFile = tempDir.resolve("diff-config.json");
-        Files.writeString(configFile, "{\n" +
+                Files.writeString(configFile, "{\n" +
                 "  \"source\": {\n" +
                 "    \"type\": \"mysql\",\n" +
-                "    \"url\": \"jdbc:mysql://localhost:3306/test\",\n" +
-                "    \"username\": \"root\",\n" +
-                "    \"password\": \"123456\",\n" +
+                "    \"connection\": {\n" +
+                "      \"url\": \"jdbc:mysql://localhost:3306/test\",\n" +
+                "      \"username\": \"root\",\n" +
+                "      \"password\": \"123456\"\n" +
+                "    },\n" +
                 "    \"resource\": {\n" +
                 "      \"type\": \"table\",\n" +
                 "      \"name\": \"performance_test_table\"\n" +
@@ -34,9 +36,11 @@ class ConfigurationManagerTest {
                 "  },\n" +
                 "  \"target\": {\n" +
                 "    \"type\": \"postgresql\",\n" +
-                "    \"url\": \"jdbc:postgresql://localhost:5432/postgres?currentSchema=public\",\n" +
-                "    \"username\": \"postgres\",\n" +
-                "    \"password\": \"123456\",\n" +
+                "    \"connection\": {\n" +
+                "      \"url\": \"jdbc:postgresql://localhost:5432/postgres?currentSchema=public\",\n" +
+                "      \"username\": \"postgres\",\n" +
+                "      \"password\": \"123456\"\n" +
+                "    },\n" +
                 "    \"resource\": {\n" +
                 "      \"type\": \"table\",\n" +
                 "      \"name\": \"performance_test_table\"\n" +
@@ -110,12 +114,14 @@ class ConfigurationManagerTest {
     @Test
     void shouldResolveEnvironmentPlaceholdersInJsonConfiguration() throws Exception {
         Path configFile = tempDir.resolve("diff-config-env.json");
-        Files.writeString(configFile, "{\n" +
+                Files.writeString(configFile, "{\n" +
                 "  \"source\": {\n" +
                 "    \"type\": \"mysql\",\n" +
-                "    \"url\": \"${env.SOURCE_URL}\",\n" +
-                "    \"username\": \"${env.DB_USER}\",\n" +
-                "    \"password\": \"${env.DB_PASSWORD}\",\n" +
+                "    \"connection\": {\n" +
+                "      \"url\": \"${env.SOURCE_URL}\",\n" +
+                "      \"username\": \"${env.DB_USER}\",\n" +
+                "      \"password\": \"${env.DB_PASSWORD}\"\n" +
+                "    },\n" +
                 "    \"resource\": {\n" +
                 "      \"type\": \"table\",\n" +
                 "      \"name\": \"${env.TABLE_NAME}\"\n" +
@@ -123,9 +129,11 @@ class ConfigurationManagerTest {
                 "  },\n" +
                 "  \"target\": {\n" +
                 "    \"type\": \"postgresql\",\n" +
-                "    \"url\": \"${env.TARGET_URL}\",\n" +
-                "    \"username\": \"${env.DB_USER}\",\n" +
-                "    \"password\": \"${env.DB_PASSWORD}\",\n" +
+                "    \"connection\": {\n" +
+                "      \"url\": \"${env.TARGET_URL}\",\n" +
+                "      \"username\": \"${env.DB_USER}\",\n" +
+                "      \"password\": \"${env.DB_PASSWORD}\"\n" +
+                "    },\n" +
                 "    \"resource\": {\n" +
                 "      \"type\": \"table\",\n" +
                 "      \"name\": \"${env.TABLE_NAME}\"\n" +
@@ -205,17 +213,19 @@ class ConfigurationManagerTest {
         Path configFile = tempDir.resolve("diff-config-env.yaml");
         Files.writeString(configFile, "source:\n" +
                 "  type: mysql\n" +
-                "  url: ${env.SOURCE_URL}\n" +
-                "  username: ${env.DB_USER}\n" +
-                "  password: ${env.DB_PASSWORD}\n" +
+                "  connection:\n" +
+                "    url: ${env.SOURCE_URL}\n" +
+                "    username: ${env.DB_USER}\n" +
+                "    password: ${env.DB_PASSWORD}\n" +
                 "  resource:\n" +
                 "    type: table\n" +
                 "    name: ${env.TABLE_NAME}\n" +
                 "target:\n" +
                 "  type: postgresql\n" +
-                "  url: ${env.TARGET_URL}\n" +
-                "  username: ${env.DB_USER}\n" +
-                "  password: ${env.DB_PASSWORD}\n" +
+                "  connection:\n" +
+                "    url: ${env.TARGET_URL}\n" +
+                "    username: ${env.DB_USER}\n" +
+                "    password: ${env.DB_PASSWORD}\n" +
                 "  resource:\n" +
                 "    type: table\n" +
                 "    name: ${env.TABLE_NAME}\n" +
@@ -260,17 +270,19 @@ class ConfigurationManagerTest {
         Path configFile = tempDir.resolve("diff-config-missing-env.yaml");
         Files.writeString(configFile, "source:\n" +
                 "  type: mysql\n" +
-                "  url: ${env.SOURCE_URL}\n" +
-                "  username: root\n" +
-                "  password: 123456\n" +
+                "  connection:\n" +
+                "    url: ${env.SOURCE_URL}\n" +
+                "    username: root\n" +
+                "    password: 123456\n" +
                 "  resource:\n" +
                 "    type: table\n" +
                 "    name: performance_test_table\n" +
                 "target:\n" +
                 "  type: postgresql\n" +
-                "  url: jdbc:postgresql://localhost:5432/postgres?currentSchema=public\n" +
-                "  username: postgres\n" +
-                "  password: 123456\n" +
+                "  connection:\n" +
+                "    url: jdbc:postgresql://localhost:5432/postgres?currentSchema=public\n" +
+                "    username: postgres\n" +
+                "    password: 123456\n" +
                 "  resource:\n" +
                 "    type: table\n" +
                 "    name: performance_test_table\n" +
@@ -297,17 +309,19 @@ class ConfigurationManagerTest {
         Path configFile = tempDir.resolve("diff-config-unsupported-sink.yaml");
         Files.writeString(configFile, "source:\n" +
                 "  type: mysql\n" +
-                "  url: jdbc:mysql://localhost:3306/test\n" +
-                "  username: root\n" +
-                "  password: 123456\n" +
+                "  connection:\n" +
+                "    url: jdbc:mysql://localhost:3306/test\n" +
+                "    username: root\n" +
+                "    password: 123456\n" +
                 "  resource:\n" +
                 "    type: table\n" +
                 "    name: performance_test_table\n" +
                 "target:\n" +
                 "  type: postgresql\n" +
-                "  url: jdbc:postgresql://localhost:5432/postgres?currentSchema=public\n" +
-                "  username: postgres\n" +
-                "  password: 123456\n" +
+                "  connection:\n" +
+                "    url: jdbc:postgresql://localhost:5432/postgres?currentSchema=public\n" +
+                "    username: postgres\n" +
+                "    password: 123456\n" +
                 "  resource:\n" +
                 "    type: table\n" +
                 "    name: performance_test_table\n" +
@@ -342,17 +356,19 @@ class ConfigurationManagerTest {
         Path configFile = tempDir.resolve("diff-config-missing-sink-type.yaml");
         Files.writeString(configFile, "source:\n" +
                 "  type: mysql\n" +
-                "  url: jdbc:mysql://localhost:3306/test\n" +
-                "  username: root\n" +
-                "  password: 123456\n" +
+                "  connection:\n" +
+                "    url: jdbc:mysql://localhost:3306/test\n" +
+                "    username: root\n" +
+                "    password: 123456\n" +
                 "  resource:\n" +
                 "    type: table\n" +
                 "    name: performance_test_table\n" +
                 "target:\n" +
                 "  type: postgresql\n" +
-                "  url: jdbc:postgresql://localhost:5432/postgres?currentSchema=public\n" +
-                "  username: postgres\n" +
-                "  password: 123456\n" +
+                "  connection:\n" +
+                "    url: jdbc:postgresql://localhost:5432/postgres?currentSchema=public\n" +
+                "    username: postgres\n" +
+                "    password: 123456\n" +
                 "  resource:\n" +
                 "    type: table\n" +
                 "    name: performance_test_table\n" +

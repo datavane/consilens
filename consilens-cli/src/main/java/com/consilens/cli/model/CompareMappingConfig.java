@@ -17,9 +17,6 @@ public class CompareMappingConfig {
     @JsonProperty("name")
     private String name;
 
-    @JsonProperty("type")
-    private String type;
-
     @JsonProperty("source")
     private FieldExpressionConfig source;
 
@@ -31,7 +28,4 @@ public class CompareMappingConfig {
 
     @JsonProperty("compare")
     private Boolean compare;
-
-    @JsonProperty("ordinal")
-    private Integer ordinal;
 }

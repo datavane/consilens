@@ -215,8 +215,8 @@ public class RealtimeCompareRunner {
             return "";
         }
         com.consilens.cli.model.ConnectionConfig.ResourceConfig resource = connectionConfig.getResource();
-        if (resource.getName() != null && !resource.getName().isBlank()) {
-            return resource.getName();
+        if ("table".equalsIgnoreCase(resource.getType())) {
+            return resource.getName() != null ? resource.getName() : "";
         }
         return resource.getPath() != null ? resource.getPath() : "";
     }

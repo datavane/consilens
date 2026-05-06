@@ -25,8 +25,5 @@ public class ResultConfig {
     private List<SinkConfig> sinks = new ArrayList<>();
 
     @Builder.Default
-    private int parallelism = 4;
-
-    @Builder.Default
     private boolean failOnSinkError = false;
 }

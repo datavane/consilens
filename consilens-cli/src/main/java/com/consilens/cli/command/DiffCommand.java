@@ -124,9 +124,9 @@ public class DiffCommand implements Runnable {
             return "(not set)";
         }
         com.consilens.cli.model.ConnectionConfig.ResourceConfig resource = connectionConfig.getResource();
-        String location = resource.getName() != null && !resource.getName().isBlank()
-                ? resource.getName()
-                : resource.getPath();
+        String location = "sql".equalsIgnoreCase(resource.getType())
+                ? resource.getPath()
+                : resource.getName();
         return resource.getType() + ":" + location;
     }
 }

@@ -98,9 +98,9 @@ public class ConfigValidateCommand implements Runnable {
                     System.out.println("    Source fields: " + nvl(config.getComparison().getFields().getSource()));
                     System.out.println("    Target fields: " + nvl(config.getComparison().getFields().getTarget()));
                 }
-                if (config.getComparison().getWhere() != null) {
-                    System.out.println("    Source where : " + nvl(config.getComparison().getWhere().getSource()));
-                    System.out.println("    Target where : " + nvl(config.getComparison().getWhere().getTarget()));
+                if (config.getComparison().getFilters() != null) {
+                    System.out.println("    Source filters: " + nvl(config.getComparison().getFilters().getSource()));
+                    System.out.println("    Target filters: " + nvl(config.getComparison().getFilters().getTarget()));
                 }
             }
 
@@ -208,9 +208,9 @@ public class ConfigValidateCommand implements Runnable {
             return "(not set)";
         }
         com.consilens.cli.model.ConnectionConfig.ResourceConfig resource = connectionConfig.getResource();
-        String location = resource.getName() != null && !resource.getName().isBlank()
-                ? resource.getName()
-                : resource.getPath();
+        String location = "sql".equalsIgnoreCase(resource.getType())
+                ? resource.getPath()
+                : resource.getName();
         return nvl(resource.getType()) + ":" + nvl(location);
     }
 }

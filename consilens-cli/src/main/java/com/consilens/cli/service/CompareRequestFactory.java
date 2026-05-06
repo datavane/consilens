@@ -188,7 +188,7 @@ public class CompareRequestFactory {
         String sql = buildMappedSql(resource, comparison, sourceSide);
         ResourceLocator sqlResource = ResourceLocator.builder()
                 .type("sql")
-                .name(resource.getName() != null ? resource.getName() : resource.getPath())
+                .name(resource.getName())
                 .path(sql)
                 .options(resource.getOptions())
                 .build();
@@ -255,9 +255,6 @@ public class CompareRequestFactory {
     }
 
     private String tableRef(ResourceLocator resource) {
-        if (resource.getPath() != null && !resource.getPath().trim().isEmpty()) {
-            return resource.getPath().trim();
-        }
         return resource.getName().trim();
     }
 
@@ -360,7 +357,7 @@ public class CompareRequestFactory {
         if (resource == null) {
             return null;
         }
-        if (resource.getName() != null && !resource.getName().isBlank()) {
+        if ("table".equalsIgnoreCase(resource.getType())) {
             return resource.getName();
         }
         return resource.getPath();

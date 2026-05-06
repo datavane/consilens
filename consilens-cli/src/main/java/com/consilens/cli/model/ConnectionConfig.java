@@ -33,15 +33,6 @@ public class ConnectionConfig {
     @JsonProperty("name")
     private String name;
 
-    @JsonProperty("url")
-    private String url;
-
-    @JsonProperty("username")
-    private String username;
-
-    @JsonProperty("password")
-    private String password;
-
     @JsonProperty("connection")
     private ConnectorConnectionProperties connection;
 
@@ -57,30 +48,21 @@ public class ConnectionConfig {
         if (connection != null) {
             result.putAll(connection.asMap());
         }
-        putIfPresent(result, "url", url);
-        putIfPresent(result, "username", username);
-        putIfPresent(result, "password", password);
         return result;
     }
 
+    @JsonIgnore
     public String getUrl() {
-        if (url != null && !url.trim().isEmpty()) {
-            return url;
-        }
         return connection != null ? connection.getUrl() : null;
     }
 
+    @JsonIgnore
     public String getUsername() {
-        if (username != null && !username.trim().isEmpty()) {
-            return username;
-        }
         return connection != null ? connection.getUsername() : null;
     }
 
+    @JsonIgnore
     public String getPassword() {
-        if (password != null && !password.trim().isEmpty()) {
-            return password;
-        }
         return connection != null ? connection.getPassword() : null;
     }
 
@@ -94,9 +76,9 @@ public class ConnectionConfig {
 
         if (requiresJdbcValidation()) {
             ValidationFramework.forContext(fieldName)
-                    .notEmpty(getUrl(), fieldName + ".url")
-                    .validJdbcUrl(getUrl(), fieldName + ".url")
-                    .notEmpty(getUsername(), fieldName + ".username")
+                    .notEmpty(getUrl(), fieldName + ".connection.url")
+                    .validJdbcUrl(getUrl(), fieldName + ".connection.url")
+                    .notEmpty(getUsername(), fieldName + ".connection.username")
                     .throwIfInvalid();
             return;
         }
@@ -128,12 +110,6 @@ public class ConnectionConfig {
                 return true;
             default:
                 return false;
-        }
-    }
-
-    private void putIfPresent(Map<String, Object> result, String key, String value) {
-        if (value != null && !value.trim().isEmpty()) {
-            result.put(key, value);
         }
     }
 
@@ -222,9 +198,13 @@ public class ConnectionConfig {
             String normalizedType = type.trim().toLowerCase(Locale.ROOT);
             switch (normalizedType) {
                 case "table":
-                    if (isBlank(name) && isBlank(path)) {
+                    if (isBlank(name)) {
                         throw ValidationException.simple("CONFIGURATION_VALIDATION",
-                                fieldName + " type=table 时必须配置 name 或 path");
+                                fieldName + " type=table 时必须配置 name");
+                    }
+                    if (!isBlank(path)) {
+                        throw ValidationException.simple("CONFIGURATION_VALIDATION",
+                                fieldName + " type=table 时不应配置 path");
                     }
                     break;
                 case "sql":
