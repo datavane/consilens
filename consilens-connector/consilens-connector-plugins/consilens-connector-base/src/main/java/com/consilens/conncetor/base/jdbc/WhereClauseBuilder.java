@@ -3,11 +3,9 @@ package com.consilens.conncetor.base.jdbc;
 import com.consilens.connector.api.DatabaseDialect;
 import com.consilens.connector.api.ConnectorException;
 import com.consilens.connector.api.model.PredicateSpec;
-import com.consilens.connector.api.model.UpdateWindow;
 import com.consilens.connector.api.planner.KeyRangeSplit;
 import com.consilens.connector.api.planner.SegmentSplit;
 
-import java.sql.Timestamp;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -23,23 +21,6 @@ public final class WhereClauseBuilder {
     public WhereClauseBuilder addBaseFilter(PredicateSpec filter) {
         if (filter != null && filter.getExpression() != null && !filter.getExpression().trim().isEmpty()) {
             predicates.add("(" + filter.getExpression().trim() + ")");
-        }
-        return this;
-    }
-
-    public WhereClauseBuilder addUpdateWindow(UpdateWindow window) {
-        if (window == null || window.getColumn() == null || window.getColumn().isBlank()) {
-            return this;
-        }
-        List<String> parts = new ArrayList<>();
-        if (window.getStart() != null) {
-            parts.add(quote(window.getColumn()) + " >= " + dialect.getSqlQueryGenerator().formatValue(Timestamp.from(window.getStart())));
-        }
-        if (window.getEnd() != null) {
-            parts.add(quote(window.getColumn()) + " < " + dialect.getSqlQueryGenerator().formatValue(Timestamp.from(window.getEnd())));
-        }
-        if (!parts.isEmpty()) {
-            predicates.add("(" + String.join(" AND ", parts) + ")");
         }
         return this;
     }

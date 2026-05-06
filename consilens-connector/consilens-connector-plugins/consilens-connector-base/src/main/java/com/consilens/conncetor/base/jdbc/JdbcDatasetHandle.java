@@ -727,7 +727,6 @@ public class JdbcDatasetHandle implements DatasetHandle, RelationalDatasetSuppor
         }
         return new WhereClauseBuilder(dialect)
                 .addBaseFilter(segment.getFilter())
-                .addUpdateWindow(segment.getUpdateWindow())
                 .addSplit(segment.getSplit(), keyColumns)
                 .build();
     }

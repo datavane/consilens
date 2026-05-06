@@ -7,6 +7,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class ConnectionConfigTest {
 
@@ -30,23 +31,46 @@ class ConnectionConfigTest {
     }
 
     @Test
-    void shouldMergeGenericConnectionPropertiesWithTopLevelFields() {
+    void shouldExposeConnectionPropertiesFromNestedConnectionBlock() {
         ConnectionConfig.ConnectorConnectionProperties properties = ConnectionConfig.ConnectorConnectionProperties.builder()
                 .url("jdbc:mysql://localhost:3306/orders")
                 .username("connector-user")
+                .password("secret")
                 .build();
         properties.addProperty("sslMode", "DISABLED");
 
         ConnectionConfig config = ConnectionConfig.builder()
                 .type("mysql")
-                .username("top-level-user")
                 .connection(properties)
                 .build();
 
         Map<String, Object> connectionMap = config.toConnectionMap();
 
         assertEquals("jdbc:mysql://localhost:3306/orders", connectionMap.get("url"));
-        assertEquals("top-level-user", connectionMap.get("username"));
+        assertEquals("connector-user", connectionMap.get("username"));
+        assertEquals("secret", connectionMap.get("password"));
         assertEquals("DISABLED", connectionMap.get("sslMode"));
+        assertEquals("jdbc:mysql://localhost:3306/orders", config.getUrl());
+        assertEquals("connector-user", config.getUsername());
+        assertEquals("secret", config.getPassword());
+    }
+
+    @Test
+    void shouldRejectPathForTableResource() {
+        ConnectionConfig config = ConnectionConfig.builder()
+                .type("mysql")
+                .connection(ConnectionConfig.ConnectorConnectionProperties.builder()
+                        .url("jdbc:mysql://localhost:3306/orders")
+                        .username("root")
+                        .password("secret")
+                        .build())
+                .resource(ConnectionConfig.ResourceConfig.builder()
+                        .type("table")
+                        .name("orders")
+                        .path("orders")
+                        .build())
+                .build();
+
+        assertThrows(Exception.class, () -> config.validate("source"));
     }
 }

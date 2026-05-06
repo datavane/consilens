@@ -7,7 +7,6 @@ import com.consilens.connector.api.model.KeySpec;
 import com.consilens.connector.api.model.PredicateSpec;
 import com.consilens.connector.api.model.ResourceLocator;
 import com.consilens.connector.api.model.SchemaDescriptor;
-import com.consilens.connector.api.model.UpdateWindow;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -36,6 +35,4 @@ public class CompareSegment {
     private SchemaDescriptor schema;
 
     private String side;
-
-    private UpdateWindow updateWindow;
 }

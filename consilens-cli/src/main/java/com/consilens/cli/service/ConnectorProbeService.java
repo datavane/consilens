@@ -7,7 +7,6 @@ import com.consilens.connector.api.model.ComparisonSpec;
 import com.consilens.connector.api.model.KeySpec;
 import com.consilens.connector.api.model.PredicateSpec;
 import com.consilens.connector.api.model.SchemaDescriptor;
-import com.consilens.connector.api.model.UpdateWindow;
 import com.consilens.connector.api.planner.CompareSegment;
 import com.consilens.connector.api.record.CloseableIterator;
 import com.consilens.connector.api.spi.ConnectorAdapter;
@@ -37,8 +36,7 @@ public final class ConnectorProbeService {
                           KeySpec keySpec,
                           ComparisonSpec comparisons,
                           PredicateSpec filter,
-                          String side,
-                          UpdateWindow updateWindow) throws Exception {
+                          String side) throws Exception {
         try (ConnectorAdapter adapter = connectorRegistry.create(config);
              com.consilens.connector.api.dataset.DatasetHandle dataset = adapter.openDataset(config.getResource(), config.getReadOptions())) {
             SchemaDescriptor schema = dataset.getSchema();
@@ -50,7 +48,6 @@ public final class ConnectorProbeService {
                     .filter(filter)
                     .schema(schema)
                     .side(side)
-                    .updateWindow(updateWindow)
                     .build();
 
             if (dataset.getHashProvider().isPresent()) {

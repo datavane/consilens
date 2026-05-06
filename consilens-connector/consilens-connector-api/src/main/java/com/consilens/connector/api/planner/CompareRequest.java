@@ -32,8 +32,6 @@ public class CompareRequest {
 
     private PredicateSpec targetFilter;
 
-    private RealtimeSpec realtimeSpec;
-
     private NormalizationSpec normalizationSpec;
 
     private CompareStrategyPreference strategyPreference;

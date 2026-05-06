@@ -2,7 +2,6 @@ package com.consilens.cli.model;
 
 import com.consilens.core.validation.ValidationException;
 import com.consilens.core.validation.ValidationFramework;
-import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.AllArgsConstructor;
@@ -42,11 +41,7 @@ public class ComparisonConfig {
     private List<String> extraColumns;
 
     @JsonProperty("filters")
-    @JsonAlias("where")
     private StringPairConfig filters;
-
-    @JsonProperty("updateColumn")
-    private String updateColumn;
 
     public void validate() throws ValidationException {
         ValidationFramework.forContext("comparison")
@@ -85,14 +80,6 @@ public class ComparisonConfig {
                 filters.validate("comparison.filters");
             }
         }
-    }
-
-    public StringPairConfig getWhere() {
-        return filters;
-    }
-
-    public void setWhere(StringPairConfig where) {
-        this.filters = where;
     }
 
     private void validateMappings() {

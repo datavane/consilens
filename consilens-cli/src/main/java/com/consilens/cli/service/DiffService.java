@@ -294,10 +294,7 @@ public class DiffService {
     }
 
     private TablePath resolveTablePath(ConnectionConfig.ResourceConfig resource) {
-        String value = resource.getName() != null && !resource.getName().isBlank()
-                ? resource.getName()
-                : resource.getPath();
-        return value != null ? TablePath.of(value) : null;
+        return resource != null && resource.getName() != null ? TablePath.of(resource.getName()) : null;
     }
 
     private String resourceDisplayName(ConnectionConfig connectionConfig) {
@@ -305,8 +302,8 @@ public class DiffService {
             return "";
         }
         ConnectionConfig.ResourceConfig resource = connectionConfig.getResource();
-        if (resource.getName() != null && !resource.getName().isBlank()) {
-            return resource.getName();
+        if ("table".equalsIgnoreCase(resource.getType())) {
+            return resource.getName() != null ? resource.getName() : "";
         }
         return resource.getPath() != null ? resource.getPath() : "";
     }
@@ -468,15 +465,13 @@ public class DiffService {
                     request.getSourceKeySpec(),
                     request.getSourceComparisons(),
                     request.getSourceFilter(),
-                    "source",
-                    request.getRealtimeSpec() != null ? request.getRealtimeSpec().getSourceWindow() : null);
+                    "source");
             long targetRowCount = probeService.countRows(
                     request.getTarget(),
                     request.getTargetKeySpec(),
                     request.getTargetComparisons(),
                     request.getTargetFilter(),
-                    "target",
-                    request.getRealtimeSpec() != null ? request.getRealtimeSpec().getTargetWindow() : null);
+                    "target");
 
             log.info("Dry run completed - Source rows: {}, Target rows: {}", sourceRowCount, targetRowCount);
 
