@@ -1,12 +1,10 @@
 package com.consilens.cli.service;
 
-import com.consilens.cli.model.CheckpointStoreConfig;
 import com.consilens.cli.model.CliConfiguration;
 import com.consilens.cli.model.CompareMappingConfig;
 import com.consilens.cli.model.ComparisonConfig;
 import com.consilens.cli.model.ConnectionConfig;
 import com.consilens.cli.model.FieldExpressionConfig;
-import com.consilens.cli.model.RealtimeConfig;
 import com.consilens.cli.model.normalization.NormalizationConfig;
 import com.consilens.cli.model.normalization.TypeNormalizationRule;
 import com.consilens.connector.api.config.ConnectorConfig;
@@ -21,16 +19,13 @@ import com.consilens.connector.api.planner.CompareExecutionOptions;
 import com.consilens.connector.api.planner.ComparePlanTypes;
 import com.consilens.connector.api.planner.CompareRequest;
 import com.consilens.connector.api.planner.CompareStrategyPreference;
-import com.consilens.connector.api.planner.RealtimeSpec;
 
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 
 public class CompareRequestFactory {
 
@@ -53,7 +48,6 @@ public class CompareRequestFactory {
                 .targetComparisons(buildResult.targetComparisons)
                 .sourceFilter(buildResult.sourceFilter)
                 .targetFilter(buildResult.targetFilter)
-                .realtimeSpec(toRealtimeSpec(config))
                 .normalizationSpec(toNormalizationSpec(config.getNormalization()))
                 .strategyPreference(toStrategyPreference(config))
                 .executionOptions(toExecutionOptions(config))
@@ -321,46 +315,6 @@ public class CompareRequestFactory {
                 .type("sql")
                 .expression(expression)
                 .build();
-    }
-
-    private RealtimeSpec toRealtimeSpec(CliConfiguration config) {
-        RealtimeConfig realtime = config.getRealtime();
-        if (realtime == null) {
-            return null;
-        }
-        CheckpointStoreConfig checkpointStore = realtime.getCheckpointStore();
-        return RealtimeSpec.builder()
-                .taskId(buildTaskId(config))
-                .enabled(Boolean.TRUE.equals(realtime.getEnabled()))
-                .watermarkDelay(realtime.getWatermarkDelay())
-                .windowSize(realtime.getWindowSize())
-                .overlap(realtime.getOverlap())
-                .checkpointStoreType(checkpointStore != null ? checkpointStore.getType() : null)
-                .checkpointStoreName(checkpointStore != null ? checkpointStore.getName() : null)
-                .build();
-    }
-
-    private String buildTaskId(CliConfiguration config) {
-        String raw = String.join("|",
-                String.valueOf(config.getSource() != null ? config.getSource().getName() : null),
-                String.valueOf(config.getTarget() != null ? config.getTarget().getName() : null),
-                String.valueOf(config.getSource() != null && config.getSource().getResource() != null
-                        ? resourceIdentity(config.getSource().getResource())
-                        : null),
-                String.valueOf(config.getTarget() != null && config.getTarget().getResource() != null
-                        ? resourceIdentity(config.getTarget().getResource())
-                        : null));
-        return UUID.nameUUIDFromBytes(raw.getBytes(StandardCharsets.UTF_8)).toString();
-    }
-
-    private String resourceIdentity(com.consilens.cli.model.ConnectionConfig.ResourceConfig resource) {
-        if (resource == null) {
-            return null;
-        }
-        if ("table".equalsIgnoreCase(resource.getType())) {
-            return resource.getName();
-        }
-        return resource.getPath();
     }
 
     private CompareStrategyPreference toStrategyPreference(CliConfiguration config) {
