@@ -31,6 +31,25 @@ class ConnectionConfigTest {
     }
 
     @Test
+    void shouldNotRequireJdbcValidationBasedOnConnectorType() {
+        ConnectionConfig.ConnectorConnectionProperties properties = ConnectionConfig.ConnectorConnectionProperties.builder()
+                .build();
+        properties.addProperty("host", "localhost");
+        properties.addProperty("database", "orders");
+
+        ConnectionConfig config = ConnectionConfig.builder()
+                .type("mysql")
+                .connection(properties)
+                .resource(ConnectionConfig.ResourceConfig.builder()
+                        .type("table")
+                        .name("orders")
+                        .build())
+                .build();
+
+        assertDoesNotThrow(() -> config.validate("source"));
+    }
+
+    @Test
     void shouldExposeConnectionPropertiesFromNestedConnectionBlock() {
         ConnectionConfig.ConnectorConnectionProperties properties = ConnectionConfig.ConnectorConnectionProperties.builder()
                 .url("jdbc:mysql://localhost:3306/orders")
