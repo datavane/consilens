@@ -1125,6 +1125,7 @@ public class ChecksumDiffer extends TableDiffer implements AutoCloseable {
         if (differences == null || differences.isEmpty()) {
             return;
         }
+        ensureDiffLimit(differences.size());
 
         log.debug("Streaming {} differences for segment: {}", differences.size(), segmentId);
         infoTreeRecorder.addMetric(segmentId, "differences", differences.size());

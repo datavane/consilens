@@ -4,6 +4,7 @@ import com.consilens.connector.api.capability.CapabilitySet;
 import com.consilens.connector.api.capability.ConnectorCapability;
 import com.consilens.connector.api.dataset.DatasetHandle;
 import com.consilens.connector.api.dataset.DatasetMetadata;
+import com.consilens.connector.api.dataset.RelationalDatasetSupport;
 import com.consilens.connector.api.planner.ComparePlanTypes;
 import com.consilens.connector.api.planner.CompareRequest;
 import com.consilens.connector.api.planner.CompareStrategyPreference;
@@ -24,12 +25,14 @@ public class DefaultComparePlanner implements ComparePlanner {
         CapabilitySet targetCapabilities = getCapabilities(target);
         List<ComparePlan> availablePlans = new ArrayList<>();
 
-        if (sourceCapabilities.supports(ConnectorCapability.SERVER_SIDE_HASH)
+        if (supportsRelationalExecution(source, target)
+                && sourceCapabilities.supports(ConnectorCapability.SERVER_SIDE_HASH)
                 && targetCapabilities.supports(ConnectorCapability.SERVER_SIDE_HASH)) {
             availablePlans.add(new PushdownChecksumPlan(executionSettings));
         }
 
         if (!hasSqlResource(source, target)
+                && supportsRelationalExecution(source, target)
                 && sameExecutionDomain(source, target)
                 && sourceCapabilities.supports(ConnectorCapability.SERVER_SIDE_JOIN)
                 && targetCapabilities.supports(ConnectorCapability.SERVER_SIDE_JOIN)) {
@@ -74,6 +77,12 @@ public class DefaultComparePlanner implements ComparePlanner {
 
     private boolean supportsStreaming(DatasetHandle datasetHandle) {
         return datasetHandle != null && datasetHandle.getRecordScanner().isPresent();
+    }
+
+    private boolean supportsRelationalExecution(DatasetHandle source, DatasetHandle target) {
+        return source != null && target != null
+                && source.getSupport(RelationalDatasetSupport.class).isPresent()
+                && target.getSupport(RelationalDatasetSupport.class).isPresent();
     }
 
     private boolean hasSqlResource(DatasetHandle source, DatasetHandle target) {

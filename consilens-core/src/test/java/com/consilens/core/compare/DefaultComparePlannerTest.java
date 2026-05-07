@@ -8,10 +8,13 @@ import com.consilens.connector.api.dataset.FilterPushdownProvider;
 import com.consilens.connector.api.dataset.HashProvider;
 import com.consilens.connector.api.dataset.KeyLookupProvider;
 import com.consilens.connector.api.dataset.RecordScanner;
+import com.consilens.connector.api.dataset.RelationalDatasetSupport;
 import com.consilens.connector.api.dataset.SnapshotProvider;
 import com.consilens.connector.api.dataset.SplitPlanner;
+import com.consilens.connector.api.DatabaseDialect;
 import com.consilens.connector.api.model.ResourceLocator;
 import com.consilens.connector.api.model.SchemaDescriptor;
+import com.consilens.connector.api.model.TablePath;
 import com.consilens.connector.api.planner.CompareExecutionOptions;
 import com.consilens.connector.api.planner.ComparePlanTypes;
 import com.consilens.connector.api.planner.CompareRequest;
@@ -21,6 +24,8 @@ import org.junit.jupiter.api.Test;
 import java.util.EnumSet;
 import java.util.Map;
 import java.util.Optional;
+import java.sql.Connection;
+import java.sql.SQLException;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -42,10 +47,10 @@ class DefaultComparePlannerTest {
                         .build())
                 .build();
 
-        DatasetHandle source = dataset("shared", capabilities(
+        DatasetHandle source = relationalDataset("shared", capabilities(
                 ConnectorCapability.SERVER_SIDE_JOIN,
                 ConnectorCapability.SERVER_SIDE_HASH));
-        DatasetHandle target = dataset("shared", capabilities(
+        DatasetHandle target = relationalDataset("shared", capabilities(
                 ConnectorCapability.SERVER_SIDE_JOIN,
                 ConnectorCapability.SERVER_SIDE_HASH));
 
@@ -63,8 +68,8 @@ class DefaultComparePlannerTest {
                         .build())
                 .build();
 
-        DatasetHandle source = dataset("left", capabilities(ConnectorCapability.SERVER_SIDE_HASH));
-        DatasetHandle target = dataset("right", capabilities(ConnectorCapability.SERVER_SIDE_HASH));
+        DatasetHandle source = relationalDataset("left", capabilities(ConnectorCapability.SERVER_SIDE_HASH));
+        DatasetHandle target = relationalDataset("right", capabilities(ConnectorCapability.SERVER_SIDE_HASH));
 
         ComparePlan plan = planner.plan(request, source, target);
 
@@ -80,8 +85,8 @@ class DefaultComparePlannerTest {
                         .build())
                 .build();
 
-        DatasetHandle source = dataset("left", capabilities(ConnectorCapability.SERVER_SIDE_HASH));
-        DatasetHandle target = dataset("right", capabilities(ConnectorCapability.SERVER_SIDE_HASH));
+        DatasetHandle source = relationalDataset("left", capabilities(ConnectorCapability.SERVER_SIDE_HASH));
+        DatasetHandle target = relationalDataset("right", capabilities(ConnectorCapability.SERVER_SIDE_HASH));
 
         assertThrows(IllegalStateException.class, () -> planner.plan(request, source, target));
     }
@@ -94,23 +99,23 @@ class DefaultComparePlannerTest {
         DatasetHandle source = dataset("left", capabilities(
                 ConnectorCapability.SERVER_SIDE_HASH,
                 ConnectorCapability.KEY_LOOKUP,
-                ConnectorCapability.STREAM_SCAN));
+                ConnectorCapability.STREAM_SCAN), true);
         DatasetHandle target = dataset("right", capabilities(
                 ConnectorCapability.SERVER_SIDE_HASH,
                 ConnectorCapability.KEY_LOOKUP,
-                ConnectorCapability.STREAM_SCAN));
+                ConnectorCapability.STREAM_SCAN), true);
 
         ComparePlan plan = planner.plan(request, source, target);
 
-        assertEquals(ComparePlanTypes.PUSHDOWN_CHECKSUM, plan.getPlanType());
+        assertEquals(ComparePlanTypes.STREAMING_MERGE, plan.getPlanType());
     }
 
     @Test
-    void shouldSelectChecksumForNonRelationalDatasetsWithHashCapability() {
+    void shouldSelectChecksumForRelationalDatasetsWithHashCapability() {
         CompareRequest request = CompareRequest.builder().build();
 
-        DatasetHandle source = dataset("left", capabilities(ConnectorCapability.SERVER_SIDE_HASH));
-        DatasetHandle target = dataset("right", capabilities(ConnectorCapability.SERVER_SIDE_HASH));
+        DatasetHandle source = relationalDataset("left", capabilities(ConnectorCapability.SERVER_SIDE_HASH));
+        DatasetHandle target = relationalDataset("right", capabilities(ConnectorCapability.SERVER_SIDE_HASH));
 
         ComparePlan plan = planner.plan(request, source, target);
 
@@ -121,10 +126,10 @@ class DefaultComparePlannerTest {
     void shouldPreferChecksumForSqlResources() {
         CompareRequest request = CompareRequest.builder().build();
 
-        DatasetHandle source = dataset("shared", capabilities(
+        DatasetHandle source = relationalDataset("shared", capabilities(
                 ConnectorCapability.SERVER_SIDE_JOIN,
                 ConnectorCapability.SERVER_SIDE_HASH), true, Map.of("resourceType", "sql"));
-        DatasetHandle target = dataset("shared", capabilities(
+        DatasetHandle target = relationalDataset("shared", capabilities(
                 ConnectorCapability.SERVER_SIDE_JOIN,
                 ConnectorCapability.SERVER_SIDE_HASH), true, Map.of("resourceType", "table"));
 
@@ -135,6 +140,10 @@ class DefaultComparePlannerTest {
 
     private DatasetHandle dataset(String executionDomainId, CapabilitySet capabilities) {
         return dataset(executionDomainId, capabilities, false);
+    }
+
+    private DatasetHandle relationalDataset(String executionDomainId, CapabilitySet capabilities) {
+        return relationalDataset(executionDomainId, capabilities, false, Map.of());
     }
 
     private DatasetHandle dataset(String executionDomainId, CapabilitySet capabilities, boolean withScanner) {
@@ -154,11 +163,24 @@ class DefaultComparePlannerTest {
         return new StubDatasetHandle(metadata, withScanner);
     }
 
+    private DatasetHandle relationalDataset(String executionDomainId,
+                                            CapabilitySet capabilities,
+                                            boolean withScanner,
+                                            Map<String, Object> attributes) {
+        DatasetMetadata metadata = DatasetMetadata.builder()
+                .logicalName("orders")
+                .executionDomainId(executionDomainId)
+                .capabilities(capabilities)
+                .attributes(attributes)
+                .build();
+        return new StubRelationalDatasetHandle(metadata, withScanner);
+    }
+
     private CapabilitySet capabilities(ConnectorCapability... capabilities) {
         return new CapabilitySet(EnumSet.copyOf(java.util.List.of(capabilities)));
     }
 
-    private static final class StubDatasetHandle implements DatasetHandle {
+    private static class StubDatasetHandle implements DatasetHandle {
 
         private final DatasetMetadata metadata;
         private final boolean withScanner;
@@ -232,6 +254,48 @@ class DefaultComparePlannerTest {
 
         @Override
         public void close() {
+        }
+    }
+
+    private static final class StubRelationalDatasetHandle extends StubDatasetHandle implements RelationalDatasetSupport {
+
+        private StubRelationalDatasetHandle(DatasetMetadata metadata, boolean withScanner) {
+            super(metadata, withScanner);
+        }
+
+        @Override
+        public String getName() {
+            return "orders";
+        }
+
+        @Override
+        public String getConnectorType() {
+            return "mysql";
+        }
+
+        @Override
+        public String getJdbcUrl() {
+            return "jdbc:mysql://localhost:3306/test";
+        }
+
+        @Override
+        public String getUsername() {
+            return "root";
+        }
+
+        @Override
+        public DatabaseDialect getDialect() {
+            return null;
+        }
+
+        @Override
+        public TablePath getTablePath() {
+            return TablePath.of("orders");
+        }
+
+        @Override
+        public Connection getConnection() throws SQLException {
+            return null;
         }
     }
 }

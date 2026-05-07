@@ -60,7 +60,7 @@ public class CliDiffResult {
 
      */
     @Getter
-    private int sourceMissingCount;
+    private long sourceMissingCount;
 
     /**
      * Number of rows missing in target (TARGET_MISSING operation).
@@ -69,7 +69,7 @@ public class CliDiffResult {
 
      */
     @Getter
-    private int targetMissingCount;
+    private long targetMissingCount;
 
     /**
      * Number of rows with data mismatch (MISMATCH operation).
@@ -78,22 +78,22 @@ public class CliDiffResult {
 
      */
     @Getter
-    private int mismatchCount;
+    private long mismatchCount;
 
     /**
      * Total number of differences.
      */
-    private int totalDifferences;
+    private long totalDifferences;
 
     /**
      * Number of rows processed in source table.
      */
-    private int sourceRowCount;
+    private long sourceRowCount;
 
     /**
      * Number of rows processed in target table.
      */
-    private int targetRowCount;
+    private long targetRowCount;
 
     /**
      * Additional metadata about the operation.
@@ -148,7 +148,7 @@ public class CliDiffResult {
      * Get the percentage of rows that differ (relative to larger table).
      */
     public double getDifferencePercentage() {
-        int maxRows = Math.max(sourceRowCount, targetRowCount);
+        long maxRows = Math.max(sourceRowCount, targetRowCount);
         if (maxRows == 0) {
             return 0.0;
         }

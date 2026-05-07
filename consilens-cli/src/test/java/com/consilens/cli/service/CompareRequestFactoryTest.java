@@ -60,6 +60,8 @@ class CompareRequestFactoryTest {
                 request.getTarget().getResource().getPath());
         assertEquals(null, request.getSourceFilter());
         assertEquals(null, request.getTargetFilter());
+        assertEquals(Boolean.TRUE, request.getExecutionOptions().getValidateUniqueKeys());
+        assertEquals(1_000_000L, request.getExecutionOptions().getMaxDifferences());
     }
 
     @Test
@@ -121,6 +123,7 @@ class CompareRequestFactoryTest {
                         .algorithm("xor")
                         .bisectionFactor(4)
                         .bisectionThreshold(1000L)
+                        .maxDifferences(1_000_000L)
                         .localCompare(LocalCompareConfig.builder().mode("full").build())
                         .build())
                 .build();

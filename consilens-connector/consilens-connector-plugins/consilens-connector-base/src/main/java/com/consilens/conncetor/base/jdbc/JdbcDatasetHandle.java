@@ -24,6 +24,7 @@ import com.consilens.connector.api.dataset.SplitPlanner;
 import com.consilens.connector.api.model.ComparisonSpec;
 import com.consilens.connector.api.model.ConnectorNativeType;
 import com.consilens.connector.api.model.DataType;
+import com.consilens.connector.api.model.DerivedCompareColumns;
 import com.consilens.connector.api.model.FieldDescriptor;
 import com.consilens.connector.api.model.ResourceLocator;
 import com.consilens.connector.api.model.SchemaDescriptor;
@@ -233,7 +234,6 @@ public class JdbcDatasetHandle implements DatasetHandle, RelationalDatasetSuppor
                         ConnectorCapability.SCHEMA_DISCOVERY,
                         ConnectorCapability.FILTER_PUSHDOWN,
                         ConnectorCapability.PROJECTION_PUSHDOWN,
-                        ConnectorCapability.SERVER_SIDE_JOIN,
                         ConnectorCapability.SERVER_SIDE_HASH,
                         ConnectorCapability.ORDERED_SCAN,
                         ConnectorCapability.STREAM_SCAN
@@ -660,7 +660,10 @@ public class JdbcDatasetHandle implements DatasetHandle, RelationalDatasetSuppor
         Set<String> keys = new LinkedHashSet<>(keyColumns);
         List<String> result = new ArrayList<>();
         for (FieldDescriptor field : schemaDescriptor.getFields()) {
-            if (field.getName() != null && !keys.contains(field.getName()) && !excluded.contains(field.getName())) {
+            if (field.getName() != null
+                    && !keys.contains(field.getName())
+                    && !excluded.contains(field.getName())
+                    && !DerivedCompareColumns.isDerived(field.getName())) {
                 result.add(field.getName());
             }
         }
@@ -825,7 +828,7 @@ public class JdbcDatasetHandle implements DatasetHandle, RelationalDatasetSuppor
         try {
             Properties properties = buildConnectionProperties(connection, new Properties());
             try (Connection jdbcConnection = DriverManager.getConnection(requireJdbcUrl(), properties);
-                 PreparedStatement statement = jdbcConnection.prepareStatement("SHOW CREATE TABLE " + tablePath.getFullPath());
+                 PreparedStatement statement = jdbcConnection.prepareStatement("SHOW CREATE TABLE " + quotedTablePath(tablePath));
                  ResultSet resultSet = statement.executeQuery()) {
                 if (!resultSet.next()) {
                     return attributes;
@@ -855,9 +858,13 @@ public class JdbcDatasetHandle implements DatasetHandle, RelationalDatasetSuppor
                 }
             }
         } catch (Exception e) {
-            log.debug("Failed to discover Doris partition metadata for {}", tablePath.getFullPath(), e);
+            log.warn("Failed to discover Doris partition metadata for {}", tablePath.getFullPath(), e);
         }
         return attributes;
+    }
+
+    private String quotedTablePath(TablePath tablePath) {
+        return dialect.getCapabilityProvider().quote(tablePath.getPathComponents());
     }
 
     private String readString(ResultSet resultSet, String columnLabel, int fallbackIndex) throws SQLException {

@@ -48,27 +48,29 @@ public class TableDiffRecordSink implements Sink {
     @Override
     public void open(SinkConfig config, DiffContext context) throws Exception {
         sinkConfig = parseConfig(config.getProperties());
-        dataSource = createDataSource(sinkConfig);
-        tableName = sinkConfig.resolveTableName();
         batchSize = sinkConfig.getBatchSize();
         if (batchSize <= 0) {
             throw new IllegalArgumentException("sink.batchSize 必须大于 0");
         }
+        TableColumnNames.validateUniqueSanitizedColumns(sinkConfig.getColumns(), "TableDiffRecordSink columns");
+        dataSource = createDataSource(sinkConfig);
+        tableName = sinkConfig.resolveTableName();
 
         sourceColumns = context.getSourceColumnNames() != null ? context.getSourceColumnNames() : new ArrayList<>();
         targetColumns = context.getTargetColumnNames() != null ? context.getTargetColumnNames() : new ArrayList<>();
         sourceOutputColumns = new LinkedHashMap<>();
         targetOutputColumns = new LinkedHashMap<>();
         for (String column : sourceColumns) {
-            sourceOutputColumns.put(sanitize(column) + "_1", column);
+            sourceOutputColumns.put(TableColumnNames.sanitize(column) + "_1", column);
         }
         for (String column : targetColumns) {
-            targetOutputColumns.put(sanitize(column) + "_2", column);
+            targetOutputColumns.put(TableColumnNames.sanitize(column) + "_2", column);
         }
 
         DatabaseDialect dialect = resolveDialect(sinkConfig);
         writeCompiler = dialect.getTableWriteCompiler();
         outputColumns = buildOutputColumns(dialect);
+        TableColumnNames.validateUniqueOutputColumns(outputColumns, "TableDiffRecordSink");
         writePlan = writeCompiler.compile(new TableWriteCompileRequest(
                 tableName,
                 sinkConfig.isCreateTable(),
@@ -186,7 +188,7 @@ public class TableDiffRecordSink implements Sink {
             List<OutputColumnSpec> columns = new ArrayList<>();
             for (ColumnMapping mapping : sinkConfig.getColumns()) {
                 columns.add(new OutputColumnSpec(
-                        sanitize(mapping.getName()),
+                        TableColumnNames.sanitize(mapping.getName()),
                         resolveSystemType(dialect, mapping.getColumnType(), Types.TEXT()),
                         true,
                         mapping.getColumnType()
@@ -201,10 +203,10 @@ public class TableDiffRecordSink implements Sink {
         columns.add(new OutputColumnSpec("nl_dq_diff_columns1", Types.JSON(), true, null));
         columns.add(new OutputColumnSpec("nl_dq_diff_columns2", Types.JSON(), true, null));
         for (String column : sourceColumns) {
-            columns.add(new OutputColumnSpec(sanitize(column) + "_1", Types.TEXT(), true, null));
+            columns.add(new OutputColumnSpec(TableColumnNames.sanitize(column) + "_1", Types.TEXT(), true, null));
         }
         for (String column : targetColumns) {
-            columns.add(new OutputColumnSpec(sanitize(column) + "_2", Types.TEXT(), true, null));
+            columns.add(new OutputColumnSpec(TableColumnNames.sanitize(column) + "_2", Types.TEXT(), true, null));
         }
         return List.copyOf(columns);
     }
@@ -219,7 +221,7 @@ public class TableDiffRecordSink implements Sink {
 
     private ColumnMapping findColumnMapping(String outputColumnName) {
         for (ColumnMapping mapping : sinkConfig.getColumns()) {
-            if (sanitize(mapping.getName()).equals(outputColumnName)) {
+            if (TableColumnNames.sanitize(mapping.getName()).equals(outputColumnName)) {
                 return mapping;
             }
         }
@@ -230,7 +232,7 @@ public class TableDiffRecordSink implements Sink {
         Map<String, ColumnMapping> map = new LinkedHashMap<>();
         if (sinkConfig.getColumns() != null) {
             for (ColumnMapping column : sinkConfig.getColumns()) {
-                map.put(sanitize(column.getName()), column);
+                map.put(TableColumnNames.sanitize(column.getName()), column);
             }
         }
         return map;
@@ -245,10 +247,6 @@ public class TableDiffRecordSink implements Sink {
         } catch (SQLException rollbackError) {
             log.warn("TableDiffRecordSink rollback failed", rollbackError);
         }
-    }
-
-    private String sanitize(String column) {
-        return column.replaceAll("[^a-zA-Z0-9_]", "_");
     }
 
     private String toJsonArray(List<String> list) {

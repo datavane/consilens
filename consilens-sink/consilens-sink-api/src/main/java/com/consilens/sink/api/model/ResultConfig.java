@@ -25,5 +25,5 @@ public class ResultConfig {
     private List<SinkConfig> sinks = new ArrayList<>();
 
     @Builder.Default
-    private boolean failOnSinkError = false;
+    private boolean failOnSinkError = true;
 }

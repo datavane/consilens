@@ -61,8 +61,7 @@ jobs:
       - name: Build and Package on ${{ matrix.java }}
         run: |
           chmod 777 ./mvnw
-          ./mvnw -B clean package -DskipTests -DskipITs \
-                 -Dspotless.skip=true \
+          ./mvnw -B clean verify -Dspotless.skip=true
 
   result:
     name: Build

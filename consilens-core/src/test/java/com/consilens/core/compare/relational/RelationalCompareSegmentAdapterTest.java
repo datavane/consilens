@@ -86,6 +86,37 @@ class RelationalCompareSegmentAdapterTest {
         assertEquals(List.of(), prepared.getTableSegment().getExtraColumns());
     }
 
+    @Test
+    void shouldIgnoreDerivedHashColumnsFromAutomaticMatching() {
+        ResourceLocator resource = ResourceLocator.builder()
+                .type("sql")
+                .name("orders_sql")
+                .path("SELECT id, name, row_hash FROM orders")
+                .build();
+        StubRelationalDataset dataset = new StubRelationalDataset(resource);
+        SchemaDescriptor schema = SchemaDescriptor.builder()
+                .fields(List.of(
+                        FieldDescriptor.builder().name("id").canonicalType("bigint").build(),
+                        FieldDescriptor.builder().name("name").canonicalType("VARCHAR").build(),
+                        FieldDescriptor.builder().name("row_hash").canonicalType("VARCHAR").build()))
+                .fieldMap(Map.of(
+                        "id", FieldDescriptor.builder().name("id").canonicalType("bigint").build(),
+                        "name", FieldDescriptor.builder().name("name").canonicalType("VARCHAR").build(),
+                        "row_hash", FieldDescriptor.builder().name("row_hash").canonicalType("VARCHAR").build()))
+                .build();
+        CompareSegment segment = CompareSegment.builder()
+                .dataset(dataset)
+                .resource(resource)
+                .keySpec(KeySpec.builder().fields(List.of("id")).build())
+                .schema(schema)
+                .build();
+
+        RelationalCompareSegmentAdapter.PreparedTableSegment prepared =
+                RelationalCompareSegmentAdapter.toTableSegment(segment, CompareExecutionSettings.fromRequest(null));
+
+        assertEquals(List.of("name"), prepared.getTableSegment().getExtraColumns());
+    }
+
     private static final class StubRelationalDataset implements DatasetHandle, RelationalDatasetSupport {
 
         private final ResourceLocator resource;

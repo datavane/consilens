@@ -11,6 +11,7 @@ import com.consilens.core.validation.ValidationException;
 import com.consilens.core.validation.ValidationFramework;
 import com.consilens.sink.api.model.ResultConfig;
 import com.consilens.sink.api.model.SinkConfig;
+import com.consilens.sink.table.TableColumnNames;
 import com.consilens.sink.table.TableSinkConfig;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonInclude;
@@ -311,6 +312,12 @@ public class CliConfiguration {
     private void validateTableSinkColumns(int sinkIndex, TableSinkConfig tableSinkConfig, DatabaseDialect dialect) {
         if (tableSinkConfig.getColumns() == null || tableSinkConfig.getColumns().isEmpty()) {
             return;
+        }
+        try {
+            TableColumnNames.validateUniqueSanitizedColumns(tableSinkConfig.getColumns(),
+                    "result.sinks[" + sinkIndex + "]");
+        } catch (IllegalArgumentException e) {
+            throw ValidationException.simple("CONFIGURATION_VALIDATION", e.getMessage());
         }
         Set<String> columnNames = new HashSet<>();
         for (int i = 0; i < tableSinkConfig.getColumns().size(); i++) {
