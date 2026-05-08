@@ -138,6 +138,69 @@ class DefaultComparePlannerTest {
         assertEquals(ComparePlanTypes.PUSHDOWN_CHECKSUM, plan.getPlanType());
     }
 
+    @Test
+    void shouldSelectStreamingWhenRelationalHashIsUnavailable() {
+        CompareRequest request = CompareRequest.builder()
+                .strategyPreference(CompareStrategyPreference.builder()
+                        .preferredPlans(java.util.List.of(ComparePlanTypes.PUSHDOWN_CHECKSUM, ComparePlanTypes.STREAMING_MERGE))
+                        .allowFallback(true)
+                        .build())
+                .build();
+
+        DatasetHandle source = relationalDataset("left", capabilities(ConnectorCapability.STREAM_SCAN), true, Map.of());
+        DatasetHandle target = relationalDataset("right", capabilities(ConnectorCapability.STREAM_SCAN), true, Map.of());
+
+        ComparePlan plan = planner.plan(request, source, target);
+
+        assertEquals(ComparePlanTypes.STREAMING_MERGE, plan.getPlanType());
+    }
+
+    @Test
+    void shouldFailWhenChecksumIsRequiredButHashCapabilityIsUnavailable() {
+        CompareRequest request = CompareRequest.builder()
+                .strategyPreference(CompareStrategyPreference.builder()
+                        .preferredPlans(java.util.List.of("checksum"))
+                        .allowFallback(false)
+                        .build())
+                .build();
+
+        DatasetHandle source = relationalDataset("left", capabilities(ConnectorCapability.STREAM_SCAN), true, Map.of());
+        DatasetHandle target = relationalDataset("right", capabilities(ConnectorCapability.STREAM_SCAN), true, Map.of());
+
+        assertThrows(IllegalStateException.class, () -> planner.plan(request, source, target));
+    }
+
+    @Test
+    void shouldResolvePlanAliasesCaseInsensitively() {
+        CompareRequest request = CompareRequest.builder()
+                .strategyPreference(CompareStrategyPreference.builder()
+                        .preferredPlans(java.util.List.of(" JOIN "))
+                        .allowFallback(false)
+                        .build())
+                .build();
+
+        DatasetHandle source = relationalDataset("shared", capabilities(
+                ConnectorCapability.SERVER_SIDE_JOIN,
+                ConnectorCapability.SERVER_SIDE_HASH));
+        DatasetHandle target = relationalDataset("shared", capabilities(
+                ConnectorCapability.SERVER_SIDE_JOIN,
+                ConnectorCapability.SERVER_SIDE_HASH));
+
+        ComparePlan plan = planner.plan(request, source, target);
+
+        assertEquals(ComparePlanTypes.SERVER_JOIN, plan.getPlanType());
+    }
+
+    @Test
+    void shouldFailWhenNoCompatiblePlanExists() {
+        CompareRequest request = CompareRequest.builder().build();
+
+        DatasetHandle source = dataset("left", capabilities());
+        DatasetHandle target = dataset("right", capabilities());
+
+        assertThrows(IllegalStateException.class, () -> planner.plan(request, source, target));
+    }
+
     private DatasetHandle dataset(String executionDomainId, CapabilitySet capabilities) {
         return dataset(executionDomainId, capabilities, false);
     }
@@ -177,6 +240,9 @@ class DefaultComparePlannerTest {
     }
 
     private CapabilitySet capabilities(ConnectorCapability... capabilities) {
+        if (capabilities == null || capabilities.length == 0) {
+            return CapabilitySet.empty();
+        }
         return new CapabilitySet(EnumSet.copyOf(java.util.List.of(capabilities)));
     }
 

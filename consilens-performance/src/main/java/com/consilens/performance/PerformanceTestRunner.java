@@ -7,6 +7,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -40,6 +41,7 @@ public class PerformanceTestRunner {
             // Set up collector
             collector.setTestName(config.getTestName());
             collector.setThreadPoolExecutor(threadPool);
+            collector.setMonitoringIntervalMs(config.getMonitoringIntervalMs());
             config.getTestParameters().forEach(collector::addTestParameter);
 
             // Warmup phase
@@ -50,11 +52,17 @@ public class PerformanceTestRunner {
 
             // Test phase
             log.info("Running test phase: {} iterations", config.getTestIterations());
-            collector.startCollection();
-
-            List<TestResult> results = executeTest(config, testLogic);
-
-            collector.stopCollection();
+            List<TestResult> results;
+            boolean collecting = false;
+            try {
+                collector.startCollection();
+                collecting = true;
+                results = executeTest(config, testLogic);
+            } finally {
+                if (collecting) {
+                    collector.stopCollection();
+                }
+            }
 
             // Collect metrics
             PerformanceMetrics metrics = collector.collectMetrics();
@@ -64,10 +72,11 @@ public class PerformanceTestRunner {
                     .config(config)
                     .metrics(metrics)
                     .testResults(results)
-                    .success(true)
+                    .success(metrics.getErrorCount() == 0)
+                    .errorMessage(metrics.getErrorCount() == 0 ? null : "Test completed with errors: " + metrics.getErrorCount())
                     .build();
 
-            log.info("Performance test completed successfully");
+            log.info("Performance test completed with success={}", result.isSuccess());
             log.info(metrics.getSummary());
 
             return result;
@@ -256,7 +265,12 @@ public class PerformanceTestRunner {
         List<TestResult> results = new ArrayList<>();
 
         // Step interval: 25%, 50%, 75%, 100% of max concurrency
-        int[] concurrencySteps = {maxConcurrency / 4, maxConcurrency / 2, maxConcurrency * 3 / 4, maxConcurrency};
+        int[] concurrencySteps = {
+                Math.max(1, maxConcurrency / 4),
+                Math.max(1, maxConcurrency / 2),
+                Math.max(1, maxConcurrency * 3 / 4),
+                maxConcurrency
+        };
         int iterationsPerStep = totalIterations / concurrencySteps.length;
 
         for (int concurrency : concurrencySteps) {
@@ -299,7 +313,8 @@ public class PerformanceTestRunner {
                 results.add(result);
 
             } catch (Exception e) {
-                log.error("Test iteration {} failed", i, e);
+                log.warn("Test iteration {} failed: {}", i, e.getMessage());
+                log.debug("Test iteration failure details", e);
                 collector.recordError();
             }
         }
@@ -314,11 +329,19 @@ public class PerformanceTestRunner {
             throws InterruptedException {
 
         List<TestResult> results = new ArrayList<>();
+        if (iterations <= 0) {
+            return results;
+        }
+        int effectiveConcurrency = Math.max(1, concurrency);
+        Semaphore permits = new Semaphore(effectiveConcurrency);
         CountDownLatch latch = new CountDownLatch(iterations);
 
         for (int i = 0; i < iterations; i++) {
             threadPool.submit(() -> {
+                boolean permitAcquired = false;
                 try {
+                    permits.acquire();
+                    permitAcquired = true;
                     long startTime = System.currentTimeMillis();
                     TestResult result = testLogic.call();
                     long duration = System.currentTimeMillis() - startTime;
@@ -337,11 +360,15 @@ public class PerformanceTestRunner {
                     return result;
 
                 } catch (Exception e) {
-                    log.error("Concurrent test iteration failed", e);
+                    log.warn("Concurrent test iteration failed: {}", e.getMessage());
+                    log.debug("Concurrent test iteration failure details", e);
                     collector.recordError();
                     return null;
 
                 } finally {
+                    if (permitAcquired) {
+                        permits.release();
+                    }
                     latch.countDown();
                 }
             });
@@ -350,7 +377,8 @@ public class PerformanceTestRunner {
         // Wait for all tasks to complete
         boolean completed = latch.await(10, TimeUnit.MINUTES);
         if (!completed) {
-            log.warn("Test did not complete within timeout");
+            collector.recordError();
+            throw new IllegalStateException("Performance test did not complete within timeout");
         }
 
         return results;
@@ -368,11 +396,30 @@ public class PerformanceTestRunner {
      * Test result holder.
      */
     @Data
+    @lombok.Builder
+    @lombok.NoArgsConstructor
+    @lombok.AllArgsConstructor
     public static class TestResult {
         private long rowsProcessed;
         private long bytesProcessed;
         private long differencesFound;
         private boolean success;
         private String errorMessage;
+
+        public static TestResult success(long rowsProcessed, long bytesProcessed, long differencesFound) {
+            return TestResult.builder()
+                    .rowsProcessed(rowsProcessed)
+                    .bytesProcessed(bytesProcessed)
+                    .differencesFound(differencesFound)
+                    .success(true)
+                    .build();
+        }
+
+        public static TestResult failure(String errorMessage) {
+            return TestResult.builder()
+                    .success(false)
+                    .errorMessage(errorMessage)
+                    .build();
+        }
     }
 }

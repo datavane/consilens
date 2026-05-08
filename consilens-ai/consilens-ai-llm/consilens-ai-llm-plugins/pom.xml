@@ -17,5 +17,7 @@
     <modules>
         <module>consilens-ai-llm-noop</module>
         <module>consilens-ai-llm-ollama</module>
+        <module>consilens-ai-llm-openai</module>
+        <module>consilens-ai-llm-deepseek</module>
     </modules>
 </project>

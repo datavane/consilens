@@ -124,6 +124,10 @@ public class PerformanceTestConfig {
             throw new IllegalArgumentException("Test name cannot be null or empty");
         }
 
+        if (loadPattern == null) {
+            throw new IllegalArgumentException("Load pattern cannot be null");
+        }
+
         if (warmupIterations < 0) {
             throw new IllegalArgumentException("Warmup iterations cannot be negative");
         }
@@ -138,6 +142,14 @@ public class PerformanceTestConfig {
 
         if (monitoringIntervalMs <= 0) {
             throw new IllegalArgumentException("Monitoring interval must be positive");
+        }
+
+        if (testDuration != null && (testDuration.isZero() || testDuration.isNegative())) {
+            throw new IllegalArgumentException("Test duration must be positive");
+        }
+
+        if (testParameters == null) {
+            throw new IllegalArgumentException("Test parameters cannot be null");
         }
 
         if (databaseConfig != null) {
@@ -163,6 +175,32 @@ public class PerformanceTestConfig {
 
         if (config.getQueryTimeoutSeconds() <= 0) {
             throw new IllegalArgumentException("Query timeout must be positive");
+        }
+
+        validateTableConfig("sourceTable", config.getSourceTable());
+        validateTableConfig("targetTable", config.getTargetTable());
+    }
+
+    /**
+     * Validate optional table configuration.
+     */
+    private void validateTableConfig(String name, TableConfig config) {
+        if (config == null) {
+            return;
+        }
+        if (config.getTableName() == null || config.getTableName().trim().isEmpty()) {
+            throw new IllegalArgumentException(name + ".tableName cannot be null or empty");
+        }
+        if (config.getKeyColumns() == null || config.getKeyColumns().length == 0) {
+            throw new IllegalArgumentException(name + ".keyColumns cannot be empty");
+        }
+        for (String keyColumn : config.getKeyColumns()) {
+            if (keyColumn == null || keyColumn.trim().isEmpty()) {
+                throw new IllegalArgumentException(name + ".keyColumns cannot contain blank values");
+            }
+        }
+        if (config.getRowLimit() < 0) {
+            throw new IllegalArgumentException(name + ".rowLimit cannot be negative");
         }
     }
 }

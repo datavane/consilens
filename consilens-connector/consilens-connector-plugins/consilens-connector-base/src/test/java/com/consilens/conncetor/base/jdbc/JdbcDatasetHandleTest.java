@@ -83,6 +83,8 @@ class JdbcDatasetHandleTest {
                 ReadOptions.builder().build());
 
         assertEquals("sql", handle.getMetadata().getAttributes().get("resourceType"));
+        assertTrue(handle.getMetadata().getCapabilities().supports(ConnectorCapability.SERVER_SIDE_HASH));
+        assertFalse(handle.getMetadata().getCapabilities().supports(ConnectorCapability.SERVER_SIDE_JOIN));
         assertEquals("SELECT id FROM orders", handle.getMetadata().getLogicalName());
     }
 

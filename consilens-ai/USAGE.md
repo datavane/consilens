@@ -32,6 +32,22 @@ String response = engine.chat(
 System.out.println(response);
 ```
 
+Cloud backend examples:
+
+```java
+LLMBackend openai = new OpenAIBackend(
+    "https://api.openai.com/v1",
+    "gpt-4.1-mini",
+    System.getenv("OPENAI_API_KEY")
+);
+
+LLMBackend deepseek = new DeepSeekBackend(
+    "https://api.deepseek.com",
+    "deepseek-chat",
+    System.getenv("DEEPSEEK_API_KEY")
+);
+```
+
 ## Common Use Cases
 
 ### 1. Compare Two Database Tables
@@ -298,6 +314,8 @@ The system validates and sanitizes all inputs:
 The system is running in fallback mode. Either:
 - Start an Ollama server: `ollama serve`
 - Configure an OllamaBackend with correct URL
+- Set `OPENAI_API_KEY` and configure OpenAIBackend
+- Set `DEEPSEEK_API_KEY` and configure DeepSeekBackend
 - Or intentionally use NoopBackend for rule-based only
 
 ### "Unknown tool: consilens_diff"

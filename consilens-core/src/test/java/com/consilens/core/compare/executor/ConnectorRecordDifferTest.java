@@ -101,6 +101,103 @@ class ConnectorRecordDifferTest {
     }
 
     @Test
+    void shouldIgnoreKnownDerivedChecksumColumnsWhenFieldsAreNotExplicit() {
+        SchemaDescriptor schema = schema(List.of(
+                "id",
+                "value",
+                "checksum",
+                "row_checksum",
+                "record_checksum",
+                "record_hash",
+                "row_md5",
+                "consilens_checksum",
+                "consilens_row_hash"));
+        CompareSegment source = segment("source_orders", schema, null,
+                List.of(record(Map.of(
+                        "id", "1",
+                        "value", "A",
+                        "checksum", "source-checksum",
+                        "row_checksum", "source-row-checksum",
+                        "record_checksum", "source-record-checksum",
+                        "record_hash", "source-record-hash",
+                        "row_md5", "source-md5",
+                        "consilens_checksum", "source-consilens-checksum",
+                        "consilens_row_hash", "source-consilens-row-hash"))));
+        CompareSegment target = segment("target_orders", schema, null,
+                List.of(record(Map.of(
+                        "id", "1",
+                        "value", "A",
+                        "checksum", "target-checksum",
+                        "row_checksum", "target-row-checksum",
+                        "record_checksum", "target-record-checksum",
+                        "record_hash", "target-record-hash",
+                        "row_md5", "target-md5",
+                        "consilens_checksum", "target-consilens-checksum",
+                        "consilens_row_hash", "target-consilens-row-hash"))));
+
+        DiffResult result = new ConnectorRecordDiffer().diff(
+                source,
+                target,
+                CompareExecutionSettings.builder()
+                        .validateUniqueKeys(true)
+                        .build());
+
+        assertEquals(0L, result.getStatistics().getTotalDifferences());
+        assertEquals(0, result.getDifferences().size());
+    }
+
+    @Test
+    void shouldCompareDerivedHashColumnsWhenFieldsAreExplicit() {
+        SchemaDescriptor schema = schema(List.of("id", "value", "row_hash"));
+        CompareSegment source = segment("source_orders", schema,
+                ComparisonSpec.builder().fields(List.of("row_hash")).build(),
+                List.of(record(Map.of("id", "1", "value", "A", "row_hash", "mysql-hash"))));
+        CompareSegment target = segment("target_orders", schema,
+                ComparisonSpec.builder().fields(List.of("row_hash")).build(),
+                List.of(record(Map.of("id", "1", "value", "A", "row_hash", "postgres-hash"))));
+
+        DiffResult result = new ConnectorRecordDiffer().diff(
+                source,
+                target,
+                CompareExecutionSettings.builder()
+                        .validateUniqueKeys(true)
+                        .build());
+
+        assertEquals(1L, result.getStatistics().getMismatchCount());
+        assertEquals(1L, result.getStatistics().getTotalDifferences());
+        assertEquals(List.of("row_hash"), result.getDifferences().get(0).getChangedColumns1());
+        assertEquals(List.of("row_hash"), result.getDifferences().get(0).getChangedColumns2());
+    }
+
+    @Test
+    void shouldAllowDuplicateKeysWhenValidationIsDisabled() {
+        CompareSegment source = segment("source_orders", List.of(record("1", "A"), record("1", "B")));
+        CompareSegment target = segment("target_orders", List.of(record("1", "A")));
+
+        DiffResult result = new ConnectorRecordDiffer().diff(
+                source,
+                target,
+                CompareExecutionSettings.builder()
+                        .validateUniqueKeys(false)
+                        .build());
+
+        assertEquals(3L, result.getStatistics().getTotalDifferences());
+    }
+
+    @Test
+    void shouldFailOnDuplicateKeysWhenValidationIsEnabled() {
+        CompareSegment source = segment("source_orders", List.of(record("1", "A"), record("1", "B")));
+        CompareSegment target = segment("target_orders", List.of(record("1", "A")));
+
+        assertThrows(com.consilens.connector.api.ConnectorException.class, () -> new ConnectorRecordDiffer().diff(
+                source,
+                target,
+                CompareExecutionSettings.builder()
+                        .validateUniqueKeys(true)
+                        .build()));
+    }
+
+    @Test
     void shouldFailWhenDiffCountExceedsConfiguredLimit() {
         CompareSegment source = segment("source_orders", List.of(record("1", "A"), record("2", "B")));
         CompareSegment target = segment("target_orders", List.of());

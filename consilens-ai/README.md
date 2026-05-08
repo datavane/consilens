@@ -71,7 +71,9 @@ consilens-ai/
 │   ├── consilens-ai-llm-api/
 │   └── consilens-ai-llm-plugins/
 │       ├── consilens-ai-llm-noop/
-│       └── consilens-ai-llm-ollama/
+│       ├── consilens-ai-llm-ollama/
+│       ├── consilens-ai-llm-openai/
+│       └── consilens-ai-llm-deepseek/
 └── consilens-ai-tool/          # Tool system
     ├── consilens-ai-tool-api/
     └── consilens-ai-tool-plugins/consilens-ai-tool-defaults/
@@ -122,6 +124,16 @@ The built-in rule-based analyzer detects:
 Configure Ollama (local LLM):
 ```java
 LLMBackend backend = new OllamaBackend("http://localhost:11434");
+```
+
+Configure OpenAI:
+```java
+LLMBackend backend = new OpenAIBackend("https://api.openai.com/v1", "gpt-4.1-mini", System.getenv("OPENAI_API_KEY"));
+```
+
+Configure DeepSeek:
+```java
+LLMBackend backend = new DeepSeekBackend("https://api.deepseek.com", "deepseek-chat", System.getenv("DEEPSEEK_API_KEY"));
 ```
 
 Or use no-op backend (fallback to rule-based):

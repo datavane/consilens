@@ -14,6 +14,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 public class AdaptiveThreadPoolExecutor {
 
     private final ThreadPoolExecutor executor;
+    private final ScheduledExecutorService monitorExecutor;
     private final AtomicInteger activeTasks = new AtomicInteger(0);
     private final AtomicInteger submittedTasks = new AtomicInteger(0);
     private final AtomicInteger completedTasks = new AtomicInteger(0);
@@ -31,11 +32,13 @@ public class AdaptiveThreadPoolExecutor {
     private volatile long lastOptimizationCheck;
 
     public AdaptiveThreadPoolExecutor(int minPoolSize, int maxPoolSize, long keepAliveTime, TimeUnit timeUnit) {
+        validateConfiguration(minPoolSize, maxPoolSize, keepAliveTime, timeUnit);
         this.minPoolSize = minPoolSize;
         this.maxPoolSize = maxPoolSize;
         this.keepAliveTime = keepAliveTime;
         this.timeUnit = timeUnit;
         this.workQueue = new LinkedBlockingQueue<>();
+        this.monitorExecutor = createMonitorExecutor();
 
         this.executor = createThreadPool();
         this.lastAdjustmentTime = System.currentTimeMillis();
@@ -61,7 +64,7 @@ public class AdaptiveThreadPoolExecutor {
      */
     private ThreadPoolExecutor createThreadPool() {
         ThreadFactory threadFactory = new AdaptiveThreadFactory();
-        RejectedExecutionHandler rejectedHandler = new AdaptiveRejectedExecutionHandler();
+        RejectedExecutionHandler rejectedHandler = new AdaptiveRejectedExecutionHandler(rejectedTasks);
 
         ThreadPoolExecutor executor = new ThreadPoolExecutor(
                 minPoolSize,
@@ -79,10 +82,42 @@ public class AdaptiveThreadPoolExecutor {
         return executor;
     }
 
+    private ScheduledExecutorService createMonitorExecutor() {
+        return Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread t = new Thread(r, "ThreadPoolMonitor");
+            t.setDaemon(true);
+            return t;
+        });
+    }
+
+    private void validateConfiguration(int minPoolSize, int maxPoolSize, long keepAliveTime, TimeUnit timeUnit) {
+        if (minPoolSize <= 0) {
+            throw new IllegalArgumentException("minPoolSize must be positive");
+        }
+        if (maxPoolSize < minPoolSize) {
+            throw new IllegalArgumentException("maxPoolSize must be greater than or equal to minPoolSize");
+        }
+        if (keepAliveTime < 0) {
+            throw new IllegalArgumentException("keepAliveTime cannot be negative");
+        }
+        if (timeUnit == null) {
+            throw new IllegalArgumentException("timeUnit cannot be null");
+        }
+    }
+
     /**
      * Submit task with performance tracking.
      */
     public <T> CompletableFuture<T> submit(Callable<T> task) {
+        if (task == null) {
+            throw new IllegalArgumentException("task cannot be null");
+        }
+        if (executor.isShutdown()) {
+            rejectedTasks.incrementAndGet();
+            CompletableFuture<T> rejected = new CompletableFuture<>();
+            rejected.completeExceptionally(new RejectedExecutionException("Executor has been shut down"));
+            return rejected;
+        }
         submittedTasks.incrementAndGet();
         activeTasks.incrementAndGet();
 
@@ -125,6 +160,12 @@ public class AdaptiveThreadPoolExecutor {
      * Execute task with timeout.
      */
     public <T> CompletableFuture<T> submitWithTimeout(Callable<T> task, long timeout, TimeUnit unit) {
+        if (timeout <= 0) {
+            throw new IllegalArgumentException("timeout must be positive");
+        }
+        if (unit == null) {
+            throw new IllegalArgumentException("unit cannot be null");
+        }
         CompletableFuture<T> future = submit(task);
         return future.orTimeout(timeout, unit);
     }
@@ -176,13 +217,7 @@ public class AdaptiveThreadPoolExecutor {
      * Start performance monitoring.
      */
     private void startPerformanceMonitoring() {
-        ScheduledExecutorService monitor = Executors.newSingleThreadScheduledExecutor(r -> {
-            Thread t = new Thread(r, "ThreadPoolMonitor");
-            t.setDaemon(true);
-            return t;
-        });
-
-        monitor.scheduleAtFixedRate(this::logPerformanceMetrics, 1, 1, TimeUnit.MINUTES);
+        monitorExecutor.scheduleAtFixedRate(this::logPerformanceMetrics, 1, 1, TimeUnit.MINUTES);
     }
 
     /**
@@ -221,15 +256,16 @@ public class AdaptiveThreadPoolExecutor {
 
         // High average execution time
         if (avgExecutionMs > 1000) { // More than 1 second
-            log.warn("High average execution time ({:.2f}ms). Check for blocking operations.", avgExecutionMs);
+            log.warn("High average execution time ({}ms). Check for blocking operations.",
+                    String.format("%.2f", avgExecutionMs));
         }
 
         // High rejection rate
         long rejected = rejectedTasks.get();
         long submitted = submittedTasks.get();
         if (submitted > 100 && (double) rejected / submitted > 0.01) { // More than 1% rejection rate
-            log.warn("High rejection rate ({}/{} = {:.2f}%). Consider increasing max pool size.",
-                    rejected, submitted, (double) rejected / submitted * 100);
+            log.warn("High rejection rate ({}/{} = {}%). Consider increasing max pool size.",
+                    rejected, submitted, String.format("%.2f", (double) rejected / submitted * 100));
         }
     }
 
@@ -301,6 +337,7 @@ public class AdaptiveThreadPoolExecutor {
      */
     public void shutdown() {
         log.info("Shutting down adaptive thread pool executor");
+        monitorExecutor.shutdownNow();
         executor.shutdown();
         try {
             if (!executor.awaitTermination(30, TimeUnit.SECONDS)) {
@@ -311,6 +348,10 @@ public class AdaptiveThreadPoolExecutor {
             Thread.currentThread().interrupt();
             executor.shutdownNow();
         }
+    }
+
+    public boolean isShutdown() {
+        return executor.isShutdown() && monitorExecutor.isShutdown();
     }
 
     /**
@@ -339,11 +380,18 @@ public class AdaptiveThreadPoolExecutor {
      * Custom rejected execution handler.
      */
     private static class AdaptiveRejectedExecutionHandler implements RejectedExecutionHandler {
-        private final AtomicInteger rejectedCount = new AtomicInteger(0);
+        private final AtomicInteger rejectedCount;
+
+        private AdaptiveRejectedExecutionHandler(AtomicInteger rejectedCount) {
+            this.rejectedCount = rejectedCount;
+        }
 
         @Override
         public void rejectedExecution(Runnable r, ThreadPoolExecutor executor) {
             int count = rejectedCount.incrementAndGet();
+            if (executor.isShutdown()) {
+                throw new RejectedExecutionException("Task rejected because executor is shut down");
+            }
             log.warn("Task rejected (count: {}). Pool size: {}, Queue size: {}, Active: {}",
                     count, executor.getPoolSize(), executor.getQueue().size(), executor.getActiveCount());
 

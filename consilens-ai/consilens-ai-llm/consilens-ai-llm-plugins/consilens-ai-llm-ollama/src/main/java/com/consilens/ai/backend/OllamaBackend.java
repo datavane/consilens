@@ -4,6 +4,7 @@ import com.consilens.ai.model.BackendInfo;
 import com.consilens.ai.model.ChatMessage;
 import com.consilens.ai.model.FunctionDefinition;
 import com.consilens.ai.model.LLMResponse;
+import com.consilens.ai.http.HttpLLMClient;
 import com.consilens.ai.spi.LLMBackend;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
