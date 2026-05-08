@@ -28,6 +28,33 @@ mvn clean install -pl consilens-ai -am
 
 ### Basic Usage
 
+Production-oriented CLI entrypoint:
+
+```bash
+consilens ai config "compare mysql users with postgresql users by id" \
+  --no-llm \
+  --source-type mysql \
+  --source-url jdbc:mysql://localhost:3306/mydb \
+  --source-table users \
+  --source-user-env MYSQL_USER \
+  --source-password-env MYSQL_PASSWORD \
+  --target-type postgresql \
+  --target-url jdbc:postgresql://localhost:5432/mydb \
+  --target-table users \
+  --target-user-env PG_USER \
+  --target-password-env PG_PASSWORD \
+  --keys id \
+  --fields name,email,status \
+  --output diff.yaml
+
+consilens ai explain -c diff.yaml
+consilens diff --dry-run -c diff.yaml
+```
+
+The CLI path generates canonical Consilens YAML and validates it with the existing engine model. AI does not execute a real diff directly.
+
+SDK/chat usage:
+
 ```java
 // Initialize components
 SessionContext session = SessionContext.builder()
@@ -83,6 +110,8 @@ consilens-ai/
 
 ### DiffTool
 Compares two database tables via JDBC and identifies all differences.
+
+This tool is intended for SDK/demo usage. Production CLI flows should generate a YAML config and execute through `DiffService` / `DefaultCompareRuntime`.
 
 **Example**: "Compare the orders table between production and staging"
 

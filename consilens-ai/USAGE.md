@@ -2,6 +2,31 @@
 
 ## Quick Start
 
+### Production CLI Flow
+
+```bash
+consilens ai config "compare users from mysql to postgresql by id" \
+  --no-llm \
+  --source-type mysql \
+  --source-url jdbc:mysql://localhost:3306/mydb \
+  --source-table users \
+  --source-user-env MYSQL_USER \
+  --source-password-env MYSQL_PASSWORD \
+  --target-type postgresql \
+  --target-url jdbc:postgresql://localhost:5432/mydb \
+  --target-table users \
+  --target-user-env PG_USER \
+  --target-password-env PG_PASSWORD \
+  --keys id \
+  --fields name,email,status \
+  --output diff.yaml
+
+consilens ai explain -c diff.yaml
+consilens diff --dry-run -c diff.yaml
+```
+
+For cloud LLMs, set `--backend openai` with `OPENAI_API_KEY`, or `--backend deepseek` with `DEEPSEEK_API_KEY`. The AI command produces structured configuration; real diff execution still goes through the existing deterministic engine.
+
 ### Basic Conversation
 
 ```java
@@ -55,12 +80,14 @@ LLMBackend deepseek = new DeepSeekBackend(
 ```
 User: "Compare the 'users' table between production and staging"
 
-Response: The AI will:
+SDK/demo response: The AI will:
 1. Ask for connection details (URLs, credentials)
 2. Execute the diff using DiffTool
 3. Report the number of differences found
 4. Store the diff result for further analysis
 ```
+
+For production CLI usage, prefer `consilens ai config` followed by `consilens diff --dry-run` and `consilens diff`.
 
 **Tool Input Schema** (DiffTool):
 ```json

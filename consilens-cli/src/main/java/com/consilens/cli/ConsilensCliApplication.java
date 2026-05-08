@@ -1,5 +1,6 @@
 package com.consilens.cli;
 
+import com.consilens.cli.command.AiCommand;
 import com.consilens.cli.command.ConfigCommand;
 import com.consilens.cli.command.DiffCommand;
 
@@ -15,6 +16,7 @@ import picocli.CommandLine.Command;
  * <ul>
  *   <li>{@code diff} - Perform data comparison between databases</li>
  *   <li>{@code config} - Configuration management (generate, validate)</li>
+ *   <li>{@code ai} - AI-assisted configuration and explanation</li>
  * </ul>
  */
 @Slf4j
@@ -23,11 +25,12 @@ import picocli.CommandLine.Command;
     version = "consilens CLI version 0.1-SNAPSHOT",
     description = "Cross-Database Data Comparison Tool",
     mixinStandardHelpOptions = true,
-    subcommands = {
-        DiffCommand.class,
-        ConfigCommand.class
-    }
-)
+	    subcommands = {
+	        DiffCommand.class,
+	        ConfigCommand.class,
+	        AiCommand.class
+	    }
+	)
 public class ConsilensCliApplication implements Runnable {
 
     public static void main(String[] args) {

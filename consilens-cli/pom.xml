@@ -40,6 +40,42 @@
             <artifactId>consilens-sink-all</artifactId>
         </dependency>
 
+        <dependency>
+            <groupId>com.consilens</groupId>
+            <artifactId>consilens-ai-core</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>com.consilens</groupId>
+            <artifactId>consilens-ai-llm-api</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>com.consilens</groupId>
+            <artifactId>consilens-ai-llm-noop</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>com.consilens</groupId>
+            <artifactId>consilens-ai-llm-ollama</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>com.consilens</groupId>
+            <artifactId>consilens-ai-llm-openai</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>com.consilens</groupId>
+            <artifactId>consilens-ai-llm-deepseek</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+
         <!-- CLI -->
         <dependency>
             <groupId>info.picocli</groupId>

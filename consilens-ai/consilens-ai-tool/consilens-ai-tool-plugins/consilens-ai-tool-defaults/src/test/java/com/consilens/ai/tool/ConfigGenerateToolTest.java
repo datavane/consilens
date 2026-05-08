@@ -39,8 +39,14 @@ class ConfigGenerateToolTest {
         assertThat(result.isSuccess()).isTrue();
         assertThat(result.getContent()).contains("source:");
         assertThat(result.getContent()).contains("target:");
-        assertThat(result.getContent()).contains("comparisons:");
-        assertThat(result.getContent()).contains("primary_keys:");
+        assertThat(result.getContent()).contains("connection:");
+        assertThat(result.getContent()).contains("resource:");
+        assertThat(result.getContent()).contains("comparison:");
+        assertThat(result.getContent()).contains("keys:");
+        assertThat(result.getContent()).contains("strategy:");
+        assertThat(result.getContent()).contains("result:");
+        assertThat(result.getContent()).doesNotContain("comparisons:");
+        assertThat(result.getContent()).doesNotContain("primary_keys:");
         assertThat(result.getContent()).contains("id");
     }
 
