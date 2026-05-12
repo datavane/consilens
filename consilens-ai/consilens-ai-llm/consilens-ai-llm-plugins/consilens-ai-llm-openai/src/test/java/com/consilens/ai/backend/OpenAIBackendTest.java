@@ -10,6 +10,7 @@ import okhttp3.mockwebserver.MockWebServer;
 import okhttp3.mockwebserver.RecordedRequest;
 import org.junit.jupiter.api.Test;
 
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 
@@ -48,7 +49,8 @@ class OpenAIBackendTest {
                     .addHeader("Content-Type", "application/json"));
             server.start();
 
-            OpenAIBackend backend = new OpenAIBackend(server.url("/v1").toString().replaceAll("/$", ""), "test-model", "test-key");
+            OpenAIBackend backend = new OpenAIBackend(server.url("/v1").toString().replaceAll("/$", ""),
+                    "test-model", "test-key", Duration.ofSeconds(5), 0.2, 256);
             FunctionDefinition function = FunctionDefinition.builder()
                     .name("consilens_config_generate")
                     .description("Generate config")
@@ -62,6 +64,8 @@ class OpenAIBackendTest {
             assertThat(request.getPath()).isEqualTo("/v1/chat/completions");
             assertThat(request.getHeader("Authorization")).isEqualTo("Bearer test-key");
             assertThat(requestBody.path("model").asText()).isEqualTo("test-model");
+            assertThat(requestBody.path("temperature").asDouble()).isEqualTo(0.2);
+            assertThat(requestBody.path("max_tokens").asInt()).isEqualTo(256);
             assertThat(requestBody.path("messages").get(0).path("role").asText()).isEqualTo("system");
             assertThat(requestBody.path("messages").get(1).path("content").asText()).isEqualTo("generate config");
             assertThat(requestBody.path("tools").get(0).path("function").path("name").asText()).isEqualTo("consilens_config_generate");
@@ -85,7 +89,10 @@ class OpenAIBackendTest {
         assertThat(provider.create(Map.of(
                 "baseUrl", "http://localhost",
                 "model", "openai-model",
-                "apiKey", "key"
+                "apiKey", "key",
+                "timeout", "5s",
+                "temperature", 0.1,
+                "maxTokens", 128
         )).info().getModel()).isEqualTo("openai-model");
     }
 

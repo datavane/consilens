@@ -43,11 +43,14 @@ class AiConfigCommandTest {
         assertTrue(Files.exists(output));
         String yaml = Files.readString(output);
         assertTrue(yaml.contains("connection:"));
+        assertTrue(yaml.contains("diff-record"));
+        assertTrue(yaml.contains("./diff-records.json"));
         assertFalse(yaml.contains("comparisons:"));
 
         CliConfiguration config = new ObjectMapper(new YAMLFactory()).readValue(output.toFile(), CliConfiguration.class);
         assertEquals("mysql", config.getSource().getType());
         assertEquals("id", config.getComparison().getKeys().getSource().get(0));
+        assertEquals(2, config.getResult().getSinks().size());
     }
 
     @Test

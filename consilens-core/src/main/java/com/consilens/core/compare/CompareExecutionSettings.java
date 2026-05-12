@@ -64,6 +64,22 @@ public class CompareExecutionSettings {
                 maxDifferences);
     }
 
+    public CompareExecutionSettings withChecksumAlgorithm(ChecksumAlgorithm checksumAlgorithm) {
+        if (this.checksumAlgorithm == checksumAlgorithm) {
+            return this;
+        }
+        return CompareExecutionSettings.builder()
+                .bisectionFactor(bisectionFactor)
+                .bisectionThreshold(bisectionThreshold)
+                .enableProfiling(enableProfiling)
+                .checksumAlgorithm(checksumAlgorithm)
+                .localCompareMode(localCompareMode)
+                .concurrencyConfig(concurrencyConfig)
+                .validateUniqueKeys(validateUniqueKeys)
+                .maxDifferences(maxDifferences)
+                .build();
+    }
+
     private static ConcurrencyConfig resolveConcurrencyConfig(Map<String, Object> attributes) {
         if (attributes != null) {
             Object value = attributes.get("concurrencyConfig");

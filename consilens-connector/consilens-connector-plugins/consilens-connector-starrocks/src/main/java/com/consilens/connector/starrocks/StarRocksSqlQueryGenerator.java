@@ -1,5 +1,6 @@
 package com.consilens.connector.starrocks;
 
+import com.consilens.common.enums.ChecksumAlgorithm;
 import com.consilens.connector.api.CapabilityProvider;
 import com.consilens.connector.api.DataTypeHandler;
 import com.consilens.conncetor.base.BaseSqlQueryGenerator;
@@ -54,6 +55,25 @@ public class StarRocksSqlQueryGenerator extends BaseSqlQueryGenerator {
             List<String> keyColumns,
             List<String> columns,
             Map<String, DataType> columnDataTypes,
+            String whereClause,
+            ChecksumAlgorithm checksumAlgorithm) {
+        if (checksumAlgorithm != null && checksumAlgorithm.isXor()) {
+            return getChecksumSQLWithXor(schemaName, tableName, keyColumns, columns, columnDataTypes, whereClause);
+        }
+        return getChecksumSQLWithConcat(schemaName, tableName, keyColumns, columns, columnDataTypes, whereClause);
+    }
+
+    @Override
+    public boolean supportsChecksumAlgorithm(ChecksumAlgorithm checksumAlgorithm) {
+        return checksumAlgorithm == null
+                || checksumAlgorithm == ChecksumAlgorithm.CONCAT
+                || checksumAlgorithm.isXor();
+    }
+
+    private String getChecksumSQLWithConcat(String schemaName, String tableName,
+            List<String> keyColumns,
+            List<String> columns,
+            Map<String, DataType> columnDataTypes,
             String whereClause) {
         StringBuilder sql = new StringBuilder();
         sql.append("SELECT COUNT(*) as row_count, ");
@@ -98,6 +118,65 @@ public class StarRocksSqlQueryGenerator extends BaseSqlQueryGenerator {
             sql.append(") AS data");
         }
 
+        return sql.toString();
+    }
+
+    private String getChecksumSQLWithXor(String schemaName, String tableName,
+            List<String> keyColumns,
+            List<String> columns,
+            Map<String, DataType> columnDataTypes,
+            String whereClause) {
+        StringBuilder sql = new StringBuilder();
+        sql.append("SELECT COUNT(*) as row_count, ");
+
+        if (columns.isEmpty()) {
+            sql.append("'0' as checksum ");
+        } else {
+            sql.append("CASE WHEN COUNT(*) = 0 THEN '0' ELSE CONCAT(");
+            for (int i = 1; i <= 16; i++) {
+                if (i > 1) {
+                    sql.append(", ");
+                }
+                sql.append(buildXorHexDigitExpression(i));
+            }
+            sql.append(") END as checksum ");
+            sql.append("FROM (SELECT UPPER(SUBSTRING(MD5(CONCAT_WS('|', ");
+            for (int i = 0; i < columns.size(); i++) {
+                if (i > 0) {
+                    sql.append(", ");
+                }
+                String col = columns.get(i);
+                DataType dataType = columnDataTypes.get(col);
+                sql.append(dataTypeHandler.normalizeColumn(col, dataType));
+            }
+            sql.append(")), 1, 16)) as row_hash FROM ");
+            sql.append(buildRelationRef(schemaName, tableName));
+            if (whereClause != null && !whereClause.trim().isEmpty()) {
+                sql.append(" WHERE ").append(whereClause);
+            }
+            sql.append(") AS data");
+        }
+
+        return sql.toString();
+    }
+
+    private String buildXorHexDigitExpression(int position) {
+        String nibbleValue = "CAST(CONV(SUBSTRING(row_hash, " + position + ", 1), 16, 10) AS BIGINT)";
+        StringBuilder sql = new StringBuilder("UPPER(CONV(");
+        int[] masks = {1, 2, 4, 8};
+        for (int i = 0; i < masks.length; i++) {
+            if (i > 0) {
+                sql.append(" + ");
+            }
+            int mask = masks[i];
+            sql.append("MOD(SUM(MOD(FLOOR(")
+                    .append(nibbleValue)
+                    .append(" / ")
+                    .append(mask)
+                    .append("), 2)), 2) * ")
+                    .append(mask);
+        }
+        sql.append(", 10, 16))");
         return sql.toString();
     }
 

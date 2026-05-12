@@ -2,32 +2,26 @@ package com.consilens.cli.config;
 
 import com.consilens.cli.model.CliConfiguration;
 import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.ValueSource;
+import org.junit.jupiter.params.provider.MethodSource;
 
+import java.io.IOException;
+import java.nio.file.Files;
 import java.util.HashMap;
+import java.util.stream.Collectors;
 import java.util.Map;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.List;
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 class ExampleConfigurationCompatibilityTest {
 
-    @ParameterizedTest
-    @ValueSource(strings = {
-            "examples/minimal-mysql-to-pg.yaml",
-            "examples/same-db-mysql-comparison.yaml",
-            "examples/large-table-mysql-to-starrocks.yaml",
-            "examples/performance-test-mysql-vs-postgres.yaml",
-            "examples/performance-test-mysql-vs-starrocks.yaml",
-            "examples/custom-sql-mysql-vs-postgres-checksum.yaml",
-            "examples/mysql-to-doris-partitioned-checksum.yaml",
-            "examples/detail-to-aggregate-custom-sql.yaml",
-            "examples/performance-test-mysql-vs-postgres.json"
-    })
-    void shouldLoadExampleConfigurations(String relativePath) throws Exception {
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("exampleConfigurationPaths")
+    void shouldLoadExampleConfigurations(Path configPath) throws Exception {
         ConfigurationManager configurationManager = new ConfigurationManager(testEnvironment());
-        Path configPath = Paths.get("..", relativePath).toAbsolutePath().normalize();
 
         CliConfiguration config = configurationManager.loadConfiguration(configPath.toString(), false);
 
@@ -38,6 +32,24 @@ class ExampleConfigurationCompatibilityTest {
         assertNotNull(config.getTarget().getResource());
         assertNotNull(config.getComparison());
         assertNotNull(config.getComparison().getKeys());
+    }
+
+    private static Stream<Path> exampleConfigurationPaths() throws IOException {
+        Path examplesDirectory = Paths.get("..", "examples").toAbsolutePath().normalize();
+        List<Path> paths;
+        try (Stream<Path> stream = Files.list(examplesDirectory)) {
+            paths = stream
+                    .filter(Files::isRegularFile)
+                    .filter(path -> {
+                        String fileName = path.getFileName().toString();
+                        return fileName.endsWith(".yaml")
+                                || fileName.endsWith(".yml")
+                                || fileName.endsWith(".json");
+                    })
+                    .sorted()
+                    .collect(Collectors.toList());
+        }
+        return paths.stream();
     }
 
     private Map<String, String> testEnvironment() {

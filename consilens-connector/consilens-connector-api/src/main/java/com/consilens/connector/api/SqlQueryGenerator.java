@@ -168,6 +168,13 @@ public interface SqlQueryGenerator {
         }
 
         /**
+         * Returns whether the generator can build checksum SQL for the given algorithm.
+         */
+        default boolean supportsChecksumAlgorithm(ChecksumAlgorithm checksumAlgorithm) {
+                return checksumAlgorithm == null || !checksumAlgorithm.isXor();
+        }
+
+        /**
          * Generate SQL for calculating checksum/hash of table data (backward compatibility).
          * Uses CONCAT algorithm by default.
          *

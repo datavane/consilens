@@ -25,11 +25,25 @@ public class HttpLLMClient {
     private final ObjectMapper objectMapper;
 
     public HttpLLMClient() {
-        this.client = new OkHttpClient.Builder()
-                .connectTimeout(Duration.ofSeconds(10))
-                .readTimeout(Duration.ofSeconds(120))
-                .writeTimeout(Duration.ofSeconds(30))
-                .build();
+        this(Duration.ofSeconds(10), Duration.ofSeconds(120), Duration.ofSeconds(30), null);
+    }
+
+    public HttpLLMClient(Duration timeout) {
+        this(timeout != null ? timeout : Duration.ofSeconds(10),
+                timeout != null ? timeout : Duration.ofSeconds(120),
+                timeout != null ? timeout : Duration.ofSeconds(30),
+                timeout);
+    }
+
+    private HttpLLMClient(Duration connectTimeout, Duration readTimeout, Duration writeTimeout, Duration callTimeout) {
+        OkHttpClient.Builder builder = new OkHttpClient.Builder()
+                .connectTimeout(connectTimeout)
+                .readTimeout(readTimeout)
+                .writeTimeout(writeTimeout);
+        if (callTimeout != null) {
+            builder.callTimeout(callTimeout);
+        }
+        this.client = builder.build();
         this.objectMapper = new ObjectMapper();
     }
 

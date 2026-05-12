@@ -3,13 +3,13 @@
     "type": "mysql",
     "name": "source-mysql",
     "connection": {
-      "url": "jdbc:mysql://localhost:3306/test",
+      "url": "jdbc:mysql://localhost:3306/consilens_demo",
       "username": "${env.MYSQL_USER}",
       "password": "${env.MYSQL_PASSWORD}"
     },
     "resource": {
       "type": "table",
-      "name": "performance_test_table"
+      "name": "consilens_performance_demo_table"
     }
   },
   "target": {
@@ -22,7 +22,7 @@
     },
     "resource": {
       "type": "table",
-      "name": "performance_test_table"
+      "name": "consilens_performance_demo_table"
     }
   },
   "comparison": {
@@ -158,7 +158,7 @@
         "type": "result",
         "properties": {
           "type": "mysql",
-          "url": "jdbc:mysql://localhost:3306/test?useUnicode=true&characterEncoding=UTF-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true",
+          "url": "jdbc:mysql://localhost:3306/diff_results?useUnicode=true&characterEncoding=UTF-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true",
           "username": "${env.MYSQL_USER}",
           "password": "${env.MYSQL_PASSWORD}",
           "driver": "com.mysql.cj.jdbc.Driver",
@@ -213,7 +213,7 @@
         "type": "result",
         "properties": {
           "type": "mysql",
-          "url": "jdbc:mysql://localhost:3306/test?useUnicode=true&characterEncoding=UTF-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true",
+          "url": "jdbc:mysql://localhost:3306/diff_results?useUnicode=true&characterEncoding=UTF-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true",
           "username": "${env.MYSQL_USER}",
           "password": "${env.MYSQL_PASSWORD}",
           "driver": "com.mysql.cj.jdbc.Driver",
@@ -268,17 +268,17 @@
             {
               "name": "database_name",
               "columnType": "varchar(128)",
-              "defaultValue": "test"
+              "defaultValue": "consilens_demo"
             },
             {
               "name": "table_name",
               "columnType": "varchar(128)",
-              "defaultValue": "test"
+              "defaultValue": "consilens_performance_demo_table"
             },
             {
               "name": "column_name",
               "columnType": "varchar(128)",
-              "defaultValue": "test"
+              "defaultValue": "record_id"
             },
             {
               "name": "actual_value",
@@ -343,7 +343,7 @@
         "type": "diff-record",
         "properties": {
           "type": "mysql",
-          "url": "jdbc:mysql://localhost:3306/test?useUnicode=true&characterEncoding=UTF-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true",
+          "url": "jdbc:mysql://localhost:3306/diff_results?useUnicode=true&characterEncoding=UTF-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true",
           "username": "${env.MYSQL_USER}",
           "password": "${env.MYSQL_PASSWORD}",
           "driver": "com.mysql.cj.jdbc.Driver",

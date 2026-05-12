@@ -44,10 +44,11 @@ public class AIConfigService {
         List<AIConfigIssue> issues = validator.validate(draft);
 
         AIBackendOptions backendOptions = request.getBackendOptions();
+        String backendName = backendResolver.resolveBackendName(backendOptions);
         if (validator.hasErrors(issues)
                 && backendOptions != null
                 && !backendOptions.isNoLlm()
-                && !"noop".equalsIgnoreCase(backendOptions.getBackend())) {
+                && !"noop".equalsIgnoreCase(backendName)) {
             draft = mergeExplicitHints(request, generateDraftWithLlm(request));
             issues = validator.validate(draft);
         }
@@ -116,6 +117,7 @@ public class AIConfigService {
                 + "  \"assumptions\": [],\n"
                 + "  \"warnings\": []\n"
                 + "}\n"
+                + "The compiler will also add a json diff-record evidence sink for diagnostics.\n"
                 + "User goal:\n"
                 + nullToEmpty(request.getGoal());
     }

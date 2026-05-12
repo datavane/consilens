@@ -13,7 +13,9 @@ import picocli.CommandLine.Command;
         AiConfigCommand.class,
         AiExplainCommand.class,
         AiDiagnoseCommand.class,
-        AiDiffCommand.class
+        AiDiffCommand.class,
+        AiProvidersCommand.class,
+        AiDoctorCommand.class
     }
 )
 public class AiCommand implements Runnable {

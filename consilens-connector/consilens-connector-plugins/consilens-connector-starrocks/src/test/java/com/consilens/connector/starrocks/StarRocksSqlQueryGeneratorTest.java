@@ -1,5 +1,6 @@
 package com.consilens.connector.starrocks;
 
+import com.consilens.common.enums.ChecksumAlgorithm;
 import com.consilens.connector.api.model.DataType;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -66,6 +67,28 @@ class StarRocksSqlQueryGeneratorTest {
         assertTrue(sql.contains("MD5(GROUP_CONCAT"));
         assertTrue(sql.contains("CONCAT_WS"));
         assertTrue(sql.contains("ORDER BY"));
+    }
+
+    @Test
+    void testSupportsChecksumAlgorithm() {
+        assertTrue(generator.supportsChecksumAlgorithm(ChecksumAlgorithm.CONCAT));
+        assertTrue(generator.supportsChecksumAlgorithm(ChecksumAlgorithm.XOR));
+    }
+
+    @Test
+    void testGetChecksumSQLWithXor() {
+        Map<String, DataType> types = new HashMap<>();
+        types.put("id", DataType.INTEGER);
+        types.put("name", DataType.VARCHAR);
+
+        String sql = generator.getChecksumSQL("test_db", "test_table",
+                Arrays.asList("id"), Arrays.asList("id", "name"), types, "id > 10", ChecksumAlgorithm.XOR);
+
+        assertTrue(sql.contains("CASE WHEN COUNT(*) = 0 THEN '0'"));
+        assertTrue(sql.contains("UPPER(SUBSTRING(MD5(CONCAT_WS('|',"));
+        assertTrue(sql.contains("CONV(SUBSTRING(row_hash, 1, 1), 16, 10)"));
+        assertTrue(sql.contains("CONCAT("));
+        assertTrue(sql.contains("WHERE id > 10"));
     }
 
     @Test

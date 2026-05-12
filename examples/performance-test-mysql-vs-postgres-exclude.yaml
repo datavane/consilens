@@ -1,5 +1,5 @@
 # 性能测试配置 - MySQL vs PostgreSQL 跨数据库比对
-# 表: performance_test_table
+# 表: consilens_performance_demo_table
 # 行数: 2,000,000
 # 列数: 50（所有列）
 
@@ -7,12 +7,12 @@ source:
   type: "mysql"
   name: source-mysql
   connection:
-    url: jdbc:mysql://localhost:3306/test
+    url: jdbc:mysql://localhost:3306/consilens_demo
     username: ${env.MYSQL_USER}
     password: ${env.MYSQL_PASSWORD}
   resource:
     type: table
-    name: performance_test_table
+    name: consilens_performance_demo_table
 
 target:
   type: postgresql
@@ -23,7 +23,7 @@ target:
     password: ${env.PG_PASSWORD}
   resource:
     type: table
-    name: performance_test_table
+    name: consilens_performance_demo_table
 
 comparison:
   keys:
@@ -159,7 +159,7 @@ result:
       type: result
       properties:
         type: mysql
-        url: jdbc:mysql://localhost:3306/test?useUnicode=true&characterEncoding=UTF-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+        url: jdbc:mysql://localhost:3306/diff_results?useUnicode=true&characterEncoding=UTF-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
         username: ${env.MYSQL_USER}
         password: ${env.MYSQL_PASSWORD}
         driver: com.mysql.cj.jdbc.Driver
@@ -196,7 +196,7 @@ result:
       type: result
       properties:
         type: mysql
-        url: jdbc:mysql://localhost:3306/test?useUnicode=true&characterEncoding=UTF-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+        url: jdbc:mysql://localhost:3306/diff_results?useUnicode=true&characterEncoding=UTF-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
         username: ${env.MYSQL_USER}
         password: ${env.MYSQL_PASSWORD}
         driver: com.mysql.cj.jdbc.Driver
@@ -234,13 +234,13 @@ result:
             defaultValue: ""
           - name: database_name
             columnType: varchar(128)
-            defaultValue: "test"
+            defaultValue: "consilens_demo"
           - name: table_name
             columnType: varchar(128)
-            defaultValue: "test"
+            defaultValue: "consilens_performance_demo_table"
           - name: column_name
             columnType: varchar(128)
-            defaultValue: "test"
+            defaultValue: "record_id"
           - name: actual_value
             value: ${totalDifferences}
             columnType: decimal(38,4)
@@ -278,7 +278,7 @@ result:
       type: diff-record
       properties:
         type: mysql
-        url: jdbc:mysql://localhost:3306/test?useUnicode=true&characterEncoding=UTF-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+        url: jdbc:mysql://localhost:3306/diff_results?useUnicode=true&characterEncoding=UTF-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
         username: ${env.MYSQL_USER}
         password: ${env.MYSQL_PASSWORD}
         driver: com.mysql.cj.jdbc.Driver

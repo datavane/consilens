@@ -1,5 +1,7 @@
 package com.consilens.ai.backend;
 
+import java.time.Duration;
+
 /**
  * OpenAI chat completion backend.
  */
@@ -14,6 +16,11 @@ public class OpenAIBackend extends AbstractOpenAICompatibleBackend {
 
     public OpenAIBackend(String baseUrl, String model, String apiKey) {
         super(baseUrl, model, apiKey);
+    }
+
+    public OpenAIBackend(String baseUrl, String model, String apiKey,
+                         Duration timeout, Double temperature, Integer maxTokens) {
+        super(baseUrl, model, apiKey, timeout, temperature, maxTokens);
     }
 
     @Override

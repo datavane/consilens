@@ -14,7 +14,7 @@
     <artifactId>consilens-cli</artifactId>
     <packaging>jar</packaging>
 
-    <name>consilens CLI</name>
+    <name>consilens cli</name>
     <description>Command-line interface for data diff operations</description>
 
     <dependencies>
@@ -43,6 +43,12 @@
         <dependency>
             <groupId>com.consilens</groupId>
             <artifactId>consilens-ai-core</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>com.consilens</groupId>
+            <artifactId>consilens-ai-analyzer-rulebased</artifactId>
             <version>${project.version}</version>
         </dependency>
 

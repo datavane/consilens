@@ -6,7 +6,7 @@ source:
   type: mysql
   name: source-mysql-custom-sql
   connection:
-    url: jdbc:mysql://localhost:3306/test
+    url: jdbc:mysql://localhost:3306/consilens_demo
     username: ${env.MYSQL_USER}
     password: ${env.MYSQL_PASSWORD}
   resource:
@@ -19,7 +19,7 @@ source:
         amount,
         status,
         updated_at
-      FROM performance_test_table
+      FROM consilens_performance_demo_table
 
 target:
   type: postgresql
@@ -38,7 +38,7 @@ target:
         amount,
         status,
         updated_at
-      FROM performance_test_table
+      FROM consilens_performance_demo_table
 
 comparison:
   keys:

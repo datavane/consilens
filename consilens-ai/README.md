@@ -49,9 +49,19 @@ consilens ai config "compare mysql users with postgresql users by id" \
 
 consilens ai explain -c diff.yaml
 consilens diff --dry-run -c diff.yaml
+consilens diff -c diff.yaml
+consilens ai diagnose --result diff-records.json --analyzer rulebased --output diagnose.md
+consilens ai providers
+consilens ai providers --format json
+consilens ai doctor --format json
 ```
 
 The CLI path generates canonical Consilens YAML and validates it with the existing engine model. AI does not execute a real diff directly.
+`ai diagnose` reads row-level diff evidence from a `json` `diff-record` sink; stats-only result files are not enough for pattern analysis.
+The analyzer is loaded via SPI. Use `--analyzer <name>` or `CONSILENS_AI_ANALYZER`; the default is `rulebased`.
+Use `--output` to persist the diagnosis report; otherwise it is printed to stdout.
+Use `ai providers` to verify which analyzer and LLM backend plugins are visible on the runtime classpath; `--format json` is available for CI checks and scripts.
+Use `ai doctor` as a production preflight check for SPI discovery, selected analyzer/backend wiring and required API key configuration. It is offline by default; add `--online` only when the deployment environment should verify backend reachability.
 
 SDK/chat usage:
 

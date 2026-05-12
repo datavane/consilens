@@ -11,7 +11,7 @@ import java.util.List;
  * JSON format sink configuration.
  *
  * <p>If {@code columns} is non-empty, each record is output as a JSON object with custom columns;
- * otherwise serializes DiffRow / DiffResult directly (default behavior).
+ * otherwise writes stable JSON fields for each diff row.
  *
  * <pre>
  * result:

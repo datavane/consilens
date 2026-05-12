@@ -13,6 +13,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.extern.slf4j.Slf4j;
 
 import java.io.IOException;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -30,14 +31,23 @@ public abstract class AbstractOpenAICompatibleBackend implements LLMBackend {
     private final String baseUrl;
     private final String model;
     private final String apiKey;
+    private final Double temperature;
+    private final Integer maxTokens;
     private final HttpLLMClient httpClient;
     private final ObjectMapper objectMapper;
 
     protected AbstractOpenAICompatibleBackend(String baseUrl, String model, String apiKey) {
+        this(baseUrl, model, apiKey, null, null, null);
+    }
+
+    protected AbstractOpenAICompatibleBackend(String baseUrl, String model, String apiKey,
+                                              Duration timeout, Double temperature, Integer maxTokens) {
         this.baseUrl = normalizeBaseUrl(baseUrl);
         this.model = model;
         this.apiKey = apiKey;
-        this.httpClient = new HttpLLMClient();
+        this.temperature = temperature;
+        this.maxTokens = maxTokens;
+        this.httpClient = timeout == null ? new HttpLLMClient() : new HttpLLMClient(timeout);
         this.objectMapper = new ObjectMapper();
     }
 
@@ -72,6 +82,7 @@ public abstract class AbstractOpenAICompatibleBackend implements LLMBackend {
             ObjectNode requestBody = objectMapper.createObjectNode();
             requestBody.put("model", model);
             requestBody.put("stream", false);
+            applyGenerationOptions(requestBody);
 
             ArrayNode messagesArray = objectMapper.createArrayNode();
             if (systemPrompt != null && !systemPrompt.isEmpty()) {
@@ -121,6 +132,7 @@ public abstract class AbstractOpenAICompatibleBackend implements LLMBackend {
             ObjectNode requestBody = objectMapper.createObjectNode();
             requestBody.put("model", model);
             requestBody.put("stream", false);
+            applyGenerationOptions(requestBody);
 
             ArrayNode messagesArray = objectMapper.createArrayNode();
             messagesArray.add(buildMessageNode(ChatMessage.Role.USER, prompt, null, null, null));
@@ -191,6 +203,15 @@ public abstract class AbstractOpenAICompatibleBackend implements LLMBackend {
         }
         JsonNode contentNode = choice.get("content");
         return contentNode != null && !contentNode.isNull() ? contentNode.asText(null) : null;
+    }
+
+    private void applyGenerationOptions(ObjectNode requestBody) {
+        if (temperature != null) {
+            requestBody.put("temperature", temperature);
+        }
+        if (maxTokens != null) {
+            requestBody.put("max_tokens", maxTokens);
+        }
     }
 
     private String normalizeBaseUrl(String value) {

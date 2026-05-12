@@ -23,9 +23,32 @@ consilens ai config "compare users from mysql to postgresql by id" \
 
 consilens ai explain -c diff.yaml
 consilens diff --dry-run -c diff.yaml
+consilens diff -c diff.yaml
+consilens ai diagnose --result diff-records.json --analyzer rulebased --output diagnose.md
+consilens ai providers
+consilens ai providers --format json
+consilens ai doctor --format json
 ```
 
-For cloud LLMs, set `--backend openai` with `OPENAI_API_KEY`, or `--backend deepseek` with `DEEPSEEK_API_KEY`. The AI command produces structured configuration; real diff execution still goes through the existing deterministic engine.
+For cloud LLMs, set `--backend openai` with `OPENAI_API_KEY`, or `--backend deepseek` with `DEEPSEEK_API_KEY`. `CONSILENS_AI_BACKEND`, `CONSILENS_AI_MODEL`, `CONSILENS_AI_BASE_URL` and `CONSILENS_AI_TIMEOUT` can provide environment defaults. The AI command produces structured configuration; real diff execution still goes through the existing deterministic engine.
+
+`ai diagnose` requires diff evidence, not only summary statistics. Configure a `json` `diff-record` sink before running `consilens diff`:
+The analyzer is selected via SPI with `--analyzer <name>` or `CONSILENS_AI_ANALYZER`; default: `rulebased`.
+Use `--output` to write the report to a file; omit it to print to stdout.
+Use `ai providers` to verify discovered analyzer and LLM backend providers before enabling a production task. Add `--format json` for CI checks and scripts.
+Use `ai doctor` for production preflight checks. It verifies provider discovery, selected analyzer/backend creation and required API key configuration without network calls by default; add `--online` to verify backend reachability.
+
+```yaml
+result:
+  sinks:
+    - format: console
+      type: result
+    - format: json
+      type: diff-record
+      properties:
+        path: ./diff-records.json
+        pretty: true
+```
 
 ### Basic Conversation
 
@@ -120,6 +143,14 @@ Response: The AI will:
    - Data truncation
 4. Provide explanations and recommendations
 ```
+
+Production CLI:
+
+```bash
+consilens ai diagnose --result diff-records.json --analyzer rulebased --output diagnose.md
+```
+
+The input must be either a JSON array of diff records or an object containing a `differences` array. A stats-only `result` JSON file is rejected because it does not contain row-level evidence.
 
 ### 3. Generate Repair SQL
 

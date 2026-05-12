@@ -1,8 +1,5 @@
 package com.consilens.cli.command;
 
-import com.consilens.cli.config.ConfigurationManager;
-import com.consilens.cli.model.CliConfiguration;
-
 import lombok.extern.slf4j.Slf4j;
 import picocli.CommandLine.Command;
 

@@ -13,6 +13,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.extern.slf4j.Slf4j;
 
 import java.io.IOException;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -30,6 +31,8 @@ public class OllamaBackend implements LLMBackend {
 
     private final String baseUrl;
     private final String model;
+    private final Double temperature;
+    private final Integer maxTokens;
     private final HttpLLMClient httpClient;
     private final ObjectMapper objectMapper;
 
@@ -38,9 +41,15 @@ public class OllamaBackend implements LLMBackend {
     }
 
     public OllamaBackend(String baseUrl, String model) {
+        this(baseUrl, model, null, null, null);
+    }
+
+    public OllamaBackend(String baseUrl, String model, Duration timeout, Double temperature, Integer maxTokens) {
         this.baseUrl = baseUrl;
         this.model = model;
-        this.httpClient = new HttpLLMClient();
+        this.temperature = temperature;
+        this.maxTokens = maxTokens;
+        this.httpClient = timeout == null ? new HttpLLMClient() : new HttpLLMClient(timeout);
         this.objectMapper = new ObjectMapper();
     }
 
@@ -50,6 +59,7 @@ public class OllamaBackend implements LLMBackend {
             ObjectNode requestBody = objectMapper.createObjectNode();
             requestBody.put("model", model);
             requestBody.put("stream", false);
+            applyGenerationOptions(requestBody);
 
             ArrayNode messagesArray = objectMapper.createArrayNode();
             if (systemPrompt != null && !systemPrompt.isEmpty()) {
@@ -122,6 +132,7 @@ public class OllamaBackend implements LLMBackend {
             requestBody.put("model", model);
             requestBody.put("prompt", prompt);
             requestBody.put("stream", false);
+            applyGenerationOptions(requestBody);
             JsonNode response = httpClient.post(baseUrl + "/api/generate", requestBody);
             return response.path("response").asText("No response from Ollama");
         } catch (IOException e) {
@@ -179,5 +190,19 @@ public class OllamaBackend implements LLMBackend {
                 .toolCalls(toolCalls)
                 .finishReason(finishReason)
                 .build();
+    }
+
+    private void applyGenerationOptions(ObjectNode requestBody) {
+        if (temperature == null && maxTokens == null) {
+            return;
+        }
+        ObjectNode options = objectMapper.createObjectNode();
+        if (temperature != null) {
+            options.put("temperature", temperature);
+        }
+        if (maxTokens != null) {
+            options.put("num_predict", maxTokens);
+        }
+        requestBody.set("options", options);
     }
 }

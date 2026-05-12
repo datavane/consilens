@@ -26,6 +26,9 @@ class AIConfigCompilerTest {
         assertEquals("users", config.getSource().getResource().getName());
         assertEquals("${env.SOURCE_USER}", config.getSource().getUsername());
         assertEquals("xor", config.getStrategy().getAlgorithm());
+        assertEquals(2, config.getResult().getSinks().size());
+        assertEquals("result", config.getResult().getSinks().get(0).getType());
+        assertEquals("diff-record", config.getResult().getSinks().get(1).getType());
     }
 
     @Test
@@ -38,6 +41,8 @@ class AIConfigCompilerTest {
         assertTrue(yaml.contains("comparison:"));
         assertTrue(yaml.contains("strategy:"));
         assertTrue(yaml.contains("result:"));
+        assertTrue(yaml.contains("diff-record"));
+        assertTrue(yaml.contains("./diff-records.json"));
     }
 
     private AIConfigDraft draft() {

@@ -1,5 +1,7 @@
 package com.consilens.ai.backend;
 
+import java.time.Duration;
+
 /**
  * DeepSeek chat completion backend.
  */
@@ -14,6 +16,11 @@ public class DeepSeekBackend extends AbstractOpenAICompatibleBackend {
 
     public DeepSeekBackend(String baseUrl, String model, String apiKey) {
         super(baseUrl, model, apiKey);
+    }
+
+    public DeepSeekBackend(String baseUrl, String model, String apiKey,
+                           Duration timeout, Double temperature, Integer maxTokens) {
+        super(baseUrl, model, apiKey, timeout, temperature, maxTokens);
     }
 
     @Override

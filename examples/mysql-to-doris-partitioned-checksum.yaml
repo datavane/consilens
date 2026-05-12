@@ -5,23 +5,23 @@ source:
   type: mysql
   name: source-mysql-to-doris
   connection:
-    url: jdbc:mysql://localhost:3306/test
+    url: jdbc:mysql://localhost:3306/consilens_demo
     username: ${env.MYSQL_USER}
     password: ${env.MYSQL_PASSWORD}
   resource:
     type: table
-    name: performance_test_table
+    name: consilens_performance_demo_table
 
 target:
   type: doris
   name: target-doris-partitioned
   connection:
-    url: jdbc:mysql://localhost:9030/test
+    url: jdbc:mysql://localhost:9030/consilens_demo
     username: ${env.DORIS_USER}
     password: ${env.DORIS_PASSWORD}
   resource:
     type: table
-    name: performance_test_table
+    name: consilens_performance_demo_table
 
 comparison:
   keys:

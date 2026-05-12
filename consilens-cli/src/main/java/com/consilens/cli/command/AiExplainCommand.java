@@ -1,6 +1,7 @@
 package com.consilens.cli.command;
 
 import com.consilens.cli.ai.AIExplainService;
+import com.consilens.cli.config.ConfigurationManager;
 import com.consilens.cli.model.CliConfiguration;
 import com.consilens.cli.service.DiffService;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -23,22 +24,39 @@ import java.util.concurrent.Callable;
 )
 public class AiExplainCommand implements Callable<Integer> {
 
+    private final ConfigurationManager configurationManager;
+    private final DiffService diffService;
+    private final AIExplainService explainService;
+    private final ObjectMapper rawConfigMapper;
+
     @Option(names = {"-c", "--config"}, required = true, description = "Configuration file path")
     private String configFile;
 
     @Option(names = "--dry-run", description = "Run DiffService dry-run before printing the explanation")
     private boolean dryRun;
 
+    public AiExplainCommand() {
+        this(new ConfigurationManager(), new DiffService(), new AIExplainService(), new ObjectMapper(new YAMLFactory()));
+    }
+
+    AiExplainCommand(ConfigurationManager configurationManager,
+                     DiffService diffService,
+                     AIExplainService explainService,
+                     ObjectMapper rawConfigMapper) {
+        this.configurationManager = configurationManager;
+        this.diffService = diffService;
+        this.explainService = explainService;
+        this.rawConfigMapper = rawConfigMapper;
+    }
+
     @Override
     public Integer call() {
         try {
-            ObjectMapper mapper = new ObjectMapper(new YAMLFactory());
-            CliConfiguration config = mapper.readValue(new File(configFile), CliConfiguration.class);
-            config.validate();
+            CliConfiguration config = dryRun ? configurationManager.loadConfiguration(configFile, false) : loadRawConfig();
             if (dryRun) {
-                new DiffService().performDryRun(config);
+                diffService.performDryRun(config);
             }
-            System.out.print(new AIExplainService().explain(config));
+            System.out.print(explainService.explain(config));
             if (dryRun) {
                 System.out.println();
                 System.out.println("Dry run:");
@@ -50,5 +68,11 @@ public class AiExplainCommand implements Callable<Integer> {
             System.err.println("[AI EXPLAIN ERROR] " + e.getMessage());
             return 1;
         }
+    }
+
+    private CliConfiguration loadRawConfig() throws Exception {
+        CliConfiguration config = rawConfigMapper.readValue(new File(configFile), CliConfiguration.class);
+        config.validate();
+        return config;
     }
 }

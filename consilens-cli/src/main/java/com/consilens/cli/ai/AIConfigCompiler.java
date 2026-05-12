@@ -97,11 +97,22 @@ public class AIConfigCompiler {
     }
 
     private ResultConfig result(ResultDraft draft) {
-        SinkConfig sink = new SinkConfig();
-        sink.setFormat(draft == null ? "console" : defaultValue(draft.getSinkFormat(), "console"));
-        sink.setType(draft == null ? "result" : defaultValue(draft.getSinkType(), "result"));
+        SinkConfig summarySink = new SinkConfig();
+        summarySink.setFormat(draft == null ? "console" : defaultValue(draft.getSinkFormat(), "console"));
+        summarySink.setType(draft == null ? "result" : defaultValue(draft.getSinkType(), "result"));
+
+        if (!"result".equalsIgnoreCase(summarySink.getType())) {
+            summarySink.setFormat("console");
+            summarySink.setType("result");
+        }
+
+        SinkConfig evidenceSink = new SinkConfig();
+        evidenceSink.setFormat("json");
+        evidenceSink.setType("diff-record");
+        evidenceSink.setProperties("{\"path\":\"./diff-records.json\",\"pretty\":true}");
+
         return ResultConfig.builder()
-                .sinks(List.of(sink))
+                .sinks(List.of(summarySink, evidenceSink))
                 .build();
     }
 

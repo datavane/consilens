@@ -3,6 +3,7 @@ package com.consilens.ai.spi;
 import com.consilens.spi.PluginManager;
 
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Manages {@link AIAnalyzer} instances loaded via SPI.
@@ -48,5 +49,12 @@ public class AIAnalyzerManager {
      */
     public AIAnalyzer create(String name, Map<String, ?> config) {
         return pluginManager.create(name, config);
+    }
+
+    /**
+     * Returns analyzer provider names discovered from the classpath.
+     */
+    public Set<String> supportedNames() {
+        return pluginManager.getSupportedKeys();
     }
 }

@@ -51,6 +51,13 @@ public class OracleSqlQueryGenerator extends BaseSqlQueryGenerator {
         }
     }
 
+    @Override
+    public boolean supportsChecksumAlgorithm(ChecksumAlgorithm checksumAlgorithm) {
+        return checksumAlgorithm == null
+                || checksumAlgorithm == ChecksumAlgorithm.CONCAT
+                || checksumAlgorithm.isXor();
+    }
+
     /**
      * Generate checksum SQL using traditional CONCAT method (backward compatible)
      */
