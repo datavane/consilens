@@ -26,6 +26,7 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -69,17 +70,8 @@ public class TableDiffRecordSink implements Sink {
 
         DatabaseDialect dialect = resolveDialect(sinkConfig);
         writeCompiler = dialect.getTableWriteCompiler();
-        outputColumns = buildOutputColumns(dialect);
-        TableColumnNames.validateUniqueOutputColumns(outputColumns, "TableDiffRecordSink");
-        writePlan = writeCompiler.compile(new TableWriteCompileRequest(
-                tableName,
-                sinkConfig.isCreateTable(),
-                sinkConfig.isDropIfExists(),
-                outputColumns
-        ));
-
-        if (sinkConfig.isCreateTable() && !outputColumns.isEmpty()) {
-            createOutputTable();
+        if (sinkConfig.hasCustomColumns() && !sinkConfig.isMergeMode()) {
+            initializeWritePlan(dialect);
         }
         log.info("TableDiffRecordSink opened, table={}, mode={}", tableName,
                 sinkConfig.isMergeMode() ? "merge" : sinkConfig.hasCustomColumns() ? "custom" : "default");
@@ -90,6 +82,7 @@ public class TableDiffRecordSink implements Sink {
         if (dataSource == null || rows == null || rows.isEmpty()) {
             return;
         }
+        ensureWritePlanInitialized(rows);
         try (Connection connection = dataSource.getConnection();
              PreparedStatement preparedStatement = connection.prepareStatement(writePlan.getInsertSql())) {
             connection.setAutoCommit(false);
@@ -126,6 +119,48 @@ public class TableDiffRecordSink implements Sink {
         }
     }
 
+    private void ensureWritePlanInitialized(List<DiffRow> rows) throws SQLException {
+        if (writePlan != null) {
+            return;
+        }
+        mergeColumnsFromRows(rows);
+        initializeWritePlan(resolveDialect(sinkConfig));
+    }
+
+    private void mergeColumnsFromRows(List<DiffRow> rows) {
+        if (rows == null || rows.isEmpty()) {
+            return;
+        }
+        sourceColumns = mergeColumns(sourceColumns, rows, true);
+        targetColumns = mergeColumns(targetColumns, rows, false);
+        rebuildOutputColumnMaps();
+    }
+
+    private List<String> mergeColumns(List<String> existing, List<DiffRow> rows, boolean sourceSide) {
+        LinkedHashSet<String> merged = new LinkedHashSet<>();
+        if (existing != null) {
+            merged.addAll(existing);
+        }
+        for (DiffRow row : rows) {
+            List<String> columnNames = sourceSide ? row.getColumnNames1() : row.getColumnNames2();
+            if (columnNames != null) {
+                merged.addAll(columnNames);
+            }
+        }
+        return new ArrayList<>(merged);
+    }
+
+    private void rebuildOutputColumnMaps() {
+        sourceOutputColumns = new LinkedHashMap<>();
+        targetOutputColumns = new LinkedHashMap<>();
+        for (String column : sourceColumns) {
+            sourceOutputColumns.put(TableColumnNames.sanitize(column) + "_1", column);
+        }
+        for (String column : targetColumns) {
+            targetOutputColumns.put(TableColumnNames.sanitize(column) + "_2", column);
+        }
+    }
+
     private void createOutputTable() throws SQLException {
         try (Connection connection = dataSource.getConnection()) {
             if (sinkConfig.isDropIfExists()) {
@@ -136,6 +171,20 @@ public class TableDiffRecordSink implements Sink {
             try (PreparedStatement statement = connection.prepareStatement(writePlan.getCreateTableSql())) {
                 statement.execute();
             }
+        }
+    }
+
+    private void initializeWritePlan(DatabaseDialect dialect) throws SQLException {
+        outputColumns = buildOutputColumns(dialect);
+        TableColumnNames.validateUniqueOutputColumns(outputColumns, "TableDiffRecordSink");
+        writePlan = writeCompiler.compile(new TableWriteCompileRequest(
+                tableName,
+                sinkConfig.isCreateTable(),
+                sinkConfig.isDropIfExists(),
+                outputColumns
+        ));
+        if (sinkConfig.isCreateTable() && !outputColumns.isEmpty()) {
+            createOutputTable();
         }
     }
 

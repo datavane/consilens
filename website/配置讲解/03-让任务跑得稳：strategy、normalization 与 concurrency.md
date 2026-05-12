@@ -292,7 +292,7 @@ source:
 当一个任务“跑不稳”时，可以按这个顺序看：
 
 ```mermaid
-flowchart TD
+flowchart LR
     A["任务跑不稳"] --> B{"先判断问题类型"}
     B -->|误报多| C["先查 comparison / normalization"]
     B -->|慢且差异段多| D["查 strategy 分段和批量参数"]
