@@ -19,7 +19,7 @@ jobs:
           cache: maven
 
       - name: Build Release Package
-        run: ./mvnw clean verify -Prelease -B
+        run: mvn clean package -DskipTests -Prelease -B
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2

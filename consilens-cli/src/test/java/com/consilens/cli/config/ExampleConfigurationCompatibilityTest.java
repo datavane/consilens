@@ -3,6 +3,7 @@ package com.consilens.cli.config;
 import com.consilens.cli.model.CliConfiguration;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -12,9 +13,12 @@ import java.util.Map;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.List;
+import java.util.LinkedHashMap;
+import java.util.function.Predicate;
 import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ExampleConfigurationCompatibilityTest {
 
@@ -32,6 +36,41 @@ class ExampleConfigurationCompatibilityTest {
         assertNotNull(config.getTarget().getResource());
         assertNotNull(config.getComparison());
         assertNotNull(config.getComparison().getKeys());
+    }
+
+    @Test
+    void shouldCoverStructuredConfigurationOptionsAcrossExamples() throws Exception {
+        List<String> exampleTexts = exampleConfigurationPaths()
+                .map(path -> {
+                    try {
+                        return Files.readString(path);
+                    } catch (IOException e) {
+                        throw new RuntimeException(e);
+                    }
+                })
+                .collect(Collectors.toList());
+
+        Map<String, Predicate<String>> requiredPatterns = new LinkedHashMap<>();
+        requiredPatterns.put("comparison.mappings", text -> text.contains("mappings:") || text.contains("\"mappings\""));
+        requiredPatterns.put("comparison.extraColumns", text -> text.contains("extraColumns:") || text.contains("\"extraColumns\""));
+        requiredPatterns.put("source/target.readOptions", text -> text.contains("readOptions:") || text.contains("\"readOptions\""));
+        requiredPatterns.put("strategy.mode=join", text -> text.contains("mode: join") || text.contains("\"mode\": \"join\""));
+        requiredPatterns.put("strategy.algorithm=concat", text -> text.contains("algorithm: concat")
+                || text.contains("\"algorithm\": \"concat\""));
+        requiredPatterns.put("strategy.localCompare.mode=row-hash", text -> text.contains("mode: row-hash")
+                || text.contains("\"mode\": \"row-hash\""));
+        requiredPatterns.put("strategy.maxDifferences", text -> text.contains("maxDifferences:")
+                || text.contains("\"maxDifferences\""));
+        requiredPatterns.put("normalization", text -> text.contains("normalization:") || text.contains("\"normalization\""));
+        requiredPatterns.put("result.failOnSinkError", text -> text.contains("failOnSinkError:")
+                || text.contains("\"failOnSinkError\""));
+        requiredPatterns.put("result.sinks[].enabled", text -> text.contains("enabled: false")
+                || text.contains("\"enabled\": false"));
+
+        for (Map.Entry<String, Predicate<String>> entry : requiredPatterns.entrySet()) {
+            assertTrue(exampleTexts.stream().anyMatch(entry.getValue()),
+                    "examples 目录缺少 " + entry.getKey() + " 的覆盖示例");
+        }
     }
 
     private static Stream<Path> exampleConfigurationPaths() throws IOException {
