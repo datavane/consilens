@@ -1,0 +1,88 @@
+# 字段映射比对配置 - MySQL users 到 PostgreSQL users
+# 目标：覆盖 comparison.mappings，并演示 column / expression / literal 三种映射方式
+
+source:
+  type: mysql
+  name: source-mysql-mapped
+  connection:
+    url: jdbc:mysql://localhost:3306/mydb
+    username: ${env.MYSQL_USER}
+    password: ${env.MYSQL_PASSWORD}
+  resource:
+    type: table
+    name: users
+
+target:
+  type: postgresql
+  name: target-postgresql-mapped
+  connection:
+    url: jdbc:postgresql://localhost:5432/postgres?currentSchema=public
+    username: ${env.PG_USER}
+    password: ${env.PG_PASSWORD}
+  resource:
+    type: table
+    name: users
+
+comparison:
+  keys:
+    source:
+      - id
+    target:
+      - id
+
+  mappings:
+    - name: user_id
+      source:
+        column: id
+      target:
+        column: id
+      key: true
+
+    - name: normalized_name
+      source:
+        expression: "UPPER(name)"
+      target:
+        expression: "UPPER(name)"
+
+    - name: email
+      source:
+        column: email
+      target:
+        column: email
+
+    - name: normalized_phone
+      source:
+        expression: "REPLACE(phone, '+86', '')"
+      target:
+        expression: "REPLACE(phone, '+86', '')"
+
+    - name: source_system
+      source:
+        literal: "seed-users"
+      target:
+        literal: "seed-users"
+
+    - name: debug_tag
+      source:
+        literal: "users-v1"
+      target:
+        literal: "users-v1"
+      compare: false
+
+  filters:
+    source: "created_at >= '2026-01-01 00:00:00'"
+    target: "created_at >= '2026-01-01 00:00:00'"
+
+strategy:
+  mode: checksum
+  algorithm: xor
+  bisectionFactor: 4
+  bisectionThreshold: 5000
+  batchSize: 1000
+  localCompare:
+    mode: row-hash
+
+result:
+  sinks:
+    - format: console
+      type: result

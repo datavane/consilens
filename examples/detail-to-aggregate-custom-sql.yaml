@@ -66,3 +66,5 @@ result:
   sinks:
     - format: console
       type: result
+    - format: console
+      type: diff-record

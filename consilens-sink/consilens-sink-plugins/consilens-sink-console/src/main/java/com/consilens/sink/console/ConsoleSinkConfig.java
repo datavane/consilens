@@ -25,4 +25,7 @@ public class ConsoleSinkConfig {
 
     /** Whether to print summary statistics; default true. */
     private boolean showStatistics = true;
+
+    /** Whether to pretty-print JSON payloads; default true. */
+    private boolean pretty = true;
 }
