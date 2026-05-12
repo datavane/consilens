@@ -2,23 +2,23 @@ source:
   type: mysql
   name: source-mysql
   connection:
-    url: jdbc:mysql://localhost:3306/test
+    url: jdbc:mysql://localhost:3306/consilens_demo
     username: ${env.MYSQL_USER}
     password: ${env.MYSQL_PASSWORD}
   resource:
     type: table
-    name: performance_test_table
+    name: consilens_performance_demo_table
 
 target:
   type: starrocks
   name: target-starrocks
   connection:
-    url: jdbc:mysql://localhost:9030/test
+    url: jdbc:mysql://localhost:9030/consilens_demo
     username: ${env.STARROCKS_USER}
     password: ${env.STARROCKS_PASSWORD}
   resource:
     type: table
-    name: performance_test_table
+    name: consilens_performance_demo_table
 
 comparison:
   keys:

@@ -4,6 +4,7 @@ import com.consilens.cli.config.ConfigurationManager;
 import com.consilens.cli.model.CliConfiguration;
 import com.consilens.cli.model.CliDiffResult;
 import com.consilens.cli.service.DiffService;
+import com.consilens.cli.service.SensitiveValueMasker;
 
 import lombok.extern.slf4j.Slf4j;
 import picocli.CommandLine.Command;
@@ -41,9 +42,9 @@ public class DiffCommand implements Runnable {
                 log.info("Starting diff operation with configuration:");
                 log.info("  Strategy: {}", config.getStrategyMode());
                 log.info("  Algorithm: {}", config.getAlgorithm());
-                log.info("  Source: {}", config.getSource().getUrl());
+                log.info("  Source: {}", SensitiveValueMasker.maskJdbcUrl(config.getSource().getUrl()));
                 log.info("  Source Resource: {}", resourceDisplay(config.getSource()));
-                log.info("  Target: {}", config.getTarget().getUrl());
+                log.info("  Target: {}", SensitiveValueMasker.maskJdbcUrl(config.getTarget().getUrl()));
                 log.info("  Target Resource: {}", resourceDisplay(config.getTarget()));
                 log.info("  Source Key Columns: {}", config.getComparison().getKeys().getSource());
                 log.info("  Target Key Columns: {}", config.getComparison().getKeys().getTarget());

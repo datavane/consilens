@@ -3,6 +3,7 @@ package com.consilens.core.compare.relational;
 import com.consilens.connector.api.ConnectorException;
 import com.consilens.connector.api.dataset.RelationalDatasetSupport;
 import com.consilens.connector.api.model.ComparisonSpec;
+import com.consilens.connector.api.model.DerivedCompareColumns;
 import com.consilens.connector.api.model.FieldDescriptor;
 import com.consilens.connector.api.model.KeySpec;
 import com.consilens.connector.api.model.PoolConfiguration;
@@ -174,7 +175,10 @@ public final class RelationalCompareSegmentAdapter {
         Set<String> keySet = new LinkedHashSet<>(keyColumns);
         return schema.getFields().stream()
                 .map(FieldDescriptor::getName)
-                .filter(name -> name != null && !keySet.contains(name) && !excluded.contains(name))
+                .filter(name -> name != null
+                        && !keySet.contains(name)
+                        && !excluded.contains(name)
+                        && !DerivedCompareColumns.isDerived(name))
                 .collect(Collectors.toCollection(ArrayList::new));
     }
 

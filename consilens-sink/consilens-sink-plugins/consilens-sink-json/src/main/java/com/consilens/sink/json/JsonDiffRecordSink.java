@@ -27,7 +27,7 @@ import java.util.Map;
  *
  * <p>Three output modes depending on {@code columns} and {@code mergeDefaults}:
  * <ul>
- *   <li><b>Default mode</b> ({@code columns} empty): serializes {@link DiffRow} directly.</li>
+ *   <li><b>Default mode</b> ({@code columns} empty): writes stable JSON objects with primitive/list fields.</li>
  *   <li><b>Full custom mode</b> ({@code columns} non-empty, {@code mergeDefaults=false}): only the configured columns as a JSON object.</li>
  *   <li><b>Merge mode</b> ({@code columns} non-empty, {@code mergeDefaults=true}): default fields with value overrides,
  *       plus extra columns appended after defaults.</li>
@@ -38,7 +38,8 @@ public class JsonDiffRecordSink implements Sink {
 
     /** Default field names output in merge mode. */
     private static final List<String> DEFAULT_FIELDS = Arrays.asList(
-            "operation", "primaryKey", "sourceValues", "targetValues", "changedColumns1", "changedColumns2");
+            "operation", "primaryKey", "sourceValues", "targetValues",
+            "columnNames1", "columnNames2", "changedColumns1", "changedColumns2");
 
     private final List<Object> buffer = new ArrayList<>();
     private ObjectMapper objectMapper;
@@ -75,8 +76,18 @@ public class JsonDiffRecordSink implements Sink {
                 buffer.add(record);
             }
         } else {
-            buffer.addAll(rows);
+            for (DiffRow row : rows) {
+                buffer.add(buildDefaultRecord(row));
+            }
         }
+    }
+
+    private LinkedHashMap<String, Object> buildDefaultRecord(DiffRow row) {
+        LinkedHashMap<String, Object> record = new LinkedHashMap<>();
+        for (String field : DEFAULT_FIELDS) {
+            record.put(field, defaultValue(field, row));
+        }
+        return record;
     }
 
     private LinkedHashMap<String, Object> buildMergeRecord(DiffRow row, DiffContext context,
@@ -107,6 +118,8 @@ public class JsonDiffRecordSink implements Sink {
             case "primaryKey":     return row.getPrimaryKeyString();
             case "sourceValues":   return row.getAllSourceValues();
             case "targetValues":   return row.getAllTargetValues();
+            case "columnNames1":   return row.getColumnNames1();
+            case "columnNames2":   return row.getColumnNames2();
             case "changedColumns1": return row.getChangedColumns1();
             case "changedColumns2": return row.getChangedColumns2();
             default:               return null;

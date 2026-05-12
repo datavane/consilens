@@ -1,301 +1,404 @@
-# Consilens 技术架构与实现原理：从分段校验到插件扩展
+>导 读: 
+      本文从架构设计视角拆解 Consilens checksum 模式：面对跨库、跨机房、大规模数据一致性校验，为什么不能简单全量拉取比较，而要采用“数据库端摘要计算、主键空间递归切片、本地精确比对”的设计。文章重点分析执行计划选择、分段策略、字段标准化、checksum 判断、递归收敛和资源控制等核心技术决策，帮助读者建立对 Consilens 大表校验机制的整体理解。
+>
+>
+>Github:
+>https://github.com/datavane/consilens
+>欢迎关注、Star、Fork，参与贡献
 
-如果把 Consilens 只看成一个“跑一次 diff 的命令行工具”，很容易低估它真正复杂的部分。
+# 跨源大表一致性校验的工程取舍
 
-跨数据源一致性校验真正难的，不在 CLI，也不在某个 hash 函数，而在三件事怎么同时成立：
-
-1. **跨数据源可比**：不同数据库的数据类型、时间函数、布尔表达和 NULL 语义要被收敛成一致表示；
-2. **大表可跑**：不能靠把整张表拖到客户端来解决问题；
-3. **结果可消费**：最后输出的不只是“是否一致”，还要能进入文件、控制台或数据库表。
-
-Consilens 的架构，基本就是围绕这三件事拆出来的。
-
-## 模块怎么拆，决定了后面会不会缠在一起
-
-当前仓库的核心模块边界大致是这样：
-
-| 模块 | 主要职责 |
-| --- | --- |
-| `consilens-cli` | 解析配置、创建连接器和数据集句柄（DatasetHandle）、组装执行链路、选择比对策略 |
-| `consilens-core` | 比对规划（DefaultComparePlanner）、`ChecksumDiffer` / `JoinDiffer`、分段递归、差异模型、线程池 |
-| `consilens-connector` | 连接器抽象（ConnectorProvider / DatasetHandle / CapabilitySet）、数据库方言、SQL 生成、类型规范化、元数据访问 |
-| `consilens-spi` | 运行时插件加载，负责发现并装配数据库方言 |
-| `consilens-sink` | 输出 SPI、内置 console/json/csv/table sink、生命周期桥接 |
-| `consilens-dist` | 发行包组装，把 `bin/`、`conf/`、`libs/`、`plugins/` 打成可运行产物 |
-| `consilens-common` | 跨模块共享的基础模型和工具类 |
-
-这个拆法的价值在于：**算法、方言、输出三条线彼此独立。**
-
-换句话说：
-
-- 你可以换连接器插件，不碰算法；
-- 可以加输出格式，不动 `ChecksumDiffer`；
-- 也可以改算法收敛逻辑，不需要重新设计 CLI 配置结构。
-
-这比把所有能力都塞进一个“大型服务类”里更适合长期演进。
-
-## 主执行链路其实很短，但每一跳都要稳
-
-从 CLI 到最终结果，主链路并不复杂：
-
-```text
-读取配置
-  ->
-创建 source / target DatasetHandle
-  ->
-DefaultComparePlanner 基于 CapabilitySet 生成比对计划
-  ->
-PlanExecutor 执行比对计划
-  ->
-执行比较，产出 DiffResult
-  ->
-通过 SinkManager 路由到 console / json / csv / table
-```
-
-这里有两个容易被忽略、但实际上很关键的点。
-
-第一，**比较对象不是直接的 JDBC 连接，而是被封装后的 `DatasetHandle`**。  
-这样算法层不需要知道连接池怎么建、SQL 怎么拼、schema 怎么处理，它拿到的是一个已经准备好的“可比较表段”。
-
-第二，**输出不是在算法里硬编码写文件**。  
-算法只产出统一的差异模型和执行树，真正的输出由 sink 子系统接手。
-
-这两个边界一旦守住，后续的扩展成本会低很多。
-
-## `checksum` 为什么是主路径
-
-因为它最符合大表、跨数据源场景的现实约束。
-
-### Phase 1：边界探测
-
-真正执行 checksum 之前，Consilens 不会先傻乎乎地对全表做一次哈希聚合。  
-它先拿两侧表的基础边界：
+在小数据量场景里，一致性校验很简单：
 
 ```sql
-SELECT COUNT(*) FROM orders;
-SELECT MIN(order_id) FROM orders;
-SELECT MAX(order_id) FROM orders;
+SELECT * FROM source_table;
+SELECT * FROM target_table;
 ```
 
-这一步的目的不是“先看看”，而是决定后面的执行策略：
+然后在应用侧逐行比较。
 
-- 如果总行数已经低于阈值，直接进入本地精确比较；
-- 如果规模明显偏大，就开始走分段收敛。
+但当数据规模进入千万级、亿级，或者 source / target 分布在不同数据库、不同机房、不同网络链路时，问题就变了。
 
-这么做的原因很简单：  
-**全表 checksum 虽然听起来直接，但对超大表来说未必是最便宜的第一步。**
-
-### Phase 2：首轮多分段，而不是一上来纯二分
-
-Consilens 的第一轮切分更接近“多路分段”，不是传统意义上的纯二分。
-
-它会根据 `bisectionFactor` 先把较大的一侧表切成多个范围段，再在另一侧创建镜像范围。  
-这样做有两个收益：
-
-1. 第一轮可以并行跑多个分段；
-2. 大量一致区间可以在第一层就直接退出。
-
-这比“全表一刀两半，然后再继续一刀两半”的纯二分更适合生产数据分布。  
-因为真实世界里的差异通常不是均匀撒在整张表上，而是集中在少数批次、少数时间窗或少数主键范围里。
-
-### Phase 3：子段收敛，何时继续多分段，何时切二分
-
-每个子段先算自己的 `row_count + checksum`。  
-之后的决策逻辑大致是：
-
-- checksum 一致：直接跳过；
-- 当前段已经小到低于 `bisectionThreshold`：本地精确比较；
-- 子段仍然足够大：继续多路切分；
-- 否则：切换为真正的二分。
-
-当前实现里，这两个阈值最关键：
-
-- **进入本地比较**：`totalRows < bisectionThreshold`
-- **从多分段切到二分**：`maxRows <= bisectionThreshold * bisectionFactor`
-
-这套规则的本质，是尽量让“大而干净”的范围在前面快速退出，让“真正脏的热区”才走更深的递归。
-
-## 为什么 `xor` 能成为默认更合理的选择
-
-`concat` 和 `xor` 的差别，表面看是两种 checksum 算法，实质上是两种资源消耗模型。
-
-`concat` 更直观，但通常需要：
-
-- 对行 hash 排序；
-- 通过 `GROUP_CONCAT` 或 `STRING_AGG` 聚成一个长字符串；
-- 再做一次整体 hash。
-
-这意味着排序、内存和临时表压力都比较重。
-
-`xor` 则更像一套面向大表的工程折中：
-
-- 先得到行 hash；
-- 再做 XOR 聚合；
-- 不依赖行顺序；
-- 因而不需要 `ORDER BY`。
-
-这不是说 `xor` 在数学上更“高级”，而是它更符合大表校验的基本目标：  
-**尽量少做那些只为了结果稳定而引入的重操作。**
-
-## `row-hash` 真正优化的是“精确比较阶段”
-
-很多系统的瓶颈其实不在前面的 checksum，而在最后一步“把小段拉出来逐行比”。
-
-Consilens 的 `row-hash` 本地比较模式，思路是先用一层更轻的行指纹做过滤。  
-它不会一上来就查完整行，而是先查：
+此时真正的瓶颈通常不是 diff 算法本身，而是：
 
 ```text
-主键 + row_hash
+数据传输成本
+数据库查询压力
+应用侧内存占用
+长任务失败恢复
+跨数据库类型差异
 ```
 
-这里的 `row_hash` 不是随便拼出来的字符串。  
-当前方言接口里，对 row-hash SQL 的要求非常明确：
+所以 Consilens checksum 模式的核心目标不是“写一个更快的逐行比较器”，而是：
 
-- 列值先做规范化；
-- 列之间用 ASCII 31 作为分隔符；
-- `NULL` 用 ASCII 1 作为哨兵值，而不是直接当空串；
-- 再对整行 canonical representation 计算 MD5。
+> 在不牺牲最终行级差异定位能力的前提下，尽可能减少原始数据搬运。
 
-这几个细节背后各有原因。分隔符用 ASCII 31，是因为普通分隔符（比如 `|`）可能出现在业务数据里，拼接结果就会有歧义；ASCII 31 几乎不会出现在正常文本里，更适合做 canonical row boundary。NULL 用 ASCII 1 做哨兵而不是压成空串，是因为空串和 NULL 在业务语义上通常不是同一件事——压平了会丢信息，校验结果就失准了。至于“先拉指纹再拉完整行”——生产上更常见的情况是一个小段里绝大多数行都没问题，先过滤一遍指纹，只对不一致的主键再查完整行，能明显减少精确阶段的数据传输量。
+这句话是整个设计的出发点。
 
-所以 `row-hash` 不是用来替代 checksum 的，而是用来优化 checksum 之后那一步“精确定位”。
+---
 
-## 跨数据源真正难的地方，在方言和规范化
+## 一、整体策略：先在数据库端做摘要过滤，再对可疑区域精查
 
-表面上看，跨数据源校验像是在做“同一个 SQL 的多数据库版本”。  
-实际上复杂得多，因为数据库差异不是一层，而是好几层叠在一起：
+Consilens checksum 的执行链路可以抽象成四个阶段：
 
-- checksum SQL 写法不一样；
-- 时间格式化函数不一样；
-- 布尔值转字符串的方式不一样；
-- 数值精度表达不一样；
-- 元数据查询和 schema 处理也不一样。
+1、
 
-所以 `DatabaseDialect` 没有设计成一个“万能大类”，而是进一步拆成多个职责明确的组件：
+这不是一个简单的 checksum 校验。
 
-- `SqlQueryGenerator`
-- `MetadataQueryGenerator`
-- `DataTypeHandler`
-- `TransactionManager`
-- `CapabilityProvider`
-- `ConnectionPoolOptimizer`
-
-这个设计的核心价值是：**数据库差异被拆散了，而不是被堆在一起。**
-
-举个最直接的例子。  
-同样是“把时间列规范成字符串”，MySQL 更可能走 `DATE_FORMAT()`，PostgreSQL 则要走 `TO_CHAR()`；  
-同样是“把布尔值标准化成 1/0”，两边的表达式也完全不同。
-
-如果这些逻辑直接写死在算法里，`ChecksumDiffer` 很快就会变成一个到处是数据库特判的怪物类。  
-把这些差异下沉到方言层，算法才能维持相对稳定。
-
-## 插件机制为什么重要
-
-数据源支持不是编译期写死的，Consilens 用的是 JDK 原生 `ServiceLoader`。
-
-运行时流程大概是：
-
-1. CLI 根据 `source.type` / `target.type`，或者 JDBC URL，识别连接器类型；
-2. `DialectFactory` 通过插件运行时加载 `DatabaseDialectProvider`；
-3. Provider 创建对应的 `DatabaseDialect`；
-4. `DatasetHandle` 封装连接池和方言，向上暴露统一的数据集访问和能力查询。
-
-每个插件 jar 里都带着自己的 SPI 注册文件：
+它本质上是一个**递归收敛算法**：
 
 ```text
-META-INF/services/com.consilens.connector.api.DatabaseDialectProvider
+大范围摘要一致  ->  直接跳过
+大范围摘要不一致 ->  继续切小
+小范围仍不一致  ->  拉明细做精确 diff
 ```
 
-这件事带来的直接好处是：  
-**新增数据源支持时，不需要改 CLI 主流程，只要补一个连接器模块并打进 `plugins/` 就行。对于非 JDBC 数据源（如 ES、MongoDB、HDFS），实现 `ConnectorProvider` + `DatasetHandle` 并声明对应能力即可。**
+```mermaid
+flowchart LR
+    A["大范围 segment"] --> B["count + checksum"]
+    B -->|一致| C["直接跳过"]
+    B -->|不一致| D["继续切小"]
+    D --> E["小范围精确 diff"]
+```
 
-## 为什么输出链路要单独抽出来
+这种设计的关键在于：
 
-算法在意的是“差异是什么”，但工程流程在意的是“差异往哪儿去”。
+> checksum 不是最终答案，而是过滤器。
 
-Consilens 把输出做成单独的 sink 子系统，内置了：
+最终仍然要落到行级差异，只是不会一开始就把全表搬回来。
 
-- `console`
-- `json`
-- `csv`
-- `table`
+---
 
-而且支持两类数据：
+## 二、核心设计一：基于能力而不是数据库类型选择执行计划
 
-- `diff-record`
-- `result`
+Consilens 的执行计划不是简单写死为：
 
-其中一个很值得注意的实现细节是：  
-`DefaultDiffLifecycle` 被放在 `consilens-sink-api`，专门负责把生命周期事件桥接到 `SinkManager`。这么放不是随手为之，而是为了**避免 `consilens-core` 和 sink 模块之间形成循环依赖**。
+```text
+MySQL      -> checksum
+PostgreSQL -> checksum
+Oracle     -> local diff
+```
 
-这意味着算法层只需要在合适的时机发出事件：
+而是由 `DefaultComparePlanner` 根据数据源能力选择策略。
 
-- `onDiffStart`
-- `onSegmentComplete`
-- `onDifferencesFound`
-- `onDiffComplete`
-- `onDiffError`
+2、
 
-至于这些事件最终是打印到控制台、写到 JSON 文件，还是落到数据库表，算法并不关心。
+这个决策非常重要。
 
-这也是为什么 Consilens 能做到“输出能力丰富，但主流程并不显得很重”。
+因为 Consilens 面向的是“跨源”，不是单一数据库。
 
-## 并发模型：IO 和 CPU 分开，不让两类工作互相拖累
+所以 planner 不应该问：
 
-一致性校验天然是混合负载：
+```text
+你是不是 MySQL？
+```
 
-- 一部分工作是数据库访问、checksum 查询、数据拉取，明显偏 IO；
-- 另一部分工作是本地差异计算、结果组装、对象转换，更偏 CPU。
+而应该问：
 
-如果这两类任务放在一个线程池里，慢查询很容易把本地计算拖住，反过来 CPU 密集任务也可能把数据库查询饿死。
+```text
+你能不能在服务端完成 hash 聚合？
+你能不能在服务端完成 join？
+你能不能下推过滤条件？
+```
 
-Consilens 的做法是把 IO 和 CPU 线程池分开配置。  
-这样至少能保证一件事：数据库端慢，不会直接把应用侧所有执行路径都堵死。
+```mermaid
+flowchart TD
+    A["ComparePlanner"] --> B{"能下推 checksum / hash 聚合？"}
+    B -->|能| C["优先 pushdown checksum"]
+    B -->|不能| D{"能服务端 join？"}
+    D -->|能| E["选择 join 计划"]
+    D -->|不能| F["退回本地 / 流式路径"]
+```
 
-## `infoTree` 为什么有价值
+这让整个架构更容易扩展到新的数据源。
 
-很多校验工具在结果里只告诉你“有几条差异”。  
-这对真正排障并不够。
+新增一个连接器时，核心问题不是改 planner，而是让连接器声明自己的能力，并实现对应 SQL 生成逻辑。
 
-Consilens 的 `DiffResult` 里除了差异明细和统计信息，还有一棵执行树 `infoTree`。  
-它记录的不只是结果，还包括过程：
+---
 
-- 当前分段范围；
-- 两侧行数；
-- split 类型；
-- checksum 是否命中；
-- 是否进入本地比较；
-- 执行耗时。
+## 三、核心设计二：按主键空间切片，而不是按 offset 分页
 
-对于大表校验来说，这棵树非常有用。  
-因为很多时候你要排查的不只是“数据哪里错了”，还有“为什么这次校验跑得这么慢”。
+大表比对最容易想到的是分页：
 
-## 代码里明确写死的边界，也是一种架构选择
+```sql
+LIMIT 10000 OFFSET 0;
+LIMIT 10000 OFFSET 10000;
+LIMIT 10000 OFFSET 20000;
+```
 
-有些限制不是“以后再说”，而是当前实现明确规定的行为：
+但 offset 分页在大表场景里问题很多：
 
-- `join` 会校验两侧数据集是否来自**同一个 JDBC URL**，否则直接报错；
-- `strategy.mode=local` 当前会在配置校验阶段被拒绝；
-- `diff` 服务里对 `LOCAL` 也保留了未实现保护；
-- `config validate --test-connection` 现在只会打印“not yet implemented”。
+```text
+越往后越慢
+数据变化时不稳定
+不同数据库执行代价差异大
+不适合递归收敛
+```
 
-这些限制看起来不够完美，但它们至少保证了一件事：  
-**系统不会把不成立的假设悄悄带进执行阶段。**
+Consilens 选择的是基于主键范围的 segment：
 
-对于一个做数据校验的系统来说，清楚地暴露边界，往往比“表面上什么都支持”更可靠。
+```text
+[minKey, maxKey)
+```
 
-## 这套架构想守住的，其实只有一件事
+例如：
 
-从外面看，Consilens 像是在做“跨数据源 diff”。  
-从里面看，它真正想守住的是一条更重要的原则：
+```text
+[1000, 2000)
+[2000, 3000)
+[3000, 4000)
+```
 
-**算法负责收敛问题，方言负责保证可比，输出负责承接结果。**
+这背后有三个技术原因。
 
-只有这三件事不缠在一起，系统才有可能在后续继续长下去：
+第一，范围条件更容易利用索引。
 
-- 要扩数据源，不必动算法；
-- 要改输出，不必改方言；
-- 要调优 checksum 收敛策略，也不用推倒整个 CLI。
+```sql
+WHERE id >= 1000 AND id < 2000
+```
 
-这也是为什么 Consilens 的技术实现看起来不像一个“大而全”的框架，反而更像一组边界清楚的模块。  
-做这类基础工具，很多时候克制比堆功能更重要。
+第二，半开区间天然避免重叠和漏数。
+
+第三，递归切分时可以继续保持同一套边界语义。
+
+3、
+
+所以，`TableSegment` 不是一个普通分页对象，而是 checksum 递归算法里的基本执行单元。
+
+---
+
+## 四、核心设计三：checksum 必须建立在标准化之后
+
+跨库一致性校验不能直接对数据库原始值做 hash。
+
+因为同一个业务值，在不同数据库里的物理或文本表达可能不同。
+
+例如：
+
+| 类型 | 可能差异 |
+| --- | --- |
+| CHAR / VARCHAR | 尾部空格、字符集、排序规则 |
+| DECIMAL | 精度、scale、尾零 |
+| TIMESTAMP | 时区、格式、毫秒精度 |
+| JSON | 字段顺序、存储格式 |
+| BLOB | 二进制展示形式 |
+
+所以 Consilens 在生成 checksum SQL 时，会通过 `DataTypeHandler.normalizeColumn()` 对字段做标准化。
+
+整体逻辑是：
+
+4、
+
+这意味着 Consilens 比较的不是“数据库底层字节”，而是“标准化后的语义值”。
+
+这是 checksum 能跨数据库成立的前提。
+
+否则 checksum 只会把大量格式差异误判成数据差异。
+
+---
+
+## 五、核心设计四：count + checksum 双条件判断
+
+一个 segment 是否可以跳过，不只看 checksum。
+
+Consilens 使用的是：
+
+```text
+source.count == target.count
+AND
+source.checksum == target.checksum
+```
+
+只有两个条件都满足，才认为该 segment 一致。
+
+5、
+
+这个判断看起来简单，但很关键。
+
+checksum 是摘要，摘要天然存在碰撞概率。
+
+count 不能消除所有碰撞，但它能提供另一个独立信号，过滤掉大量明显不一致的情况。
+
+这是一种很典型的工程设计：
+
+> 不追求单点绝对可靠，而是组合多个低成本信号，提高整体判断可靠性。
+
+---
+
+## 六、核心设计五：大段多路切，小段二分，最终本地精查
+
+递归切分不是永远二分，也不是永远按固定 fan-out 切。
+
+Consilens 当前策略可以理解为：
+
+```text
+大范围：多路切分，提高收敛速度
+中等范围：继续缩小问题区域
+小范围：停止递归，进入本地精确比较
+```
+
+这里的核心不是“切得越细越好”。
+
+切分本身也有成本：
+
+```text
+更多 SQL 查询
+更多异步任务
+更多数据库连接占用
+更多调度开销
+```
+
+所以 Consilens 需要在两件事之间做平衡：
+
+```text
+继续切分，减少明细拉取
+提前本地比较，减少递归开销
+```
+
+这也是 `bisectionThreshold`、`bisectionFactor`、`maxDepth`、`activeSegmentBudget` 这些参数存在的意义。
+
+---
+
+## 七、核心设计六：终局比较有 full 和 row-hash 两种路径
+
+checksum 只能告诉我们某个范围存在差异。
+
+但最终用户需要的是：
+
+```text
+哪一行缺失？
+哪一行多出？
+哪一行字段不一致？
+具体哪几个字段不同？
+```
+
+所以最终必须进入本地精确比较。
+
+当前有两种模式。
+
+### 1. full 模式
+
+直接拉取小 segment 内的完整行：
+
+```text
+source full rows
+target full rows
+local diff
+```
+
+优点：
+
+```text
+实现简单
+结果直观
+排障容易
+```
+
+缺点：
+
+```text
+宽表场景下传输量较大
+低差异率时会拉取很多无差异数据
+```
+
+### 2. row-hash 模式
+
+先只拉主键和行级 hash：
+7、
+
+适合：
+
+```text
+宽表
+差异行很少
+网络成本敏感
+```
+
+这是一个典型的两阶段优化：
+
+```text
+先用轻量行摘要定位可疑 key
+再只对可疑 key 回查完整数据
+```
+
+```mermaid
+flowchart LR
+    A["checksum 命中异常 segment"] --> B{"终局比较模式"}
+    B -->|full| C["直接拉完整行"]
+    B -->|row-hash| D["先拉主键 + 行 hash"]
+    D --> E["筛出可疑 key"]
+    E --> F["回查可疑 key 的完整行"]
+    C --> G["本地精确 diff"]
+    F --> G
+```
+
+---
+
+## 八、核心设计七：用并发预算约束递归任务树
+
+递归算法如果不加控制，很容易把问题从“数据比较”变成“任务爆炸”。
+
+例如一个大 segment 被切成 32 个子 segment，每个子 segment 又继续切分，任务数量会迅速扩大。
+
+所以 Consilens 引入了类似 `activeSegmentBudget` 的约束。
+
+8、
+
+这个设计说明 Consilens 并不是单纯追求算法上的最优切分，而是在考虑真实运行环境：
+
+```text
+数据库连接数有限
+线程池容量有限
+查询队列有限
+系统需要可控退化
+```
+
+真正可上线的校验系统，必须能控制自己的资源边界。
+
+---
+
+## 九、整体技术决策图
+
+可以把 Consilens checksum 模式总结成下面这张技术决策图：
+
+9、
+
+这张图比单纯讲 checksum 算法更重要。
+
+因为它表达的是整个系统的工程判断：
+
+```text
+什么时候下推？
+什么时候跳过？
+什么时候继续切？
+什么时候停止递归？
+什么时候拉明细？
+什么时候控制并发？
+```
+
+```mermaid
+flowchart TD
+    A["进入 compare 请求"] --> B["按能力选择执行计划"]
+    B --> C["生成 segment 并下推 checksum"]
+    C --> D{"count + checksum 是否一致？"}
+    D -->|是| E["跳过该段"]
+    D -->|否| F{"是否继续切分？"}
+    F -->|是| G["递归切分并受并发预算约束"]
+    F -->|否| H["进入 full / row-hash 精查"]
+    G --> D
+    H --> I["输出主键级 / 字段级差异"]
+```
+
+这些决策共同构成了 Consilens checksum 模式的设计核心。
+
+
+
+## 加入我们
+Consilens 的目标是成为最好的跨数据源数据一致性比对的开源项目，为更多的用户去解决数据一致性校验中遇到的问题。在此我们真诚欢迎更多的贡献者参与到社区建设中来，和我们一起成长，携手共建更好的社区。
+
+**项目地址：**
+https://github.com/datavane/consilens
+**问题和建议：**
+https://github.com/datavane/consilens/issues
+**贡献代码：**
+https://github.com/datavane/consilens/pull

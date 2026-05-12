@@ -44,6 +44,7 @@ public class PerformanceCollector {
     // Test metadata
     private String testName;
     private final Map<String, Object> testParameters = new ConcurrentHashMap<>();
+    private long monitoringIntervalMs = 100L;
 
     public PerformanceCollector() {
         this.resourceMonitor = new ResourceMonitor();
@@ -72,6 +73,16 @@ public class PerformanceCollector {
     }
 
     /**
+     * Set resource monitoring interval.
+     */
+    public void setMonitoringIntervalMs(long monitoringIntervalMs) {
+        if (monitoringIntervalMs <= 0) {
+            throw new IllegalArgumentException("Monitoring interval must be positive");
+        }
+        this.monitoringIntervalMs = monitoringIntervalMs;
+    }
+
+    /**
      * Start collecting performance metrics.
      */
     public void startCollection() {
@@ -91,8 +102,7 @@ public class PerformanceCollector {
         failedQueries.set(0);
         queryLatencies.clear();
 
-        // Start resource monitoring (sample every 100ms)
-        resourceMonitor.startMonitoring(100);
+        resourceMonitor.startMonitoring(monitoringIntervalMs);
 
         log.info("Performance metrics collection started");
     }
@@ -162,6 +172,9 @@ public class PerformanceCollector {
      * Collect all metrics and build PerformanceMetrics object.
      */
     public PerformanceMetrics collectMetrics() {
+        if (startTime == null) {
+            throw new IllegalStateException("Performance collection has not been started");
+        }
         if (endTime == null) {
             endTime = Instant.now();
         }
@@ -291,6 +304,8 @@ public class PerformanceCollector {
         failedQueries.set(0);
         queryLatencies.clear();
         testParameters.clear();
+        startTime = null;
+        endTime = null;
     }
 
     /**

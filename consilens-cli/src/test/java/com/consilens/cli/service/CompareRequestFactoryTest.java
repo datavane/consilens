@@ -9,6 +9,7 @@ import com.consilens.cli.model.ListPairConfig;
 import com.consilens.cli.model.LocalCompareConfig;
 import com.consilens.cli.model.StrategyConfig;
 import com.consilens.cli.model.StringPairConfig;
+import com.consilens.connector.api.planner.ComparePlanTypes;
 import com.consilens.connector.api.planner.CompareRequest;
 import org.junit.jupiter.api.Test;
 
@@ -60,6 +61,8 @@ class CompareRequestFactoryTest {
                 request.getTarget().getResource().getPath());
         assertEquals(null, request.getSourceFilter());
         assertEquals(null, request.getTargetFilter());
+        assertEquals(Boolean.TRUE, request.getExecutionOptions().getValidateUniqueKeys());
+        assertEquals(1_000_000L, request.getExecutionOptions().getMaxDifferences());
     }
 
     @Test
@@ -96,6 +99,125 @@ class CompareRequestFactoryTest {
         assertEquals("id > 10", request.getSourceFilter().getExpression());
     }
 
+    @Test
+    void shouldMapChecksumStrategyToPreferredPlansAndExecutionOptions() {
+        CliConfiguration config = baseConfig();
+        config.setStrategy(StrategyConfig.builder()
+                .mode("checksum")
+                .algorithm("xor")
+                .bisectionFactor(8)
+                .bisectionThreshold(12_000L)
+                .batchSize(2000)
+                .enableProfiling(true)
+                .maxDifferences(123L)
+                .localCompare(LocalCompareConfig.builder().mode("row-hash").build())
+                .build());
+        config.setComparison(ComparisonConfig.builder()
+                .keys(ListPairConfig.builder().source(List.of("id")).target(List.of("order_id")).build())
+                .build());
+
+        CompareRequest request = factory.create(config);
+
+        assertEquals(List.of(
+                        ComparePlanTypes.PUSHDOWN_CHECKSUM,
+                        ComparePlanTypes.KEY_HASH,
+                        ComparePlanTypes.STREAMING_MERGE),
+                request.getStrategyPreference().getPreferredPlans());
+        assertEquals(Boolean.TRUE, request.getStrategyPreference().getAllowFallback());
+        assertEquals("xor", request.getExecutionOptions().getChecksumAlgorithm());
+        assertEquals(8, request.getExecutionOptions().getBisectionFactor());
+        assertEquals(12_000L, request.getExecutionOptions().getBisectionThreshold());
+        assertEquals(Boolean.TRUE, request.getExecutionOptions().getEnableProfiling());
+        assertEquals("row-hash", request.getExecutionOptions().getLocalCompareMode());
+        assertEquals(Boolean.TRUE, request.getExecutionOptions().getValidateUniqueKeys());
+        assertEquals(123L, request.getExecutionOptions().getMaxDifferences());
+        assertEquals(123L, request.getExecutionOptions().getAttributes().get("maxDifferences"));
+    }
+
+    @Test
+    void shouldMapJoinStrategyToRequiredServerJoinPlan() {
+        CliConfiguration config = baseConfig();
+        config.setStrategy(StrategyConfig.builder()
+                .mode("join")
+                .algorithm("concat")
+                .bisectionFactor(4)
+                .batchSize(1000)
+                .maxDifferences(1000L)
+                .build());
+        config.setComparison(ComparisonConfig.builder()
+                .keys(ListPairConfig.builder().source(List.of("id")).target(List.of("id")).build())
+                .build());
+
+        CompareRequest request = factory.create(config);
+
+        assertEquals(List.of(ComparePlanTypes.SERVER_JOIN), request.getStrategyPreference().getPreferredPlans());
+        assertEquals(Boolean.FALSE, request.getStrategyPreference().getAllowFallback());
+    }
+
+    @Test
+    void shouldUseBatchSizeWhenBisectionThresholdIsNotConfigured() {
+        CliConfiguration config = baseConfig();
+        config.setStrategy(StrategyConfig.builder()
+                .mode("checksum")
+                .algorithm("concat")
+                .bisectionFactor(4)
+                .batchSize(321)
+                .maxDifferences(1000L)
+                .build());
+        config.setComparison(ComparisonConfig.builder()
+                .keys(ListPairConfig.builder().source(List.of("id")).target(List.of("id")).build())
+                .build());
+
+        CompareRequest request = factory.create(config);
+
+        assertEquals(3210L, request.getExecutionOptions().getBisectionThreshold());
+    }
+
+    @Test
+    void shouldCompileMappingKeysLiteralsAndDisabledCompareFields() {
+        CliConfiguration config = baseConfig();
+        config.setComparison(ComparisonConfig.builder()
+                .keys(ListPairConfig.builder().source(List.of("order_id")).target(List.of("id")).build())
+                .mappings(List.of(
+                        CompareMappingConfig.builder()
+                                .name("logical_id")
+                                .key(true)
+                                .source(FieldExpressionConfig.builder().column("order_id").build())
+                                .target(FieldExpressionConfig.builder().column("id").build())
+                                .build(),
+                        CompareMappingConfig.builder()
+                                .name("source_name")
+                                .source(FieldExpressionConfig.builder().column("name").build())
+                                .target(FieldExpressionConfig.builder().column("full_name").build())
+                                .build(),
+                        CompareMappingConfig.builder()
+                                .name("constant_flag")
+                                .source(FieldExpressionConfig.builder().literal(true).build())
+                                .target(FieldExpressionConfig.builder().literal(false).build())
+                                .build(),
+                        CompareMappingConfig.builder()
+                                .name("debug_only")
+                                .compare(false)
+                                .source(FieldExpressionConfig.builder().column("debug_source").build())
+                                .target(FieldExpressionConfig.builder().column("debug_target").build())
+                                .build()))
+                .exclude(ListPairConfig.builder()
+                        .source(List.of("constant_flag"))
+                        .target(List.of("constant_flag"))
+                        .build())
+                .build());
+
+        CompareRequest request = factory.create(config);
+
+        assertEquals(List.of("logical_id"), request.getSourceKeySpec().getFields());
+        assertEquals(List.of("source_name"), request.getSourceComparisons().getFields());
+        assertEquals(List.of("constant_flag"), request.getSourceComparisons().getExclude());
+        assertEquals("SELECT order_id AS logical_id, name AS source_name, debug_source AS debug_only FROM source_table",
+                request.getSource().getResource().getPath());
+        assertEquals("SELECT id AS logical_id, full_name AS source_name, debug_target AS debug_only FROM target_table",
+                request.getTarget().getResource().getPath());
+    }
+
     private CliConfiguration baseConfig() {
         return CliConfiguration.builder()
                 .source(ConnectionConfig.builder()
@@ -121,6 +243,7 @@ class CompareRequestFactoryTest {
                         .algorithm("xor")
                         .bisectionFactor(4)
                         .bisectionThreshold(1000L)
+                        .maxDifferences(1_000_000L)
                         .localCompare(LocalCompareConfig.builder().mode("full").build())
                         .build())
                 .build();

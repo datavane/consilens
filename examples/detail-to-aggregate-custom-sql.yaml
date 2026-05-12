@@ -5,7 +5,7 @@ source:
   type: mysql
   name: source-mysql-detail-aggregate
   connection:
-    url: jdbc:mysql://localhost:3306/test
+    url: jdbc:mysql://localhost:3306/consilens_demo
     username: ${env.MYSQL_USER}
     password: ${env.MYSQL_PASSWORD}
   resource:
@@ -16,7 +16,7 @@ source:
         COUNT(*) AS order_count,
         SUM(amount) AS total_amount,
         MAX(updated_at) AS updated_at
-      FROM performance_test_table
+      FROM consilens_performance_demo_table
       WHERE deleted = 0
       GROUP BY DATE(created_at), status
 

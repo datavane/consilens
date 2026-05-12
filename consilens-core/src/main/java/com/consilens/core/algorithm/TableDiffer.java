@@ -63,6 +63,17 @@ public abstract class TableDiffer implements DiffEmitter {
         return new ArrayList<>();
     }
 
+    protected void ensureDiffLimit(long nextDifferenceCount) {
+        if (diffSink instanceof InMemoryDiffSink) {
+            long current = ((InMemoryDiffSink) diffSink).size();
+            long maxDifferences = config.getMaxDifferences();
+            if (current + nextDifferenceCount > maxDifferences) {
+                throw new IllegalStateException("Diff result exceeds maxDifferences=" + maxDifferences
+                        + ". Increase strategy.maxDifferences or narrow the comparison scope.");
+            }
+        }
+    }
+
     /**
      * Main entry point for table diffing.
      */
@@ -262,11 +273,13 @@ public abstract class TableDiffer implements DiffEmitter {
         private final ChecksumAlgorithm checksumAlgorithm;
         private final LocalCompareMode localCompareMode;
         private final ConcurrencyConfig concurrencyConfig;
+        private final long maxDifferences;
 
         public DifferConfig(int bisectionFactor, long bisectionThreshold,
                            boolean enableProfiling, ChecksumAlgorithm checksumAlgorithm,
                            LocalCompareMode localCompareMode,
-                           ConcurrencyConfig concurrencyConfig) {
+                           ConcurrencyConfig concurrencyConfig,
+                           long maxDifferences) {
             this.bisectionFactor = bisectionFactor;
             this.bisectionThreshold = bisectionThreshold;
             this.enableProfiling = enableProfiling;
@@ -274,6 +287,15 @@ public abstract class TableDiffer implements DiffEmitter {
             this.checksumAlgorithm = checksumAlgorithm != null ? checksumAlgorithm : ChecksumAlgorithm.CONCAT;
             this.localCompareMode = localCompareMode != null ? localCompareMode : LocalCompareMode.FULL;
             this.concurrencyConfig = concurrencyConfig != null ? concurrencyConfig : ConcurrencyConfig.defaultConfig();
+            this.maxDifferences = maxDifferences > 0 ? maxDifferences : 1_000_000L;
+        }
+
+        public DifferConfig(int bisectionFactor, long bisectionThreshold,
+                           boolean enableProfiling, ChecksumAlgorithm checksumAlgorithm,
+                           LocalCompareMode localCompareMode,
+                           ConcurrencyConfig concurrencyConfig) {
+            this(bisectionFactor, bisectionThreshold, enableProfiling,
+                 checksumAlgorithm, localCompareMode, concurrencyConfig, 1_000_000L);
         }
 
         public DifferConfig(int bisectionFactor, long bisectionThreshold,

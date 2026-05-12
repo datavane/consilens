@@ -279,6 +279,12 @@
             </dependency>
 
             <dependency>
+                <groupId>com.squareup.okhttp3</groupId>
+                <artifactId>mockwebserver</artifactId>
+                <version>${okhttp.version}</version>
+            </dependency>
+
+            <dependency>
                 <groupId>com.consilens</groupId>
                 <artifactId>consilens-sink-api</artifactId>
                 <version>${project.version}</version>

@@ -171,12 +171,12 @@ public class DiffService {
 
         return CliDiffResult.builder()
                 .strategy(strategy)
-                .sourceMissingCount((int) stats.getSourceMissingCount())
-                .targetMissingCount((int) stats.getTargetMissingCount())
-                .mismatchCount((int) stats.getMismatchCount())
-                .totalDifferences((int) stats.getTotalDifferences())
-                .sourceRowCount((int) stats.getSourceRowCount())
-                .targetRowCount((int) stats.getTargetRowCount())
+                .sourceMissingCount(stats.getSourceMissingCount())
+                .targetMissingCount(stats.getTargetMissingCount())
+                .mismatchCount(stats.getMismatchCount())
+                .totalDifferences(stats.getTotalDifferences())
+                .sourceRowCount(stats.getSourceRowCount())
+                .targetRowCount(stats.getTargetRowCount())
                 .differences(convertDiffRows(coreResult.getDifferences()))
                 .tableMetadata(tableMetadata)
                 .infoTree(coreResult.getInfoTree() != null && coreResult.getInfoTree().isPresent()
@@ -313,6 +313,9 @@ public class DiffService {
         if (config.getConcurrency() != null) {
             attributes.put("concurrencyConfig", config.getConcurrency());
         }
+        if (config.getStrategy().getMaxDifferences() != null) {
+            attributes.put("maxDifferences", config.getStrategy().getMaxDifferences());
+        }
 
         return CompareExecutionOptions.builder()
                 .bisectionFactor(config.getStrategy().getBisectionFactor())
@@ -322,7 +325,8 @@ public class DiffService {
                 .localCompareMode(config.getStrategy().getLocalCompare() != null
                         ? config.getStrategy().getLocalCompare().getMode()
                         : null)
-                .validateUniqueKeys(false)
+                .validateUniqueKeys(true)
+                .maxDifferences(config.getStrategy().getMaxDifferences())
                 .attributes(attributes.isEmpty() ? null : attributes)
                 .build();
     }
@@ -482,8 +486,8 @@ public class DiffService {
                     .targetMissingCount(0)
                     .mismatchCount(0)
                     .totalDifferences(0)
-                    .sourceRowCount((int) sourceRowCount)
-                    .targetRowCount((int) targetRowCount)
+                    .sourceRowCount(sourceRowCount)
+                    .targetRowCount(targetRowCount)
                     .differences(new java.util.ArrayList<>())
                     .tableMetadata(tableMetadata)
                     .build();

@@ -6,6 +6,7 @@ import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.lang.management.*;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
@@ -24,6 +25,7 @@ public class ResourceMonitor {
 
     private final ScheduledExecutorService scheduler;
     private volatile boolean monitoring = false;
+    private volatile ScheduledFuture<?> monitoringTask;
 
     // CPU metrics
     private final AtomicLong cpuSampleCount = new AtomicLong(0);
@@ -68,6 +70,9 @@ public class ResourceMonitor {
      * Start monitoring resources at the specified interval.
      */
     public void startMonitoring(long intervalMs) {
+        if (intervalMs <= 0) {
+            throw new IllegalArgumentException("Monitoring interval must be positive");
+        }
         if (monitoring) {
             log.warn("Resource monitoring is already running");
             return;
@@ -77,9 +82,11 @@ public class ResourceMonitor {
         resetMetrics();
         captureInitialGcMetrics();
 
-        scheduler.scheduleAtFixedRate(() -> {
+        monitoringTask = scheduler.scheduleAtFixedRate(() -> {
             try {
-                collectMetrics();
+                if (monitoring) {
+                    collectMetrics();
+                }
             } catch (Exception e) {
                 log.error("Error collecting resource metrics", e);
             }
@@ -93,6 +100,11 @@ public class ResourceMonitor {
      */
     public void stopMonitoring() {
         monitoring = false;
+        ScheduledFuture<?> task = monitoringTask;
+        if (task != null) {
+            task.cancel(false);
+            monitoringTask = null;
+        }
         log.info("Resource monitoring stopped");
     }
 

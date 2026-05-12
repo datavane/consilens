@@ -10,8 +10,10 @@ import com.consilens.connector.api.dataset.KeyLookupProvider;
 import com.consilens.connector.api.dataset.RecordScanner;
 import com.consilens.connector.api.dataset.SnapshotProvider;
 import com.consilens.connector.api.dataset.SplitPlanner;
+import com.consilens.connector.api.model.ComparisonSpec;
 import com.consilens.connector.api.model.FieldDescriptor;
 import com.consilens.connector.api.model.KeySpec;
+import com.consilens.connector.api.model.PredicateSpec;
 import com.consilens.connector.api.model.ResourceLocator;
 import com.consilens.connector.api.model.SchemaDescriptor;
 import com.consilens.connector.api.normalization.NormalizationSpec;
@@ -29,9 +31,11 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.mockito.Mockito.mock;
 
@@ -68,6 +72,67 @@ class DefaultCompareRuntimeTest {
         assertFalse(capturedTarget.getConnection().containsKey("normalization"));
         assertSame(normalizationSpec, capturedTarget.getReadOptions().getOptions().get("normalization"));
         assertEquals("target", capturedTarget.getReadOptions().getOptions().get("normalizationSide"));
+    }
+
+    @Test
+    void shouldBuildCompareSegmentsFromRequest() throws Exception {
+        CapturingConnectorRegistry registry = new CapturingConnectorRegistry(
+                new StubConnectorAdapter(),
+                new StubConnectorAdapter());
+        CapturingExecutor executor = new CapturingExecutor();
+        DefaultCompareRuntime runtime = new DefaultCompareRuntime(
+                registry,
+                (request, source, target) -> new PushdownChecksumPlan(CompareExecutionSettings.fromRequest(request)),
+                List.of(executor));
+        KeySpec sourceKey = KeySpec.builder().fields(List.of("id")).build();
+        KeySpec targetKey = KeySpec.builder().fields(List.of("order_id")).build();
+        ComparisonSpec sourceComparisons = ComparisonSpec.builder()
+                .fields(List.of("amount", "dt"))
+                .exclude(List.of("debug_source"))
+                .build();
+        ComparisonSpec targetComparisons = ComparisonSpec.builder()
+                .fields(List.of("actual_amount", "dt"))
+                .exclude(List.of("debug_target"))
+                .build();
+        PredicateSpec sourceFilter = PredicateSpec.builder()
+                .type("sql")
+                .expression("dt = '2026-05-07'")
+                .build();
+        PredicateSpec targetFilter = PredicateSpec.builder()
+                .type("sql")
+                .expression("dt = '2026-05-07'")
+                .build();
+        CompareRequest request = CompareRequest.builder()
+                .source(connectorConfig("source-orders"))
+                .target(connectorConfig("target-orders"))
+                .sourceKeySpec(sourceKey)
+                .targetKeySpec(targetKey)
+                .sourceComparisons(sourceComparisons)
+                .targetComparisons(targetComparisons)
+                .sourceFilter(sourceFilter)
+                .targetFilter(targetFilter)
+                .build();
+
+        runtime.execute(request);
+
+        CompareSegment sourceSegment = executor.lastSourceSegment;
+        CompareSegment targetSegment = executor.lastTargetSegment;
+        assertNotNull(sourceSegment);
+        assertNotNull(targetSegment);
+        assertEquals("source", sourceSegment.getSide());
+        assertEquals("target", targetSegment.getSide());
+        assertSame(sourceKey, sourceSegment.getKeySpec());
+        assertSame(targetKey, targetSegment.getKeySpec());
+        assertSame(sourceComparisons, sourceSegment.getComparisons());
+        assertSame(targetComparisons, targetSegment.getComparisons());
+        assertSame(sourceFilter, sourceSegment.getFilter());
+        assertSame(targetFilter, targetSegment.getFilter());
+        assertEquals("source-orders", sourceSegment.getResource().getName());
+        assertEquals("target-orders", targetSegment.getResource().getName());
+        assertEquals(List.of("id", "amount", "actual_amount", "dt", "order_cnt"),
+                sourceSegment.getSchema().getFields().stream().map(FieldDescriptor::getName).collect(Collectors.toList()));
+        assertEquals(List.of("id", "amount", "actual_amount", "dt", "order_cnt"),
+                targetSegment.getSchema().getFields().stream().map(FieldDescriptor::getName).collect(Collectors.toList()));
     }
 
     private ConnectorConfig connectorConfig(String tableName) {

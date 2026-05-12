@@ -2,6 +2,54 @@
 
 ## Quick Start
 
+### Production CLI Flow
+
+```bash
+consilens ai config "compare users from mysql to postgresql by id" \
+  --no-llm \
+  --source-type mysql \
+  --source-url jdbc:mysql://localhost:3306/mydb \
+  --source-table users \
+  --source-user-env MYSQL_USER \
+  --source-password-env MYSQL_PASSWORD \
+  --target-type postgresql \
+  --target-url jdbc:postgresql://localhost:5432/mydb \
+  --target-table users \
+  --target-user-env PG_USER \
+  --target-password-env PG_PASSWORD \
+  --keys id \
+  --fields name,email,status \
+  --output diff.yaml
+
+consilens ai explain -c diff.yaml
+consilens diff --dry-run -c diff.yaml
+consilens diff -c diff.yaml
+consilens ai diagnose --result diff-records.json --analyzer rulebased --output diagnose.md
+consilens ai providers
+consilens ai providers --format json
+consilens ai doctor --format json
+```
+
+For cloud LLMs, set `--backend openai` with `OPENAI_API_KEY`, or `--backend deepseek` with `DEEPSEEK_API_KEY`. `CONSILENS_AI_BACKEND`, `CONSILENS_AI_MODEL`, `CONSILENS_AI_BASE_URL` and `CONSILENS_AI_TIMEOUT` can provide environment defaults. The AI command produces structured configuration; real diff execution still goes through the existing deterministic engine.
+
+`ai diagnose` requires diff evidence, not only summary statistics. Configure a `json` `diff-record` sink before running `consilens diff`:
+The analyzer is selected via SPI with `--analyzer <name>` or `CONSILENS_AI_ANALYZER`; default: `rulebased`.
+Use `--output` to write the report to a file; omit it to print to stdout.
+Use `ai providers` to verify discovered analyzer and LLM backend providers before enabling a production task. Add `--format json` for CI checks and scripts.
+Use `ai doctor` for production preflight checks. It verifies provider discovery, selected analyzer/backend creation and required API key configuration without network calls by default; add `--online` to verify backend reachability.
+
+```yaml
+result:
+  sinks:
+    - format: console
+      type: result
+    - format: json
+      type: diff-record
+      properties:
+        path: ./diff-records.json
+        pretty: true
+```
+
 ### Basic Conversation
 
 ```java
@@ -32,6 +80,22 @@ String response = engine.chat(
 System.out.println(response);
 ```
 
+Cloud backend examples:
+
+```java
+LLMBackend openai = new OpenAIBackend(
+    "https://api.openai.com/v1",
+    "gpt-4.1-mini",
+    System.getenv("OPENAI_API_KEY")
+);
+
+LLMBackend deepseek = new DeepSeekBackend(
+    "https://api.deepseek.com",
+    "deepseek-chat",
+    System.getenv("DEEPSEEK_API_KEY")
+);
+```
+
 ## Common Use Cases
 
 ### 1. Compare Two Database Tables
@@ -39,12 +103,14 @@ System.out.println(response);
 ```
 User: "Compare the 'users' table between production and staging"
 
-Response: The AI will:
+SDK/demo response: The AI will:
 1. Ask for connection details (URLs, credentials)
 2. Execute the diff using DiffTool
 3. Report the number of differences found
 4. Store the diff result for further analysis
 ```
+
+For production CLI usage, prefer `consilens ai config` followed by `consilens diff --dry-run` and `consilens diff`.
 
 **Tool Input Schema** (DiffTool):
 ```json
@@ -77,6 +143,14 @@ Response: The AI will:
    - Data truncation
 4. Provide explanations and recommendations
 ```
+
+Production CLI:
+
+```bash
+consilens ai diagnose --result diff-records.json --analyzer rulebased --output diagnose.md
+```
+
+The input must be either a JSON array of diff records or an object containing a `differences` array. A stats-only `result` JSON file is rejected because it does not contain row-level evidence.
 
 ### 3. Generate Repair SQL
 
@@ -298,6 +372,8 @@ The system validates and sanitizes all inputs:
 The system is running in fallback mode. Either:
 - Start an Ollama server: `ollama serve`
 - Configure an OllamaBackend with correct URL
+- Set `OPENAI_API_KEY` and configure OpenAIBackend
+- Set `DEEPSEEK_API_KEY` and configure DeepSeekBackend
 - Or intentionally use NoopBackend for rule-based only
 
 ### "Unknown tool: consilens_diff"

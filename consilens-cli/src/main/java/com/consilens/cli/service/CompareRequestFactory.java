@@ -342,6 +342,9 @@ public class CompareRequestFactory {
         if (config.getConcurrency() != null) {
             attributes.put("concurrencyConfig", config.getConcurrency());
         }
+        if (config.getStrategy().getMaxDifferences() != null) {
+            attributes.put("maxDifferences", config.getStrategy().getMaxDifferences());
+        }
 
         return CompareExecutionOptions.builder()
                 .bisectionFactor(config.getStrategy().getBisectionFactor())
@@ -351,7 +354,8 @@ public class CompareRequestFactory {
                 .localCompareMode(config.getStrategy().getLocalCompare() != null
                         ? config.getStrategy().getLocalCompare().getMode()
                         : null)
-                .validateUniqueKeys(false)
+                .validateUniqueKeys(true)
+                .maxDifferences(config.getStrategy().getMaxDifferences())
                 .attributes(attributes.isEmpty() ? null : attributes)
                 .build();
     }

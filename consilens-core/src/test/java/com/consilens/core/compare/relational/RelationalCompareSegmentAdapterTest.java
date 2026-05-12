@@ -17,7 +17,10 @@ import com.consilens.connector.api.model.KeySpec;
 import com.consilens.connector.api.model.ResourceLocator;
 import com.consilens.connector.api.model.SchemaDescriptor;
 import com.consilens.connector.api.model.TablePath;
+import com.consilens.connector.api.model.PredicateSpec;
 import com.consilens.connector.api.planner.CompareSegment;
+import com.consilens.connector.api.planner.KeyRangeSplit;
+import com.consilens.connector.api.planner.OffsetLimitSplit;
 import com.consilens.core.compare.CompareExecutionSettings;
 import com.consilens.core.segment.TableSegment;
 import org.junit.jupiter.api.Test;
@@ -28,6 +31,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -84,6 +88,131 @@ class RelationalCompareSegmentAdapterTest {
                 RelationalCompareSegmentAdapter.toTableSegment(segment, CompareExecutionSettings.fromRequest(null));
 
         assertEquals(List.of(), prepared.getTableSegment().getExtraColumns());
+    }
+
+    @Test
+    void shouldIgnoreDerivedHashColumnsFromAutomaticMatching() {
+        ResourceLocator resource = ResourceLocator.builder()
+                .type("sql")
+                .name("orders_sql")
+                .path("SELECT id, name, row_hash FROM orders")
+                .build();
+        StubRelationalDataset dataset = new StubRelationalDataset(resource);
+        SchemaDescriptor schema = SchemaDescriptor.builder()
+                .fields(List.of(
+                        FieldDescriptor.builder().name("id").canonicalType("bigint").build(),
+                        FieldDescriptor.builder().name("name").canonicalType("VARCHAR").build(),
+                        FieldDescriptor.builder().name("row_hash").canonicalType("VARCHAR").build()))
+                .fieldMap(Map.of(
+                        "id", FieldDescriptor.builder().name("id").canonicalType("bigint").build(),
+                        "name", FieldDescriptor.builder().name("name").canonicalType("VARCHAR").build(),
+                        "row_hash", FieldDescriptor.builder().name("row_hash").canonicalType("VARCHAR").build()))
+                .build();
+        CompareSegment segment = CompareSegment.builder()
+                .dataset(dataset)
+                .resource(resource)
+                .keySpec(KeySpec.builder().fields(List.of("id")).build())
+                .schema(schema)
+                .build();
+
+        RelationalCompareSegmentAdapter.PreparedTableSegment prepared =
+                RelationalCompareSegmentAdapter.toTableSegment(segment, CompareExecutionSettings.fromRequest(null));
+
+        assertEquals(List.of("name"), prepared.getTableSegment().getExtraColumns());
+    }
+
+    @Test
+    void shouldHonorExplicitComparisonFieldsIncludingDerivedHashColumns() {
+        ResourceLocator resource = ResourceLocator.builder()
+                .type("sql")
+                .name("orders_sql")
+                .path("SELECT id, name, row_hash FROM orders")
+                .build();
+        StubRelationalDataset dataset = new StubRelationalDataset(resource);
+        SchemaDescriptor schema = schema("id", "name", "row_hash");
+        CompareSegment segment = CompareSegment.builder()
+                .dataset(dataset)
+                .resource(resource)
+                .keySpec(KeySpec.builder().fields(List.of("id")).build())
+                .comparisons(ComparisonSpec.builder().fields(List.of("row_hash")).build())
+                .schema(schema)
+                .build();
+
+        RelationalCompareSegmentAdapter.PreparedTableSegment prepared =
+                RelationalCompareSegmentAdapter.toTableSegment(segment, CompareExecutionSettings.fromRequest(null));
+
+        assertEquals(List.of("row_hash"), prepared.getTableSegment().getExtraColumns());
+    }
+
+    @Test
+    void shouldRejectExplicitComparisonFieldsOverlappingKeys() {
+        ResourceLocator resource = ResourceLocator.builder()
+                .type("table")
+                .name("orders")
+                .build();
+        StubRelationalDataset dataset = new StubRelationalDataset(resource);
+        CompareSegment segment = CompareSegment.builder()
+                .dataset(dataset)
+                .resource(resource)
+                .keySpec(KeySpec.builder().fields(List.of("id")).build())
+                .comparisons(ComparisonSpec.builder().fields(List.of("id", "name")).build())
+                .schema(dataset.getSchema())
+                .build();
+
+        assertThrows(ConnectorException.class,
+                () -> RelationalCompareSegmentAdapter.toTableSegment(segment, CompareExecutionSettings.fromRequest(null)));
+    }
+
+    @Test
+    void shouldApplyFilterAndSupportedSplitsToTableSegment() {
+        ResourceLocator resource = ResourceLocator.builder()
+                .type("table")
+                .name("orders")
+                .build();
+        StubRelationalDataset dataset = new StubRelationalDataset(resource);
+        CompareSegment keyRangeSegment = CompareSegment.builder()
+                .dataset(dataset)
+                .resource(resource)
+                .keySpec(KeySpec.builder().fields(List.of("id")).build())
+                .filter(PredicateSpec.builder().expression("id >= 10").build())
+                .schema(dataset.getSchema())
+                .split(KeyRangeSplit.builder()
+                        .startKey(List.of(10L))
+                        .endKey(List.of(20L))
+                        .build())
+                .build();
+        CompareSegment offsetSegment = keyRangeSegment.toBuilder()
+                .split(OffsetLimitSplit.builder()
+                        .offset(100L)
+                        .limit(50L)
+                        .build())
+                .build();
+
+        TableSegment keyRange = RelationalCompareSegmentAdapter
+                .toTableSegment(keyRangeSegment, CompareExecutionSettings.fromRequest(null))
+                .getTableSegment();
+        TableSegment offset = RelationalCompareSegmentAdapter
+                .toTableSegment(offsetSegment, CompareExecutionSettings.fromRequest(null))
+                .getTableSegment();
+
+        assertEquals(Optional.of("id >= 10 AND id < 20 AND ((id >= 10))"), keyRange.getWhereClause());
+        assertEquals(Optional.of(List.of(10L)), keyRange.getMinKey());
+        assertEquals(Optional.of(List.of(20L)), keyRange.getMaxKey());
+        assertTrue(offset.getLimitOffset().isPresent());
+        assertEquals(50L, offset.getLimitOffset().get().getLimit());
+        assertEquals(100L, offset.getLimitOffset().get().getOffset());
+    }
+
+    private SchemaDescriptor schema(String... names) {
+        Map<String, FieldDescriptor> fieldMap = new LinkedHashMap<>();
+        List<FieldDescriptor> fields = java.util.Arrays.stream(names)
+                .map(name -> FieldDescriptor.builder().name(name).canonicalType("VARCHAR").build())
+                .peek(field -> fieldMap.put(field.getName(), field))
+                .collect(Collectors.toList());
+        return SchemaDescriptor.builder()
+                .fields(fields)
+                .fieldMap(fieldMap)
+                .build();
     }
 
     private static final class StubRelationalDataset implements DatasetHandle, RelationalDatasetSupport {
@@ -181,7 +310,10 @@ class RelationalCompareSegmentAdapterTest {
 
         @Override
         public TablePath getTablePath() {
-            throw new ConnectorException("SQL resource does not expose a physical TablePath");
+            if ("sql".equalsIgnoreCase(resource.getType())) {
+                throw new ConnectorException("SQL resource does not expose a physical TablePath");
+            }
+            return TablePath.of(resource.getName());
         }
 
         @Override

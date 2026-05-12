@@ -184,6 +184,43 @@ public class TableSegmentTest {
     }
 
     @Test
+    public void testBuildWhereClauseCanIncludeUpperBound() {
+        TableSegment segment = TableSegment.builder()
+                .tablePath(TablePath.of("test_table"))
+                .keyColumns(Arrays.asList("biz_date", "status"))
+                .minKey(Optional.of(Arrays.asList("2026-05-01", "active")))
+                .maxKey(Optional.of(Arrays.asList("2026-05-01", "pending")))
+                .upperBoundInclusive(true)
+                .build();
+
+        String whereClause = segment.buildWhereClause();
+
+        assertTrue(whereClause.contains("(biz_date > '2026-05-01' OR (biz_date = '2026-05-01' AND status >= 'active'))"));
+        assertTrue(whereClause.contains("(biz_date < '2026-05-01' OR (biz_date = '2026-05-01' AND status <= 'pending'))"));
+    }
+
+    @Test
+    public void testFinalSegmentKeepsInclusiveUpperBoundOnlyOnTailSegment() {
+        TableSegment segment = TableSegment.builder()
+                .tablePath(TablePath.of("test_table"))
+                .keyColumns(Arrays.asList("id"))
+                .minKey(Optional.of(Arrays.asList(0)))
+                .maxKey(Optional.of(Arrays.asList(100)))
+                .upperBoundInclusive(true)
+                .build();
+
+        List<TableSegment> segments = segment.segmentByCheckpoints(Arrays.asList(
+                Arrays.asList(25),
+                Arrays.asList(50),
+                Arrays.asList(75)));
+
+        assertFalse(segments.get(0).isUpperBoundInclusive());
+        assertFalse(segments.get(1).isUpperBoundInclusive());
+        assertFalse(segments.get(2).isUpperBoundInclusive());
+        assertTrue(segments.get(3).isUpperBoundInclusive());
+    }
+
+    @Test
     public void testBuildWhereClauseRejectsUnsafeCustomClause() {
         TableSegment segment = TableSegment.builder()
                 .tablePath(TablePath.of("test_table"))

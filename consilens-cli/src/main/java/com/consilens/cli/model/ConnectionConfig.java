@@ -90,27 +90,7 @@ public class ConnectionConfig {
 
     private boolean requiresJdbcValidation() {
         String effectiveUrl = getUrl();
-        if (effectiveUrl != null && effectiveUrl.startsWith("jdbc:")) {
-            return true;
-        }
-        if (type == null) {
-            return false;
-        }
-        switch (type.trim().toLowerCase(Locale.ROOT)) {
-            case "mysql":
-            case "postgresql":
-            case "oracle":
-            case "sqlserver":
-            case "presto":
-            case "trino":
-            case "doris":
-            case "starrocks":
-            case "clickhouse":
-            case "tidb":
-                return true;
-            default:
-                return false;
-        }
+        return effectiveUrl != null && effectiveUrl.startsWith("jdbc:");
     }
 
     @Data

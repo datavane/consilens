@@ -8,12 +8,12 @@ import com.consilens.connector.api.model.ResourceLocator;
 import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Proxy;
-import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Properties;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
@@ -66,9 +66,10 @@ class JdbcDatasetHandleTest {
                 readOptions);
 
         assertTrue(handle.getSupport(RelationalDatasetSupport.class).isPresent());
+        assertTrue(handle.getMetadata().getCapabilities().supports(ConnectorCapability.SERVER_SIDE_HASH));
+        assertFalse(handle.getMetadata().getCapabilities().supports(ConnectorCapability.SERVER_SIDE_JOIN));
         assertNull(handle.getMetadata().getAttributes().get("readOptions"));
         assertNull(handle.getMetadata().getAttributes().get("connection"));
-        assertTrue(handle.getMetadata().getCapabilities().supports(ConnectorCapability.SERVER_SIDE_JOIN));
     }
 
     @Test
@@ -82,6 +83,8 @@ class JdbcDatasetHandleTest {
                 ReadOptions.builder().build());
 
         assertEquals("sql", handle.getMetadata().getAttributes().get("resourceType"));
+        assertTrue(handle.getMetadata().getCapabilities().supports(ConnectorCapability.SERVER_SIDE_HASH));
+        assertFalse(handle.getMetadata().getCapabilities().supports(ConnectorCapability.SERVER_SIDE_JOIN));
         assertEquals("SELECT id FROM orders", handle.getMetadata().getLogicalName());
     }
 

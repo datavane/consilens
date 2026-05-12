@@ -34,6 +34,20 @@
             <artifactId>consilens-connector-api</artifactId>
         </dependency>
 
+        <dependency>
+            <groupId>com.consilens</groupId>
+            <artifactId>consilens-connector-mysql</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>com.consilens</groupId>
+            <artifactId>consilens-connector-postgresql</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+
         <!-- JSON Processing -->
         <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>

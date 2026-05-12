@@ -17,6 +17,7 @@ public class CompareExecutionSettings {
 
     private static final int DEFAULT_BISECTION_FACTOR = 32;
     private static final long DEFAULT_BISECTION_THRESHOLD = 16384L;
+    private static final long DEFAULT_MAX_DIFFERENCES = 1_000_000L;
 
     private final int bisectionFactor;
     private final long bisectionThreshold;
@@ -25,6 +26,8 @@ public class CompareExecutionSettings {
     private final LocalCompareMode localCompareMode;
     private final ConcurrencyConfig concurrencyConfig;
     private final boolean validateUniqueKeys;
+    @Builder.Default
+    private final long maxDifferences = DEFAULT_MAX_DIFFERENCES;
 
     public static CompareExecutionSettings fromRequest(CompareRequest request) {
         CompareExecutionOptions executionOptions = request != null ? request.getExecutionOptions() : null;
@@ -45,7 +48,8 @@ public class CompareExecutionSettings {
                         ? LocalCompareMode.fromString(executionOptions.getLocalCompareMode())
                         : LocalCompareMode.FULL)
                 .concurrencyConfig(resolveConcurrencyConfig(attributes))
-                .validateUniqueKeys(executionOptions != null && Boolean.TRUE.equals(executionOptions.getValidateUniqueKeys()))
+                .validateUniqueKeys(executionOptions == null || !Boolean.FALSE.equals(executionOptions.getValidateUniqueKeys()))
+                .maxDifferences(resolveMaxDifferences(executionOptions, attributes))
                 .build();
     }
 
@@ -56,7 +60,24 @@ public class CompareExecutionSettings {
                 enableProfiling,
                 checksumAlgorithm,
                 localCompareMode,
-                concurrencyConfig);
+                concurrencyConfig,
+                maxDifferences);
+    }
+
+    public CompareExecutionSettings withChecksumAlgorithm(ChecksumAlgorithm checksumAlgorithm) {
+        if (this.checksumAlgorithm == checksumAlgorithm) {
+            return this;
+        }
+        return CompareExecutionSettings.builder()
+                .bisectionFactor(bisectionFactor)
+                .bisectionThreshold(bisectionThreshold)
+                .enableProfiling(enableProfiling)
+                .checksumAlgorithm(checksumAlgorithm)
+                .localCompareMode(localCompareMode)
+                .concurrencyConfig(concurrencyConfig)
+                .validateUniqueKeys(validateUniqueKeys)
+                .maxDifferences(maxDifferences)
+                .build();
     }
 
     private static ConcurrencyConfig resolveConcurrencyConfig(Map<String, Object> attributes) {
@@ -67,5 +88,22 @@ public class CompareExecutionSettings {
             }
         }
         return ConcurrencyConfig.defaultConfig();
+    }
+
+    private static long resolveMaxDifferences(CompareExecutionOptions executionOptions, Map<String, Object> attributes) {
+        if (executionOptions != null && executionOptions.getMaxDifferences() != null) {
+            return Math.max(1L, executionOptions.getMaxDifferences());
+        }
+        if (attributes == null) {
+            return DEFAULT_MAX_DIFFERENCES;
+        }
+        Object value = attributes.get("maxDifferences");
+        if (value instanceof Number) {
+            return Math.max(1L, ((Number) value).longValue());
+        }
+        if (value instanceof String && !((String) value).trim().isEmpty()) {
+            return Math.max(1L, Long.parseLong(((String) value).trim()));
+        }
+        return DEFAULT_MAX_DIFFERENCES;
     }
 }

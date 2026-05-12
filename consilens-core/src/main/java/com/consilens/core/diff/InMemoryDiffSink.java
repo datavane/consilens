@@ -21,4 +21,8 @@ public class InMemoryDiffSink implements DiffSink {
     public List<DiffRow> getDifferences() {
         return new ArrayList<>(differences);
     }
+
+    public int size() {
+        return differences.size();
+    }
 }

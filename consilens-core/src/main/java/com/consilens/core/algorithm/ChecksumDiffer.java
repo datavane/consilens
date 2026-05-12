@@ -432,21 +432,19 @@ public class ChecksumDiffer extends TableDiffer implements AutoCloseable {
     /**
      * Create bounded segment from checksum result.
      * 
-     * CRITICAL: We need to set both minKey and maxKey to satisfy isBounded() check,
-     * but the original whereClause will ensure the correct upper bound (using <=).
-     * The maxKey will generate "< maxKey" in buildWhereClause(), but the whereClause
-     * will override it with the correct "<= maxKey" condition.
+     * CRITICAL: Initial bounds come from actual observed boundary rows, so the root segment
+     * must include the upper bound. Recursive child segments still use exclusive upper bounds
+     * to avoid overlap; only this root bounded segment flips to inclusive.
      */
     private TableSegment createBoundedSegment(TableSegment original, ChecksumResult bounds) {
         if (bounds == null || bounds.getMinKey() == null || bounds.getMaxKey() == null) {
             return original;
         }
 
-        // Set both minKey and maxKey to satisfy isBounded() requirement
-        // The original whereClause will be preserved and will provide the correct upper bound
         return original.toBuilder()
                 .minKey(Optional.of(bounds.getMinKey()))
                 .maxKey(Optional.of(bounds.getMaxKey()))
+                .upperBoundInclusive(true)
                 .build();
     }
 
@@ -1125,6 +1123,7 @@ public class ChecksumDiffer extends TableDiffer implements AutoCloseable {
         if (differences == null || differences.isEmpty()) {
             return;
         }
+        ensureDiffLimit(differences.size());
 
         log.debug("Streaming {} differences for segment: {}", differences.size(), segmentId);
         infoTreeRecorder.addMetric(segmentId, "differences", differences.size());

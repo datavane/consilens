@@ -570,16 +570,9 @@ public abstract class AbstractDatabaseAdapter implements DatabaseAdapter {
             return null;
         }
 
-        String whereClause = segment.buildWhereClause();
-        String sql = segment.hasRelationSource()
-                ? dialect.getSqlQueryGenerator().getMinMaxKeySQLFromSql(
-                        segment.getRelationFromSql(), segment.getKeyColumns(), getMin, whereClause)
-                : dialect.getSqlQueryGenerator().getMinMaxKeySQL(
-                        segment.getTablePath().getSchema().orElse(null),
-                        segment.getTablePath().getTableName(),
-                        segment.getKeyColumns(),
-                        getMin,
-                        whereClause);
+        String sql = segment.getKeyColumns().size() > 1
+                ? buildCompositeBoundaryKeyQuery(segment, getMin)
+                : buildSingleColumnBoundaryKeyQuery(segment, getMin);
 
         try {
             List<Object[]> results = query(sql, Object[].class);
@@ -607,6 +600,61 @@ public abstract class AbstractDatabaseAdapter implements DatabaseAdapter {
         }
 
         return null;
+    }
+
+    private String buildSingleColumnBoundaryKeyQuery(TableSegment segment, boolean getMin) {
+        String whereClause = segment.buildWhereClause();
+        return segment.hasRelationSource()
+                ? dialect.getSqlQueryGenerator().getMinMaxKeySQLFromSql(
+                segment.getRelationFromSql(), segment.getKeyColumns(), getMin, whereClause)
+                : dialect.getSqlQueryGenerator().getMinMaxKeySQL(
+                segment.getTablePath().getSchema().orElse(null),
+                segment.getTablePath().getTableName(),
+                segment.getKeyColumns(),
+                getMin,
+                whereClause);
+    }
+
+    private String buildCompositeBoundaryKeyQuery(TableSegment segment, boolean getMin) {
+        StringBuilder sql = new StringBuilder();
+        List<String> keyColumns = segment.getKeyColumns();
+        String whereClause = segment.buildWhereClause();
+
+        sql.append("SELECT ");
+        sql.append(String.join(", ", keyColumns.stream().map(this::quoteColumn).toArray(String[]::new)));
+        sql.append(" FROM ");
+        sql.append(resolveRelationRef(segment));
+
+        if (whereClause != null && !whereClause.trim().isEmpty()) {
+            sql.append(" WHERE ").append(whereClause);
+        }
+
+        String direction = getMin ? "ASC" : "DESC";
+        sql.append(" ORDER BY ");
+        sql.append(String.join(", ",
+                keyColumns.stream()
+                        .map(column -> quoteColumn(column) + " " + direction)
+                        .toArray(String[]::new)));
+        sql.append(" ").append(dialect.getSqlQueryGenerator().getLimitClause(1));
+        return sql.toString();
+    }
+
+    private String resolveRelationRef(TableSegment segment) {
+        if (segment.hasRelationSource()) {
+            return "(" + stripTrailingSemicolon(segment.getRelationFromSql()) + ") consilens_sql_source";
+        }
+        return String.join(".",
+                segment.getTablePath().getPathComponents().stream()
+                        .map(this::quoteColumn)
+                        .toArray(String[]::new));
+    }
+
+    private String stripTrailingSemicolon(String sql) {
+        String normalized = sql != null ? sql.trim() : "";
+        while (normalized.endsWith(";")) {
+            normalized = normalized.substring(0, normalized.length() - 1).trim();
+        }
+        return normalized;
     }
 
     @Override

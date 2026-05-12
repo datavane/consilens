@@ -42,6 +42,30 @@ class TableDiffRecordSinkTest {
     }
 
     @Test
+    void shouldRejectCustomColumnsThatCollideAfterSanitization() {
+        SinkConfig sinkConfig = new SinkConfig();
+        sinkConfig.setFormat("table");
+        sinkConfig.setType("diff-record");
+        sinkConfig.setProperties("{"
+                + "\"type\":\"mysql\","
+                + "\"url\":\"jdbc:h2:mem:sanitized_collision;MODE=MySQL;DB_CLOSE_DELAY=-1\","
+                + "\"username\":\"sa\","
+                + "\"password\":\"\","
+                + "\"driver\":\"org.h2.Driver\","
+                + "\"tableName\":\"diff_record_collision\","
+                + "\"columns\":["
+                + "{\"name\":\"a-b\",\"value\":\"1\"},"
+                + "{\"name\":\"a_b\",\"value\":\"2\"}"
+                + "]"
+                + "}");
+
+        TableDiffRecordSink sink = new TableDiffRecordSink();
+        DiffContext context = DiffContext.builder().taskId("task-collision").build();
+
+        assertThrows(IllegalArgumentException.class, () -> sink.open(sinkConfig, context));
+    }
+
+    @Test
     void shouldRollbackEntireTransactionWhenBatchInsertFails() throws Exception {
         String url = "jdbc:h2:mem:diff_record_rollback;MODE=MySQL;DB_CLOSE_DELAY=-1";
         SinkConfig sinkConfig = new SinkConfig();

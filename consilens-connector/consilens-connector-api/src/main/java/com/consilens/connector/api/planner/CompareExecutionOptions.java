@@ -25,5 +25,7 @@ public class CompareExecutionOptions {
 
     private Boolean validateUniqueKeys;
 
+    private Long maxDifferences;
+
     private Map<String, Object> attributes;
 }

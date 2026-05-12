@@ -30,6 +30,7 @@ import java.util.Map;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class ConnectorRecordDifferTest {
 
@@ -80,22 +81,151 @@ class ConnectorRecordDifferTest {
         assertEquals(0L, result.getStatistics().getTotalDifferences());
     }
 
+    @Test
+    void shouldIgnoreDerivedHashColumnsWhenFieldsAreNotExplicit() {
+        SchemaDescriptor schema = schema(List.of("id", "value", "row_hash"));
+        CompareSegment source = segment("source_orders", schema, null,
+                List.of(record(Map.of("id", "1", "value", "A", "row_hash", "mysql-hash"))));
+        CompareSegment target = segment("target_orders", schema, null,
+                List.of(record(Map.of("id", "1", "value", "A", "row_hash", "postgres-hash"))));
+
+        DiffResult result = new ConnectorRecordDiffer().diff(
+                source,
+                target,
+                CompareExecutionSettings.builder()
+                        .validateUniqueKeys(true)
+                        .build());
+
+        assertEquals(0L, result.getStatistics().getTotalDifferences());
+        assertEquals(0, result.getDifferences().size());
+    }
+
+    @Test
+    void shouldIgnoreKnownDerivedChecksumColumnsWhenFieldsAreNotExplicit() {
+        SchemaDescriptor schema = schema(List.of(
+                "id",
+                "value",
+                "checksum",
+                "row_checksum",
+                "record_checksum",
+                "record_hash",
+                "row_md5",
+                "consilens_checksum",
+                "consilens_row_hash"));
+        CompareSegment source = segment("source_orders", schema, null,
+                List.of(record(Map.of(
+                        "id", "1",
+                        "value", "A",
+                        "checksum", "source-checksum",
+                        "row_checksum", "source-row-checksum",
+                        "record_checksum", "source-record-checksum",
+                        "record_hash", "source-record-hash",
+                        "row_md5", "source-md5",
+                        "consilens_checksum", "source-consilens-checksum",
+                        "consilens_row_hash", "source-consilens-row-hash"))));
+        CompareSegment target = segment("target_orders", schema, null,
+                List.of(record(Map.of(
+                        "id", "1",
+                        "value", "A",
+                        "checksum", "target-checksum",
+                        "row_checksum", "target-row-checksum",
+                        "record_checksum", "target-record-checksum",
+                        "record_hash", "target-record-hash",
+                        "row_md5", "target-md5",
+                        "consilens_checksum", "target-consilens-checksum",
+                        "consilens_row_hash", "target-consilens-row-hash"))));
+
+        DiffResult result = new ConnectorRecordDiffer().diff(
+                source,
+                target,
+                CompareExecutionSettings.builder()
+                        .validateUniqueKeys(true)
+                        .build());
+
+        assertEquals(0L, result.getStatistics().getTotalDifferences());
+        assertEquals(0, result.getDifferences().size());
+    }
+
+    @Test
+    void shouldCompareDerivedHashColumnsWhenFieldsAreExplicit() {
+        SchemaDescriptor schema = schema(List.of("id", "value", "row_hash"));
+        CompareSegment source = segment("source_orders", schema,
+                ComparisonSpec.builder().fields(List.of("row_hash")).build(),
+                List.of(record(Map.of("id", "1", "value", "A", "row_hash", "mysql-hash"))));
+        CompareSegment target = segment("target_orders", schema,
+                ComparisonSpec.builder().fields(List.of("row_hash")).build(),
+                List.of(record(Map.of("id", "1", "value", "A", "row_hash", "postgres-hash"))));
+
+        DiffResult result = new ConnectorRecordDiffer().diff(
+                source,
+                target,
+                CompareExecutionSettings.builder()
+                        .validateUniqueKeys(true)
+                        .build());
+
+        assertEquals(1L, result.getStatistics().getMismatchCount());
+        assertEquals(1L, result.getStatistics().getTotalDifferences());
+        assertEquals(List.of("row_hash"), result.getDifferences().get(0).getChangedColumns1());
+        assertEquals(List.of("row_hash"), result.getDifferences().get(0).getChangedColumns2());
+    }
+
+    @Test
+    void shouldAllowDuplicateKeysWhenValidationIsDisabled() {
+        CompareSegment source = segment("source_orders", List.of(record("1", "A"), record("1", "B")));
+        CompareSegment target = segment("target_orders", List.of(record("1", "A")));
+
+        DiffResult result = new ConnectorRecordDiffer().diff(
+                source,
+                target,
+                CompareExecutionSettings.builder()
+                        .validateUniqueKeys(false)
+                        .build());
+
+        assertEquals(3L, result.getStatistics().getTotalDifferences());
+    }
+
+    @Test
+    void shouldFailOnDuplicateKeysWhenValidationIsEnabled() {
+        CompareSegment source = segment("source_orders", List.of(record("1", "A"), record("1", "B")));
+        CompareSegment target = segment("target_orders", List.of(record("1", "A")));
+
+        assertThrows(com.consilens.connector.api.ConnectorException.class, () -> new ConnectorRecordDiffer().diff(
+                source,
+                target,
+                CompareExecutionSettings.builder()
+                        .validateUniqueKeys(true)
+                        .build()));
+    }
+
+    @Test
+    void shouldFailWhenDiffCountExceedsConfiguredLimit() {
+        CompareSegment source = segment("source_orders", List.of(record("1", "A"), record("2", "B")));
+        CompareSegment target = segment("target_orders", List.of());
+
+        assertThrows(com.consilens.connector.api.ConnectorException.class, () -> new ConnectorRecordDiffer().diff(
+                source,
+                target,
+                CompareExecutionSettings.builder()
+                        .validateUniqueKeys(true)
+                        .maxDifferences(1L)
+                        .build()));
+    }
+
     private CompareSegment segment(String tableName, List<CanonicalRecord> records) {
         return segment(tableName, ComparisonSpec.builder().fields(List.of("value")).build(), records);
     }
 
     private CompareSegment segment(String tableName, ComparisonSpec comparisons, List<CanonicalRecord> records) {
+        return segment(tableName, schema(List.of("id", "value")), comparisons, records);
+    }
+
+    private CompareSegment segment(String tableName,
+                                   SchemaDescriptor schema,
+                                   ComparisonSpec comparisons,
+                                   List<CanonicalRecord> records) {
         ResourceLocator resource = ResourceLocator.builder()
                 .type("table")
                 .name(tableName)
-                .build();
-        SchemaDescriptor schema = SchemaDescriptor.builder()
-                .fields(List.of(
-                        FieldDescriptor.builder().name("id").canonicalType("varchar").build(),
-                        FieldDescriptor.builder().name("value").canonicalType("varchar").build()))
-                .fieldMap(Map.of(
-                        "id", FieldDescriptor.builder().name("id").canonicalType("varchar").build(),
-                        "value", FieldDescriptor.builder().name("value").canonicalType("varchar").build()))
                 .build();
         return CompareSegment.builder()
                 .dataset(new TestDatasetHandle(resource, schema, records))
@@ -111,6 +241,28 @@ class ConnectorRecordDifferTest {
         values.put("id", CanonicalValue.builder().type("varchar").value(id).build());
         values.put("value", CanonicalValue.builder().type("varchar").value(value).build());
         return new TestRecord(RecordKey.builder().parts(List.of(id)).build(), values);
+    }
+
+    private CanonicalRecord record(Map<String, Object> rawValues) {
+        Map<String, CanonicalValue> values = new LinkedHashMap<>();
+        for (Map.Entry<String, Object> entry : rawValues.entrySet()) {
+            values.put(entry.getKey(), CanonicalValue.builder().type("varchar").value(entry.getValue()).build());
+        }
+        return new TestRecord(RecordKey.builder().parts(List.of(rawValues.get("id"))).build(), values);
+    }
+
+    private SchemaDescriptor schema(List<String> columns) {
+        List<FieldDescriptor> fields = new ArrayList<>();
+        Map<String, FieldDescriptor> fieldMap = new LinkedHashMap<>();
+        for (String column : columns) {
+            FieldDescriptor field = FieldDescriptor.builder().name(column).canonicalType("varchar").build();
+            fields.add(field);
+            fieldMap.put(column, field);
+        }
+        return SchemaDescriptor.builder()
+                .fields(fields)
+                .fieldMap(fieldMap)
+                .build();
     }
 
     private static final class TestDatasetHandle implements DatasetHandle {

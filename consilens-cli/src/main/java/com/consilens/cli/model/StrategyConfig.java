@@ -49,6 +49,10 @@ public class StrategyConfig {
     @JsonProperty("localCompare")
     private LocalCompareConfig localCompare = LocalCompareConfig.builder().mode("full").build();
 
+    @Builder.Default
+    @JsonProperty("maxDifferences")
+    private Long maxDifferences = 1_000_000L;
+
     @JsonIgnore
     public ComparisonStrategy getModeEnum() {
         return ComparisonStrategy.fromString(mode);
@@ -65,6 +69,7 @@ public class StrategyConfig {
                 .notEmpty(algorithm, "strategy.algorithm")
                 .positive(batchSize, "strategy.batchSize")
                 .positive(bisectionFactor, "strategy.bisectionFactor")
+                .positive(maxDifferences, "strategy.maxDifferences")
                 .throwIfInvalid();
 
         String normalizedMode = mode == null ? null : mode.trim().toLowerCase();

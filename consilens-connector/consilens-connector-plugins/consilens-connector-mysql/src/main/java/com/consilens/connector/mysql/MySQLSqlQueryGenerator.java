@@ -62,6 +62,13 @@ public class MySQLSqlQueryGenerator extends BaseSqlQueryGenerator {
     }
 
     @Override
+    public boolean supportsChecksumAlgorithm(ChecksumAlgorithm checksumAlgorithm) {
+        return checksumAlgorithm == null
+                || checksumAlgorithm == ChecksumAlgorithm.CONCAT
+                || checksumAlgorithm.isXor();
+    }
+
+    @Override
     protected String buildNullSafeNotEquals(String left, String right) {
         return "NOT (" + left + " <=> " + right + ")";
     }

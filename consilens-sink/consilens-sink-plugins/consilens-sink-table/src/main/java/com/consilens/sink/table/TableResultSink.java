@@ -41,12 +41,14 @@ public class TableResultSink implements Sink {
     @Override
     public void open(SinkConfig config, DiffContext context) throws Exception {
         sinkConfig = parseConfig(config.getProperties());
+        TableColumnNames.validateUniqueSanitizedColumns(sinkConfig.getColumns(), "TableResultSink columns");
         dataSource = createDataSource(sinkConfig);
         tableName = sinkConfig.resolveTableName();
 
         DatabaseDialect dialect = DatabaseDialects.require(sinkConfig.resolveDatabaseType());
         writeCompiler = dialect.getTableWriteCompiler();
         outputColumns = buildOutputColumns(dialect);
+        TableColumnNames.validateUniqueOutputColumns(outputColumns, "TableResultSink");
         writePlan = writeCompiler.compile(new TableWriteCompileRequest(
                 tableName,
                 sinkConfig.isCreateTable(),
@@ -182,7 +184,7 @@ public class TableResultSink implements Sink {
             List<OutputColumnSpec> columns = new ArrayList<>();
             for (ColumnMapping mapping : sinkConfig.getColumns()) {
                 columns.add(new OutputColumnSpec(
-                        sanitize(mapping.getName()),
+                        TableColumnNames.sanitize(mapping.getName()),
                         resolveSystemType(dialect, mapping.getColumnType(), Types.TEXT()),
                         true,
                         mapping.getColumnType()
@@ -214,15 +216,11 @@ public class TableResultSink implements Sink {
 
     private ColumnMapping findColumnMapping(String outputColumnName) {
         for (ColumnMapping mapping : sinkConfig.getColumns()) {
-            if (sanitize(mapping.getName()).equals(outputColumnName)) {
+            if (TableColumnNames.sanitize(mapping.getName()).equals(outputColumnName)) {
                 return mapping;
             }
         }
         return null;
-    }
-
-    private String sanitize(String column) {
-        return column.replaceAll("[^a-zA-Z0-9_]", "_");
     }
 
     private TableSinkConfig parseConfig(String properties) throws Exception {

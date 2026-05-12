@@ -4,6 +4,7 @@ import com.consilens.cli.config.ConfigurationManager;
 import com.consilens.cli.model.CliConfiguration;
 import com.consilens.cli.service.ConnectorConfigMapper;
 import com.consilens.cli.service.ConnectorProbeService;
+import com.consilens.cli.service.SensitiveValueMasker;
 
 import lombok.extern.slf4j.Slf4j;
 import picocli.CommandLine.Command;
@@ -73,16 +74,16 @@ public class ConfigValidateCommand implements Runnable {
             if (config.getSource() != null) {
                 System.out.println("  Source:");
                 System.out.println("    Type   : " + nvl(config.getSource().getType()));
-                System.out.println("    URL    : " + nvl(config.getSource().getUrl()));
-                System.out.println("    User   : " + nvl(config.getSource().getUsername()));
+                System.out.println("    URL    : " + SensitiveValueMasker.maskJdbcUrl(config.getSource().getUrl()));
+                System.out.println("    User   : " + SensitiveValueMasker.maskUsername(config.getSource().getUsername()));
             }
 
             // Target connection
             if (config.getTarget() != null) {
                 System.out.println("  Target:");
                 System.out.println("    Type   : " + nvl(config.getTarget().getType()));
-                System.out.println("    URL    : " + nvl(config.getTarget().getUrl()));
-                System.out.println("    User   : " + nvl(config.getTarget().getUsername()));
+                System.out.println("    URL    : " + SensitiveValueMasker.maskJdbcUrl(config.getTarget().getUrl()));
+                System.out.println("    User   : " + SensitiveValueMasker.maskUsername(config.getTarget().getUsername()));
             }
 
             // Comparison
@@ -161,7 +162,7 @@ public class ConfigValidateCommand implements Runnable {
 
         // Test source connection
         try {
-            System.out.print("  Testing source connection (" + config.getSource().getUrl() + ") ... ");
+            System.out.print("  Testing source connection (" + SensitiveValueMasker.maskJdbcUrl(config.getSource().getUrl()) + ") ... ");
             new ConnectorProbeService().verifyAccessible(
                     ConnectorConfigMapper.toConnectorConfig(config.getSource()));
             System.out.println("✓ OK");
@@ -176,7 +177,7 @@ public class ConfigValidateCommand implements Runnable {
 
         // Test target connection
         try {
-            System.out.print("  Testing target connection (" + config.getTarget().getUrl() + ") ... ");
+            System.out.print("  Testing target connection (" + SensitiveValueMasker.maskJdbcUrl(config.getTarget().getUrl()) + ") ... ");
             new ConnectorProbeService().verifyAccessible(
                     ConnectorConfigMapper.toConnectorConfig(config.getTarget()));
             System.out.println("✓ OK");

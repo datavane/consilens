@@ -5,6 +5,7 @@ import com.consilens.connector.api.LegacyTypeMapper;
 import com.consilens.connector.api.dataset.DatasetHandle;
 import com.consilens.connector.api.model.ComparisonSpec;
 import com.consilens.connector.api.model.DataType;
+import com.consilens.connector.api.model.DerivedCompareColumns;
 import com.consilens.connector.api.model.FieldDescriptor;
 import com.consilens.connector.api.model.KeySpec;
 import com.consilens.connector.api.model.ResourceLocator;
@@ -61,13 +62,13 @@ final class ConnectorRecordDiffer {
             while (sourceCursor.hasGroup() || targetCursor.hasGroup()) {
                 if (!sourceCursor.hasGroup()) {
                     for (RecordRow row : targetCursor.currentRows()) {
-                        differences.add(DiffRow.added(targetCursor.currentKey().displayParts(), row.values, targetData.columns));
+                        addDifference(differences, DiffRow.added(targetCursor.currentKey().displayParts(), row.values, targetData.columns), settings);
                         sourceMissingCount++;
                     }
                     targetCursor.advanceGroup();
                 } else if (!targetCursor.hasGroup()) {
                     for (RecordRow row : sourceCursor.currentRows()) {
-                        differences.add(DiffRow.removed(sourceCursor.currentKey().displayParts(), row.values, sourceData.columns));
+                        addDifference(differences, DiffRow.removed(sourceCursor.currentKey().displayParts(), row.values, sourceData.columns), settings);
                         targetMissingCount++;
                     }
                     sourceCursor.advanceGroup();
@@ -75,13 +76,13 @@ final class ConnectorRecordDiffer {
                     int keyComparison = sourceCursor.currentKey().compareTo(targetCursor.currentKey());
                     if (keyComparison < 0) {
                         for (RecordRow row : sourceCursor.currentRows()) {
-                            differences.add(DiffRow.removed(sourceCursor.currentKey().displayParts(), row.values, sourceData.columns));
+                            addDifference(differences, DiffRow.removed(sourceCursor.currentKey().displayParts(), row.values, sourceData.columns), settings);
                             targetMissingCount++;
                         }
                         sourceCursor.advanceGroup();
                     } else if (keyComparison > 0) {
                         for (RecordRow row : targetCursor.currentRows()) {
-                            differences.add(DiffRow.added(targetCursor.currentKey().displayParts(), row.values, targetData.columns));
+                            addDifference(differences, DiffRow.added(targetCursor.currentKey().displayParts(), row.values, targetData.columns), settings);
                             sourceMissingCount++;
                         }
                         targetCursor.advanceGroup();
@@ -97,25 +98,25 @@ final class ConnectorRecordDiffer {
 
                         if (sourceRows.size() != 1 || targetRows.size() != 1) {
                             for (RecordRow row : sourceRows) {
-                                differences.add(DiffRow.removed(key.displayParts(), row.values, sourceData.columns));
+                                addDifference(differences, DiffRow.removed(key.displayParts(), row.values, sourceData.columns), settings);
                                 targetMissingCount++;
                             }
                             for (RecordRow row : targetRows) {
-                                differences.add(DiffRow.added(key.displayParts(), row.values, targetData.columns));
+                                addDifference(differences, DiffRow.added(key.displayParts(), row.values, targetData.columns), settings);
                                 sourceMissingCount++;
                             }
                         } else {
                             RecordRow sourceRow = sourceRows.get(0);
                             RecordRow targetRow = targetRows.get(0);
                             if (!sourceRow.normalizedValues.equals(targetRow.normalizedValues)) {
-                                differences.add(DiffRow.modified(
+                                addDifference(differences, DiffRow.modified(
                                         key.displayParts(),
                                         sourceRow.values,
                                         targetRow.values,
                                         sourceData.columns,
                                         targetData.columns,
                                         changedColumns(sourceData.columns, sourceRow.normalizedValues, targetRow.normalizedValues),
-                                        changedColumns(targetData.columns, sourceRow.normalizedValues, targetRow.normalizedValues)));
+                                        changedColumns(targetData.columns, sourceRow.normalizedValues, targetRow.normalizedValues)), settings);
                                 mismatchCount++;
                             }
                         }
@@ -165,6 +166,15 @@ final class ConnectorRecordDiffer {
                 .sourceTablePath(resolveTablePath(source.getResource(), source.getDataset()))
                 .targetTablePath(resolveTablePath(target.getResource(), target.getDataset()))
                 .build();
+    }
+
+    private void addDifference(List<DiffRow> differences, DiffRow diffRow, CompareExecutionSettings settings) {
+        long maxDifferences = settings != null ? settings.getMaxDifferences() : 1_000_000L;
+        if (differences.size() >= maxDifferences) {
+            throw new ConnectorException("Diff result exceeds maxDifferences=" + maxDifferences
+                    + ". Increase strategy.maxDifferences or narrow the comparison scope.");
+        }
+        differences.add(diffRow);
     }
 
     DiffResult empty(CompareSegment source, CompareSegment target, long sourceRows, long targetRows) {
@@ -251,7 +261,10 @@ final class ConnectorRecordDiffer {
                     ? new LinkedHashSet<>(keySpec.getFields())
                     : Set.of();
             for (FieldDescriptor field : schema.getFields()) {
-                if (field.getName() != null && !keys.contains(field.getName()) && !excluded.contains(field.getName())) {
+                if (field.getName() != null
+                        && !keys.contains(field.getName())
+                        && !excluded.contains(field.getName())
+                        && !DerivedCompareColumns.isDerived(field.getName())) {
                     result.add(field.getName());
                 }
             }

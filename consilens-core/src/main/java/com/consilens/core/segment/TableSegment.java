@@ -77,6 +77,9 @@ public class TableSegment {
     @Builder.Default
     private int segmentIndex = 0;
 
+    @Builder.Default
+    private boolean upperBoundInclusive = false;
+
     private boolean caseSensitive;
 
     // Runtime data
@@ -244,6 +247,7 @@ public class TableSegment {
             TableSegment segment = toBuilder()
                     .minKey(Optional.of(previousPoint))
                     .maxKey(Optional.of(checkpoint))
+                    .upperBoundInclusive(false)
                     .build();
             segments.add(segment);
             previousPoint = checkpoint;
@@ -253,6 +257,7 @@ public class TableSegment {
         TableSegment finalSegment = toBuilder()
                 .minKey(Optional.of(previousPoint))
                 .maxKey(maxKey)
+                .upperBoundInclusive(upperBoundInclusive)
                 .build();
         segments.add(finalSegment);
 
@@ -357,7 +362,10 @@ public class TableSegment {
                         if (whereBuilder.length() > 0) {
                             whereBuilder.append(" AND ");
                         }
-                        whereBuilder.append(String.format("%s < %s", column, formatValue(maxValue)));
+                        whereBuilder.append(String.format("%s %s %s",
+                                column,
+                                upperBoundInclusive ? "<=" : "<",
+                                formatValue(maxValue)));
                     }
                 }
             } else {
@@ -411,9 +419,11 @@ public class TableSegment {
                                     keyColumns.get(j), formatValue(maxValues.get(j))));
                         }
                         
-                        // Add comparison for current key (always use <)
-                        upperBound.append(String.format("%s < %s", 
-                                keyColumns.get(i), formatValue(maxValues.get(i))));
+                        // Add comparison for current key.
+                        upperBound.append(String.format("%s %s %s",
+                                keyColumns.get(i),
+                                (upperBoundInclusive && i == keyColumns.size() - 1) ? "<=" : "<",
+                                formatValue(maxValues.get(i))));
                         
                         if (i > 0) {
                             upperBound.append(")");

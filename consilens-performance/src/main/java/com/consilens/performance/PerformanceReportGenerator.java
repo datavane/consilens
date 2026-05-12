@@ -24,6 +24,7 @@ public class PerformanceReportGenerator {
         try {
             String markdown = buildMarkdownReport(result);
             Path path = Paths.get(outputPath);
+            createParentDirectories(path);
             Files.writeString(path, markdown);
             log.info("Markdown report generated: {}", outputPath);
         } catch (IOException e) {
@@ -39,6 +40,7 @@ public class PerformanceReportGenerator {
         try {
             String html = buildHtmlReport(result);
             Path path = Paths.get(outputPath);
+            createParentDirectories(path);
             Files.writeString(path, html);
             log.info("HTML report generated: {}", outputPath);
         } catch (IOException e) {
@@ -51,6 +53,7 @@ public class PerformanceReportGenerator {
      * Build Markdown report content.
      */
     private String buildMarkdownReport(PerformanceTestResult result) {
+        validateReportInput(result);
         StringBuilder md = new StringBuilder();
 
         PerformanceMetrics metrics = result.getMetrics();
@@ -205,6 +208,25 @@ public class PerformanceReportGenerator {
         return md.toString();
     }
 
+    private void createParentDirectories(Path path) throws IOException {
+        Path parent = path.toAbsolutePath().getParent();
+        if (parent != null) {
+            Files.createDirectories(parent);
+        }
+    }
+
+    private void validateReportInput(PerformanceTestResult result) {
+        if (result == null) {
+            throw new IllegalArgumentException("Performance test result cannot be null");
+        }
+        if (result.getConfig() == null) {
+            throw new IllegalArgumentException("Performance test result config cannot be null");
+        }
+        if (result.isSuccess() && result.getMetrics() == null) {
+            throw new IllegalArgumentException("Successful performance test result must include metrics");
+        }
+    }
+
     /**
      * Generate performance analysis.
      */
@@ -323,6 +345,7 @@ public class PerformanceReportGenerator {
      * Build HTML report content.
      */
     private String buildHtmlReport(PerformanceTestResult result) {
+        validateReportInput(result);
         StringBuilder html = new StringBuilder();
 
         PerformanceMetrics metrics = result.getMetrics();

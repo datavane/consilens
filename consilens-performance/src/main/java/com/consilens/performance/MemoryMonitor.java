@@ -37,6 +37,9 @@ public class MemoryMonitor {
     private volatile boolean memoryPressure;
 
     public MemoryMonitor(double memoryThreshold, boolean enableGCSuggestion) {
+        if (memoryThreshold <= 0.0 || memoryThreshold > 1.0) {
+            throw new IllegalArgumentException("Memory threshold must be in (0, 1]");
+        }
         this.runtime = Runtime.getRuntime();
         this.memoryMXBean = ManagementFactory.getMemoryMXBean();
         this.memoryThreshold = memoryThreshold;
@@ -99,7 +102,8 @@ public class MemoryMonitor {
         MemoryUsage heapUsage = memoryMXBean.getHeapMemoryUsage();
         currentMemoryUsed = heapUsage.getUsed();
         maxMemoryUsed = Math.max(maxMemoryUsed, currentMemoryUsed);
-        memoryUtilization = (double) currentMemoryUsed / heapUsage.getMax();
+        long heapMax = heapUsage.getMax() > 0 ? heapUsage.getMax() : runtime.maxMemory();
+        memoryUtilization = heapMax > 0 ? (double) currentMemoryUsed / heapMax : 0.0;
         memoryPressure = memoryUtilization > memoryThreshold;
     }
 
@@ -161,10 +165,12 @@ public class MemoryMonitor {
         MemoryUsage nonHeapUsage = memoryMXBean.getNonHeapMemoryUsage();
 
         if (log.isDebugEnabled()) {
-            log.debug("Memory Stats - Heap: {}/{}MB ({:.1f}%), Non-Heap: {}/{}MB",
+            long heapMax = heapUsage.getMax() > 0 ? heapUsage.getMax() : runtime.maxMemory();
+            double heapPercent = heapMax > 0 ? (double) heapUsage.getUsed() / heapMax * 100 : 0.0;
+            log.debug("Memory Stats - Heap: {}/{}MB ({}%), Non-Heap: {}/{}MB",
                     heapUsage.getUsed() / 1024 / 1024,
-                    heapUsage.getMax() / 1024 / 1024,
-                    (double) heapUsage.getUsed() / heapUsage.getMax() * 100,
+                    heapMax / 1024 / 1024,
+                    String.format("%.1f", heapPercent),
                     nonHeapUsage.getUsed() / 1024 / 1024,
                     nonHeapUsage.getMax() / 1024 / 1024);
         }
@@ -229,6 +235,7 @@ public class MemoryMonitor {
      * Get memory recommendations.
      */
     public String getMemoryRecommendations() {
+        updateMemoryStats();
         StringBuilder recommendations = new StringBuilder();
 
         if (memoryUtilization > 0.9) {
@@ -259,6 +266,7 @@ public class MemoryMonitor {
      * Check if JVM needs more memory.
      */
     public boolean needsMoreMemory() {
+        updateMemoryStats();
         return memoryUtilization > 0.85 || (gcCount.get() > 10 && getAverageGCTime() > 100);
     }
 
