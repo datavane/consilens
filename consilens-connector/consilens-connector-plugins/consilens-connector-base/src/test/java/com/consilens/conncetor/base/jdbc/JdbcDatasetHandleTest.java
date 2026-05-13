@@ -67,7 +67,7 @@ class JdbcDatasetHandleTest {
 
         assertTrue(handle.getSupport(RelationalDatasetSupport.class).isPresent());
         assertTrue(handle.getMetadata().getCapabilities().supports(ConnectorCapability.SERVER_SIDE_HASH));
-        assertFalse(handle.getMetadata().getCapabilities().supports(ConnectorCapability.SERVER_SIDE_JOIN));
+        assertTrue(handle.getMetadata().getCapabilities().supports(ConnectorCapability.SERVER_SIDE_JOIN));
         assertNull(handle.getMetadata().getAttributes().get("readOptions"));
         assertNull(handle.getMetadata().getAttributes().get("connection"));
     }

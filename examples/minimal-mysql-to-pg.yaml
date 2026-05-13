@@ -16,7 +16,7 @@ target:
   type: postgresql
   name: target-postgresql
   connection:
-    url: jdbc:postgresql://localhost:5432/mydb
+    url: jdbc:postgresql://localhost:5432/postgres?currentSchema=public
     username: ${env.PG_USER}
     password: ${env.PG_PASSWORD}
   resource:

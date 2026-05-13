@@ -227,17 +227,22 @@ public class JdbcDatasetHandle implements DatasetHandle, RelationalDatasetSuppor
             attributes.putAll(discoverDorisPartitionAttributes(resource));
         }
 
+        EnumSet<ConnectorCapability> capabilities = EnumSet.of(
+                ConnectorCapability.SCHEMA_DISCOVERY,
+                ConnectorCapability.FILTER_PUSHDOWN,
+                ConnectorCapability.PROJECTION_PUSHDOWN,
+                ConnectorCapability.SERVER_SIDE_HASH,
+                ConnectorCapability.ORDERED_SCAN,
+                ConnectorCapability.STREAM_SCAN
+        );
+        if (!isSqlResource(resource)) {
+            capabilities.add(ConnectorCapability.SERVER_SIDE_JOIN);
+        }
+
         return DatasetMetadata.builder()
                 .logicalName(resource != null ? (resource.getName() != null ? resource.getName() : resource.getPath()) : null)
                 .executionDomainId(buildExecutionDomainId(connectorType, connection))
-                .capabilities(new CapabilitySet(EnumSet.of(
-                        ConnectorCapability.SCHEMA_DISCOVERY,
-                        ConnectorCapability.FILTER_PUSHDOWN,
-                        ConnectorCapability.PROJECTION_PUSHDOWN,
-                        ConnectorCapability.SERVER_SIDE_HASH,
-                        ConnectorCapability.ORDERED_SCAN,
-                        ConnectorCapability.STREAM_SCAN
-                )))
+                .capabilities(new CapabilitySet(capabilities))
                 .attributes(attributes)
                 .build();
     }
