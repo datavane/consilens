@@ -220,4 +220,61 @@ class TableDiffRecordSinkTest {
             assertEquals("43", resultSet.getString("device_id_2"));
         }
     }
+
+    @Test
+    void shouldExpandDefaultWideTableColumnsFromDiffRowsWhenContextOnlyHasKeys() throws Exception {
+        String url = "jdbc:h2:mem:diff_record_dynamic_columns;MODE=MySQL;DB_CLOSE_DELAY=-1";
+        SinkConfig sinkConfig = new SinkConfig();
+        sinkConfig.setFormat("table");
+        sinkConfig.setType("diff-record");
+        sinkConfig.setProperties("{"
+                + "\"type\":\"mysql\","
+                + "\"url\":\"" + url + "\","
+                + "\"username\":\"sa\","
+                + "\"password\":\"\","
+                + "\"driver\":\"org.h2.Driver\","
+                + "\"tableName\":\"diff_record_dynamic_columns_test\","
+                + "\"createTable\":true,"
+                + "\"dropIfExists\":true,"
+                + "\"batchSize\":100"
+                + "}");
+
+        DiffContext context = DiffContext.builder()
+                .taskId("task-dynamic-columns")
+                .sourceColumnNames(List.of("record_id"))
+                .targetColumnNames(List.of("record_id"))
+                .build();
+
+        DiffRow row = DiffRow.modified(
+                List.of("REC0001"),
+                List.of("REC0001", 42L, "active"),
+                List.of("REC0001", 43L, "inactive"),
+                List.of("record_id", "col_int", "status"),
+                List.of("record_id", "col_int", "status"),
+                List.of("col_int", "status"),
+                List.of("col_int", "status")
+        );
+
+        TableDiffRecordSink sink = new TableDiffRecordSink();
+        sink.open(sinkConfig, context);
+        try {
+            sink.onDiffRecords(List.of(row), context);
+        } finally {
+            sink.close();
+        }
+
+        try (Connection connection = DriverManager.getConnection(url, "sa", "");
+             Statement statement = connection.createStatement();
+             ResultSet resultSet = statement.executeQuery(
+                     "SELECT record_id_1, col_int_1, status_1, record_id_2, col_int_2, status_2 "
+                             + "FROM diff_record_dynamic_columns_test")) {
+            assertTrue(resultSet.next());
+            assertEquals("REC0001", resultSet.getString("record_id_1"));
+            assertEquals("42", resultSet.getString("col_int_1"));
+            assertEquals("active", resultSet.getString("status_1"));
+            assertEquals("REC0001", resultSet.getString("record_id_2"));
+            assertEquals("43", resultSet.getString("col_int_2"));
+            assertEquals("inactive", resultSet.getString("status_2"));
+        }
+    }
 }

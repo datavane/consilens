@@ -1,11 +1,13 @@
 package com.consilens.core.algorithm;
 
 import com.consilens.common.enums.ChecksumAlgorithm;
+import com.consilens.common.enums.LocalCompareMode;
 import com.consilens.core.database.adpter.DatabaseAdapter;
 import com.consilens.core.database.adpter.DatabaseAdapter.RowMapper;
 import com.consilens.core.database.connection.ConnectionPool;
 import com.consilens.core.diff.DiffResult;
 import com.consilens.core.diff.DiffResult.InfoTreeNode;
+import com.consilens.core.thread.ConcurrencyConfig;
 import com.consilens.core.thread.ExecutorProvider;
 import com.consilens.connector.api.model.TablePath;
 import com.consilens.connector.api.model.PoolConfiguration;
@@ -179,6 +181,46 @@ class ChecksumDifferTest {
                         // Verify chunked queries were performed
                         verify(mockAdapter1, atLeast(2)).countAndChecksum(any(TableSegment.class));
                         verify(mockAdapter2, atLeast(2)).countAndChecksum(any(TableSegment.class));
+                }
+
+                @Test
+                @DisplayName("测试 row-hash 模式能够在键被标准化后仍然取回差异行")
+                void testRowHashComparisonShouldResolveRowsUsingNormalizedKeys() throws Exception {
+                        differ.close();
+                        differ = new ChecksumDiffer(new TableDiffer.DifferConfig(
+                                        4,
+                                        1000,
+                                        false,
+                                        ChecksumAlgorithm.CONCAT,
+                                        LocalCompareMode.ROW_HASH,
+                                        ConcurrencyConfig.defaultConfig()));
+
+                        lenient().when(mockAdapter1.countAndBounds(any(TableSegment.class)))
+                                        .thenReturn(new ChecksumResult(1, null, Arrays.asList(0L), Arrays.asList(1L)));
+                        lenient().when(mockAdapter2.countAndBounds(any(TableSegment.class)))
+                                        .thenReturn(new ChecksumResult(1, null, Arrays.asList(0L), Arrays.asList(1L)));
+                        lenient().when(mockAdapter1.countAndChecksum(any(TableSegment.class)))
+                                        .thenReturn(new ChecksumResult(1, "source-checksum", Arrays.asList(0L), Arrays.asList(1L)));
+                        lenient().when(mockAdapter2.countAndChecksum(any(TableSegment.class)))
+                                        .thenReturn(new ChecksumResult(1, "target-checksum", Arrays.asList(0L), Arrays.asList(1L)));
+
+                        when(mockAdapter1.querySegmentRowHashes(any(TableSegment.class)))
+                                        .thenReturn(Map.of(List.of(1), "source-row-hash"));
+                        when(mockAdapter2.querySegmentRowHashes(any(TableSegment.class)))
+                                        .thenReturn(Map.of(List.of(1), "target-row-hash"));
+
+                        when(mockAdapter1.querySegmentByKeys(any(TableSegment.class), anySet()))
+                                        .thenReturn(Collections.singletonList(
+                                                        new Object[] {"1", "user_00001", "1380000002"}));
+                        when(mockAdapter2.querySegmentByKeys(any(TableSegment.class), anySet()))
+                                        .thenReturn(Collections.singletonList(
+                                                        new Object[] {"1", "user_00001", "1380000001"}));
+
+                        DiffResult result = differ.diffTables(segment1, segment2).get();
+
+                        assertNotNull(result);
+                        assertEquals(1, result.getDifferences().size());
+                        assertEquals(List.of("value"), result.getDifferences().get(0).getChangedColumns1());
                 }
         }
 
