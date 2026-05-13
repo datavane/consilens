@@ -26,6 +26,13 @@ public class CheckpointSelector {
      * Choose optimal checkpoints for the given key range.
      */
     public List<KeyVector> chooseCheckpoints(KeyVector minKey, KeyVector maxKey, int preferredCount) {
+        return chooseCheckpoints(minKey, maxKey, preferredCount, false);
+    }
+
+    public List<KeyVector> chooseCheckpoints(KeyVector minKey,
+                                             KeyVector maxKey,
+                                             int preferredCount,
+                                             boolean forceSplit) {
         if (minKey.isGreaterThan(maxKey)) {
             throw new IllegalArgumentException("minKey must not be greater than maxKey");
         }
@@ -37,7 +44,7 @@ public class CheckpointSelector {
         long spaceSize = space.calculateSpaceSize(minKey, maxKey);
 
         // If space is too small, don't split
-        if (spaceSize <= bisectionThreshold) {
+        if (!forceSplit && spaceSize <= bisectionThreshold) {
             return List.of(minKey, maxKey);
         }
 
@@ -70,10 +77,13 @@ public class CheckpointSelector {
     /**
      * Choose checkpoints with adaptive strategy based on data distribution.
      */
-    public List<KeyVector> chooseAdaptiveCheckpoints(KeyVector minKey, KeyVector maxKey,
-                                                    long estimatedRows, SamplingResult samplingResult) {
+    public List<KeyVector> chooseAdaptiveCheckpoints(KeyVector minKey,
+                                                     KeyVector maxKey,
+                                                     int preferredCount,
+                                                     long estimatedRows,
+                                                     SamplingResult samplingResult) {
         // Start with basic uniform distribution
-        List<KeyVector> basicCheckpoints = chooseCheckpoints(minKey, maxKey, bisectionFactor);
+        List<KeyVector> basicCheckpoints = chooseCheckpoints(minKey, maxKey, preferredCount, true);
 
         // If we have sampling information, adjust checkpoints
         if (samplingResult != null && samplingResult.hasDistributionInfo()) {

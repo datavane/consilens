@@ -1,6 +1,7 @@
 package com.consilens.core.segment;
 
 import com.consilens.core.database.adpter.DatabaseAdapter;
+import com.consilens.core.segmentation.CheckpointSelector;
 import com.consilens.core.segmentation.IntelligentSegmenter;
 import com.consilens.core.segment.strategy.FallbackSegmentStrategy;
 import com.consilens.core.segment.strategy.RangeSegmentStrategy;
@@ -8,7 +9,6 @@ import com.consilens.core.segment.strategy.RowSampleSegmentStrategy;
 import com.consilens.core.segment.strategy.SegmentStrategy;
 import com.consilens.core.segment.strategy.SegmentStrategyType;
 import com.consilens.core.thread.ConcurrencyConfig;
-import com.consilens.core.thread.ExecutorProvider;
 import com.consilens.core.thread.ExecutorProvider;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
@@ -36,7 +36,11 @@ public class TableSegmenter {
 
     public TableSegmenter(DatabaseAdapter database, SegmenterConfig config, ExecutorProvider executorProvider) {
         this.config = config;
-        this.intelligentSegmenter = new IntelligentSegmenter(database);
+        this.intelligentSegmenter = new IntelligentSegmenter(
+                database,
+                buildCheckpointSelector(config),
+                config.getSampleSize(),
+                true);
         this.rangeStrategy = new RangeSegmentStrategy(intelligentSegmenter);
         this.rowSampleStrategy = new RowSampleSegmentStrategy();
         this.fallbackStrategy = new FallbackSegmentStrategy(config);
@@ -95,6 +99,13 @@ public class TableSegmenter {
 
     private Executor getIoExecutor() {
         return executorProvider.getIoExecutor();
+    }
+
+    private CheckpointSelector buildCheckpointSelector(SegmenterConfig config) {
+        int maxSegments = Math.max(2, config.getMaxSegmentCount());
+        long rawThreshold = config.getBisectionThreshold();
+        int threshold = (int) Math.max(1L, Math.min(Integer.MAX_VALUE, rawThreshold));
+        return new CheckpointSelector(maxSegments, threshold);
     }
 
     private SegmentStrategy selectStrategy(TableSegment table) {

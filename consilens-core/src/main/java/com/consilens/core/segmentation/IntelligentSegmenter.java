@@ -126,7 +126,11 @@ public class IntelligentSegmenter {
 
             // Choose checkpoints
             List<KeyVector> checkpoints = checkpointSelector.chooseAdaptiveCheckpoints(
-                    minKey, maxKey, estimateTableSize(table), samplingResult);
+                    minKey,
+                    maxKey,
+                    Math.max(2, maxSegments + 1),
+                    estimateTableSize(table),
+                    samplingResult);
 
             // Validate checkpoints
             if (!checkpointSelector.validateCheckpoints(checkpoints, minKey, maxKey)) {

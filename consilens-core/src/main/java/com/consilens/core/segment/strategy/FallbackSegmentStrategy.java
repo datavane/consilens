@@ -50,7 +50,7 @@ public class FallbackSegmentStrategy implements SegmentStrategy {
 
             try {
                 if (table.isBounded()) {
-                    List<List<Object>> checkpoints = table.chooseCheckpoints(maxSegments);
+                    List<List<Object>> checkpoints = table.chooseCheckpoints(Math.max(0, maxSegments - 1));
                     return table.segmentByCheckpoints(checkpoints);
                 }
                 return List.of(table);

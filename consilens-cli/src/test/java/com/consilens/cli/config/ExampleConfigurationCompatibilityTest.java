@@ -1,6 +1,8 @@
 package com.consilens.cli.config;
 
 import com.consilens.cli.model.CliConfiguration;
+import com.consilens.cli.service.CompareRequestFactory;
+import com.consilens.connector.api.normalization.DefaultNormalizationSpecValidator;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.api.Test;
@@ -73,6 +75,54 @@ class ExampleConfigurationCompatibilityTest {
         }
     }
 
+    @Test
+    void shouldCoverAllNormalizationRuleParametersInSameDbExample() throws Exception {
+        String exampleText = Files.readString(sameDbExamplePath());
+        List<String> requiredTokens = List.of(
+                "precision:",
+                "rounding:",
+                "format:",
+                "timezone:",
+                "comparisonMode:",
+                "encoding:",
+                "uppercase:",
+                "trueValue:",
+                "falseValue:",
+                "nullValue:");
+
+        for (String token : requiredTokens) {
+            assertTrue(exampleText.contains(token),
+                    "same-db-mysql-comparison.yaml 缺少 normalization 参数覆盖: " + token);
+        }
+    }
+
+    @Test
+    void shouldBuildValidNormalizationSpecForSameDbExample() throws Exception {
+        ConfigurationManager configurationManager = new ConfigurationManager(testEnvironment());
+        CliConfiguration config = configurationManager.loadConfiguration(sameDbExamplePath().toString(), false);
+
+        CompareRequestFactory factory = new CompareRequestFactory();
+        new DefaultNormalizationSpecValidator().validate(factory.create(config).getNormalizationSpec());
+    }
+
+    @Test
+    void shouldEnableCsvDiffRecordSinkForSameDbExample() throws Exception {
+        ConfigurationManager configurationManager = new ConfigurationManager(testEnvironment());
+        CliConfiguration config = configurationManager.loadConfiguration(sameDbExamplePath().toString(), false);
+
+        assertNotNull(config.getResult());
+        assertNotNull(config.getResult().getSinks());
+
+        var csvSink = config.getResult().getSinks().stream()
+                .filter(sink -> "csv".equalsIgnoreCase(sink.getFormat()))
+                .filter(sink -> "diff-record".equalsIgnoreCase(sink.getType()))
+                .findFirst()
+                .orElseThrow();
+
+        assertTrue(csvSink.isEnabled(), "same-db-mysql-comparison.yaml 的 csv diff-record sink 应默认启用");
+        assertTrue(csvSink.getProperties().contains("\"path\":\"./output/orders-diff.csv\""));
+    }
+
     private static Stream<Path> exampleConfigurationPaths() throws IOException {
         Path examplesDirectory = Paths.get("..", "examples").toAbsolutePath().normalize();
         List<Path> paths;
@@ -89,6 +139,10 @@ class ExampleConfigurationCompatibilityTest {
                     .collect(Collectors.toList());
         }
         return paths.stream();
+    }
+
+    private static Path sameDbExamplePath() {
+        return Paths.get("..", "examples", "same-db-mysql-comparison.yaml").toAbsolutePath().normalize();
     }
 
     private Map<String, String> testEnvironment() {

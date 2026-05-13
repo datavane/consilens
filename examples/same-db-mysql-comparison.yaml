@@ -1,6 +1,6 @@
 # 同库 join 比对配置 - MySQL 内部两张表比对
 # 适用于同一 JDBC URL 下的迁移验证，也覆盖 readOptions / extraColumns /
-# normalization / result.failOnSinkError / sink.enabled 等显式配置项
+# normalization（所有规则参数）/ result.failOnSinkError / sink.enabled 等显式配置项
 
 source:
   type: mysql
@@ -72,16 +72,35 @@ normalization:
     decimal:
       precision: 2
       rounding: true
+    float:
+      precision: 4
+      rounding: false
+    date:
+      format: yyyy-MM-dd
+      comparisonMode: DATE_ONLY
+    time:
+      format: HH:mm:ss
     datetime:
       format: yyyy-MM-dd HH:mm:ss
       timezone: Asia/Shanghai
-      comparisonMode: instant
+      comparisonMode: "TRUNCATE_TO_SECOND"
+    timestamp:
+      format: yyyy-MM-dd HH:mm:ss
+      timezone: Asia/Shanghai
+      comparisonMode: "TRUNCATE_TO_SECOND"
+    binary:
+      encoding: hex
+      uppercase: true
+    boolean:
+      trueValue: "Y"
+      falseValue: "N"
+      nullValue: "<BOOL_NULL>"
   source:
     varchar:
-      nullValue: ""
+      nullValue: "<SRC_NULL>"
   target:
     varchar:
-      nullValue: ""
+      nullValue: "<TGT_NULL>"
 
 result:
   failOnSinkError: false
@@ -90,7 +109,7 @@ result:
       type: result
     - format: csv
       type: diff-record
-      enabled: false
+      enabled: true
       properties:
         path: ./output/orders-diff.csv
         delimiter: ","
@@ -99,3 +118,6 @@ result:
         columns:
           - name: env
             value: staging
+    - format: console
+      type: result
+      enabled: false
