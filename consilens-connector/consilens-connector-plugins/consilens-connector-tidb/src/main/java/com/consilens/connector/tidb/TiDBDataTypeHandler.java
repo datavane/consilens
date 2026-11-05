@@ -35,6 +35,17 @@ public class TiDBDataTypeHandler extends BaseDataTypeHandler {
         super(capabilityProvider, normalizationConfig);
     }
 
+    /**
+     * 科学计数渲染：转发到 {@link BaseDataTypeHandler#mysqlFamilyScientificFloatExpression(String)}
+     * 的共享实现——mysql 族各方言必须逐字同形，不能各自拷贝。
+     */
+    @Override
+    protected String scientificFloatExpression(String quotedCol) {
+        return mysqlFamilyScientificFloatExpression(quotedCol);
+    }
+
+
+
     @Override
     public TypeDescriptor convertToTypeDescriptor(String originType) {
         if (originType == null || originType.isBlank()) {
@@ -166,7 +177,7 @@ public class TiDBDataTypeHandler extends BaseDataTypeHandler {
     @Override
     protected String normalizeString(String quotedCol) {
         // Just TRIM, no CAST needed for TiDB (MySQL-compatible)
-        return "COALESCE(TRIM(" + quotedCol + "), '')";
+        return "COALESCE(TRIM(" + quotedCol + "), " + stringNullReplacement() + ")";
     }
 
     /**
@@ -175,7 +186,7 @@ public class TiDBDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeInteger(String quotedCol) {
-        return "COALESCE(TRIM(CAST(" + quotedCol + " AS CHAR)), '0')";
+        return "COALESCE(TRIM(CAST(" + quotedCol + " AS CHAR)), '')";
     }
 
     /**
@@ -193,17 +204,16 @@ public class TiDBDataTypeHandler extends BaseDataTypeHandler {
         // If precision is 0, return integer format without decimal point
         if (precision == 0) {
             String roundFunction = rounding ? "ROUND" : "TRUNCATE";
-            return "COALESCE(TRIM(CAST(" + roundFunction + "(" + quotedCol + ", 0) AS CHAR)), '0')";
+            return "COALESCE(TRIM(CAST(" + roundFunction + "(" + quotedCol + ", 0) AS CHAR)), '')";
         }
 
-        String defaultValue = "0." + "0".repeat(precision);
 
         if (rounding) {
             // Round half up: ROUND then format
-            return "COALESCE(REPLACE(FORMAT(ROUND(" + quotedCol + ", " + precision + "), " + precision + "), ',', ''), '" + defaultValue + "')";
+            return "COALESCE(REPLACE(FORMAT(ROUND(" + quotedCol + ", " + precision + "), " + precision + "), ',', ''), '')";
         } else {
             // Truncate: TRUNCATE then format
-            return "COALESCE(REPLACE(FORMAT(TRUNCATE(" + quotedCol + ", " + precision + "), " + precision + "), ',', ''), '" + defaultValue + "')";
+            return "COALESCE(REPLACE(FORMAT(TRUNCATE(" + quotedCol + ", " + precision + "), " + precision + "), ',', ''), '')";
         }
     }
 
@@ -214,25 +224,24 @@ public class TiDBDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeFloat(String quotedCol) {
-        // Get precision from config, default to 4
-        int precision = getPrecision("float", 4);
+        // Get precision from config, default to 6
+        int precision = getPrecision("float", 6);
         // Get rounding config, default to true (round half up)
         boolean rounding = getRounding("float", true);
 
         // If precision is 0, return integer format without decimal point
         if (precision == 0) {
             String roundFunction = rounding ? "ROUND" : "TRUNCATE";
-            return "COALESCE(TRIM(CAST(" + roundFunction + "(CAST(" + quotedCol + " AS DOUBLE), 0) AS CHAR)), '0')";
+            return "COALESCE(TRIM(CAST(" + roundFunction + "(CAST(" + quotedCol + " AS DOUBLE), 0) AS CHAR)), '')";
         }
 
-        String defaultValue = "0." + "0".repeat(precision);
 
         if (rounding) {
             // Round half up: ROUND then format
-            return "COALESCE(REPLACE(FORMAT(ROUND(CAST(" + quotedCol + " AS DOUBLE), " + precision + "), " + precision + "), ',', ''), '" + defaultValue + "')";
+            return "COALESCE(REPLACE(FORMAT(ROUND(CAST(" + quotedCol + " AS DOUBLE), " + precision + "), " + precision + "), ',', ''), '')";
         } else {
             // Truncate: TRUNCATE then format
-            return "COALESCE(REPLACE(FORMAT(TRUNCATE(CAST(" + quotedCol + " AS DOUBLE), " + precision + "), " + precision + "), ',', ''), '" + defaultValue + "')";
+            return "COALESCE(REPLACE(FORMAT(TRUNCATE(CAST(" + quotedCol + " AS DOUBLE), " + precision + "), " + precision + "), ',', ''), '')";
         }
     }
 
@@ -271,8 +280,7 @@ public class TiDBDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeDateTime(String quotedCol) {
-        return "COALESCE(DATE_FORMAT(CONVERT_TZ(" + quotedCol + ", @@session.time_zone, '"
-                + resolveTiDbTimezone("datetime", "+00:00") + "'), '" + resolveTiDbTemporalFormat("datetime",
+        return "COALESCE(DATE_FORMAT(" + tzShiftByAnchor(quotedCol, resolveTiDbTimezone("datetime", "+00:00")) + ", '" + resolveTiDbTemporalFormat("datetime",
                 "%Y-%m-%d %H:%i:%s", "%Y-%m-%d") + "'), '')";
     }
 
@@ -282,8 +290,7 @@ public class TiDBDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeTimestamp(String quotedCol) {
-        return "COALESCE(DATE_FORMAT(CONVERT_TZ(" + quotedCol + ", @@session.time_zone, '"
-                + resolveTiDbTimezone("timestamp", "+00:00") + "'), '" + resolveTiDbTemporalFormat("timestamp",
+        return "COALESCE(DATE_FORMAT(" + tzShiftByAnchor(quotedCol, resolveTiDbTimezone("timestamp", "+00:00")) + ", '" + resolveTiDbTemporalFormat("timestamp",
                 "%Y-%m-%d %H:%i:%s", "%Y-%m-%d") + "'), '')";
     }
 
@@ -293,8 +300,7 @@ public class TiDBDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeTimestampWithTimezone(String quotedCol) {
-        return "COALESCE(DATE_FORMAT(CONVERT_TZ(" + quotedCol + ", @@session.time_zone, '"
-                + resolveTiDbTimezone("timestamp_with_timezone", "+00:00") + "'), '" + resolveTiDbTemporalFormat("timestamp_with_timezone",
+        return "COALESCE(DATE_FORMAT(" + tzShiftByAnchor(quotedCol, resolveTiDbTimezone("timestamp_with_timezone", "+00:00")) + ", '" + resolveTiDbTemporalFormat("timestamp_with_timezone",
                 "%Y-%m-%d %H:%i:%s", "%Y-%m-%d") + "'), '')";
     }
 
@@ -329,7 +335,7 @@ public class TiDBDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeBoolean(String quotedCol) {
-        return "CASE WHEN " + quotedCol + " = 1 THEN '1' ELSE '0' END";
+        return "CASE WHEN " + quotedCol + " IS NULL THEN '' WHEN " + quotedCol + " = 1 THEN '1' ELSE '0' END";
     }
 
     /**
@@ -353,7 +359,7 @@ public class TiDBDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeDefault(String quotedCol) {
-        return "COALESCE(TRIM(CAST(" + quotedCol + " AS CHAR)), '0')";
+        return "COALESCE(TRIM(CAST(" + quotedCol + " AS CHAR)), '')";
     }
 
     @Override

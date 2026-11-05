@@ -23,14 +23,50 @@ import java.util.stream.Collectors;
 public class DiffResult {
 
     /**
+     * Additive result/artifact schema version. Bumped only for breaking changes
+     * to field meaning or required fields.
+     */
+    public static final int RESULT_SCHEMA_VERSION = 1;
+
+    /**
      * List of differences found.
      */
     private List<DiffRow> differences;
 
     /**
+     * 容差内（精确不等、但按 tolerance/relativeTolerance 判等）的行样本。
+     * 默认口径下这些行不计入 {@link #differences} 与 totalDifferences，只用于报告单列。
+     */
+    @Builder.Default
+    private List<DiffRow> withinToleranceDifferences = Collections.emptyList();
+
+    /**
      * Statistics about the diff operation.
      */
     private DiffStatistics statistics;
+
+    /**
+     * Per-column statistics accumulated from the complete run result.
+     * Empty when the caller did not request column stats or the result was not post-processed.
+     */
+    @Builder.Default
+    private List<ColumnStats> columnStats = Collections.emptyList();
+
+    /**
+     * Structured schema compatibility report produced by the validation phase.
+     * Null for results created outside the standard TableDiffer flow.
+     */
+    private SchemaCompatibility schemaCompatibility;
+
+    /**
+     * Reproducibility fingerprint (safe configuration + engine version).
+     */
+    private RunFingerprint fingerprint;
+
+    /**
+     * Execution evidence derived from the existing InfoTree/metadata.
+     */
+    private DiffEvidence evidence;
 
     /**
      * Information tree tracking the diff process.
@@ -141,7 +177,7 @@ public class DiffResult {
             return "No statistics available";
         }
 
-        return String.format(
+        String summary = String.format(
                 "Source: %s (%d rows), Target: %s (%d rows), Differences: %d (source missing: %d, target missing: %d, mismatched: %d), %.2f%% difference",
                 sourceTablePath.getTableName(),
                 statistics.getSourceRowCount(),
@@ -151,8 +187,12 @@ public class DiffResult {
                 statistics.getSourceMissingCount(),
                 statistics.getTargetMissingCount(),
                 statistics.getMismatchCount(),
-                statistics.getDifferencePercentage() * 100
+                statistics.getDifferencePercentage()
         );
+        if (statistics.getWithinToleranceCount() > 0) {
+            summary += " (" + statistics.getWithinToleranceCount() + " within tolerance, not counted)";
+        }
+        return summary;
     }
 
     /**
@@ -173,9 +213,10 @@ public class DiffResult {
             statsMap.put("processingTimeMs", statistics.getProcessingTimeMs());
         }
 
+        statsMap.put("withinToleranceCount", statistics == null ? 0L : statistics.getWithinToleranceCount());
         statsMap.put("differenceCount", getDifferenceCount());
         statsMap.put("hasDifferences", hasDifferences());
-        statsMap.put("completedAt", completedAt.toString());
+        statsMap.put("completedAt", completedAt == null ? null : completedAt.toString());
 
         return statsMap;
     }
@@ -184,7 +225,7 @@ public class DiffResult {
      * Create a copy with additional metadata.
      */
     public DiffResult withMetadata(String key, Object value) {
-        Map<String, Object> newMetadata = new HashMap<>(metadata);
+        Map<String, Object> newMetadata = new HashMap<>(metadata == null ? Map.of() : metadata);
         newMetadata.put(key, value);
 
         return this.toBuilder()
@@ -200,19 +241,37 @@ public class DiffResult {
             return this;
         }
 
-        List<DiffRow> mergedDifferences = new ArrayList<>(this.differences);
-        mergedDifferences.addAll(other.differences);
+        // builder 构造的对象这几个字段可以是 null，合并前先归一化
+        List<DiffRow> mergedDifferences = new ArrayList<>(
+                this.differences == null ? List.of() : this.differences);
+        if (other.differences != null) {
+            mergedDifferences.addAll(other.differences);
+        }
 
-        DiffStatistics mergedStats = statistics.merge(other.statistics);
+        List<DiffRow> mergedWithinTolerance = new ArrayList<>(
+                this.withinToleranceDifferences == null ? List.of() : this.withinToleranceDifferences);
+        if (other.withinToleranceDifferences != null) {
+            mergedWithinTolerance.addAll(other.withinToleranceDifferences);
+        }
 
-        Map<String, Object> mergedMetadata = new HashMap<>(this.metadata);
-        mergedMetadata.putAll(other.metadata);
+        DiffStatistics mergedStats = statistics == null ? other.statistics : statistics.merge(other.statistics);
+
+        Map<String, Object> mergedMetadata = new HashMap<>(
+                this.metadata == null ? Map.of() : this.metadata);
+        if (other.metadata != null) {
+            mergedMetadata.putAll(other.metadata);
+        }
+
+        Instant mergedCompletedAt = completedAt == null ? other.completedAt
+                : other.completedAt == null || completedAt.isAfter(other.completedAt) ? completedAt
+                : other.completedAt;
 
         return builder()
                 .differences(mergedDifferences)
+                .withinToleranceDifferences(mergedWithinTolerance)
                 .statistics(mergedStats)
                 .infoTree(Optional.empty()) // Would need to merge info trees
-                .completedAt(completedAt.isAfter(other.completedAt) ? completedAt : other.completedAt)
+                .completedAt(mergedCompletedAt)
                 .metadata(mergedMetadata)
                 .sourceTablePath(sourceTablePath)
                 .targetTablePath(targetTablePath)
@@ -265,7 +324,9 @@ public class DiffResult {
         private final long totalDifferences;
         private final long processingTimeMs;
         private final long unchangedCount;
-        private final double differencePercentage;
+        /** 容差内行数（默认口径下不计入 totalDifferences，仅报告展示）。 */
+        @Builder.Default
+        private final long withinToleranceCount = 0L;
 
         public static DiffStatistics empty() {
             return builder()
@@ -277,7 +338,7 @@ public class DiffResult {
                     .totalDifferences(0)
                     .processingTimeMs(0)
                     .unchangedCount(0)
-                    .differencePercentage(0.0)
+                    .withinToleranceCount(0)
                     .build();
         }
 
@@ -285,13 +346,23 @@ public class DiffResult {
             return sourceMissingCount + targetMissingCount + mismatchCount;
         }
 
+        /**
+         * 差异占比，0..100：全站（前端进度条/matchScore 阈值、DiffReportSupport、
+         * percentageFromCounts）统一按百分数消费。
+         */
         public double getDifferencePercentage() {
-            long totalRows = Math.max(sourceRowCount, targetRowCount);
-            return totalRows > 0 ? (double) getTotalDifferences() / totalRows : 0.0;
+            // 分母取两侧行数之和：仅取 max 时，若一侧有 2N 行、另一侧 0 行，
+            // SM+TM 会达到 200% 以上，matchScore 变负、进度条/阈值全部失真。
+            long totalRows = sourceRowCount + targetRowCount;
+            if (totalRows <= 0) {
+                return 0.0;
+            }
+            double percentage = (double) getTotalDifferences() / totalRows * 100.0;
+            return Math.max(0.0, Math.min(100.0, percentage));
         }
 
         public long getUnchangedCount() {
-            return Math.min(sourceRowCount, targetRowCount) - mismatchCount;
+            return Math.max(0, Math.min(sourceRowCount, targetRowCount) - mismatchCount);
         }
 
         public DiffStatistics merge(DiffStatistics other) {
@@ -306,7 +377,8 @@ public class DiffResult {
                     .targetMissingCount(targetMissingCount + other.targetMissingCount)
                     .mismatchCount(mismatchCount + other.mismatchCount)
                     .processingTimeMs(Math.max(processingTimeMs, other.processingTimeMs))
-                    .unchangedCount(Math.max(unchangedCount, other.unchangedCount))
+                    .unchangedCount(unchangedCount + other.unchangedCount)
+                    .withinToleranceCount(withinToleranceCount + other.withinToleranceCount)
                     .build();
         }
     }

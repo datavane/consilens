@@ -24,14 +24,18 @@ class StarRocksDataTypeHandlerTest {
     @Test
     void testNormalizeColumn_Int() {
         String result = handler.normalizeColumn("age", DataType.INTEGER);
-        assertEquals("COALESCE(TRIM(CAST(`age` AS CHAR)), '0')", result);
+        // NULL 哨兵统一为空串（与其它方言一致）
+        assertEquals("COALESCE(TRIM(CAST(`age` AS CHAR)), '')", result);
     }
 
     @Test
     void testNormalizeColumn_Timestamp() {
         String result = handler.normalizeColumn("created_at", DataType.TIMESTAMP);
+        // 以固定锚点求偏移，再整体平移：命名时区不依赖 mysql.time_zone 表
         assertEquals(
-                "COALESCE(DATE_FORMAT(CONVERT_TZ(`created_at`, 'Asia/Shanghai', '+00:00'), '%Y-%m-%d %H:%i:%s'), '')",
+                "COALESCE(DATE_FORMAT(DATE_ADD(`created_at`, INTERVAL -TIMESTAMPDIFF(SECOND, "
+                        + "CONVERT_TZ('2020-06-01 12:00:00', @@session.time_zone, '+00:00'), "
+                        + "'2020-06-01 12:00:00') SECOND), '%Y-%m-%d %H:%i:%s'), '')",
                 result);
     }
 

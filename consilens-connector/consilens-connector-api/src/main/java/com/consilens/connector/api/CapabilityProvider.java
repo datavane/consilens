@@ -42,53 +42,6 @@ public interface CapabilityProvider {
     Set<DatabaseFeature> getSupportedFeatures();
 
     /**
-     * Get the default schema name for this database.
-     * 
-     * @return default schema name
-     */
-    String getDefaultSchema();
-
-    /**
-     * Get the catalog/schema separator.
-     * 
-     * @return catalog separator (typically ".")
-     */
-    String getCatalogSeparator();
-
-    /**
-     * Check if the database supports schema-specific features.
-     * 
-     * @return true if schemas are supported
-     */
-    default boolean supportsSchemas() {
-        return true;
-    }
-
-    /**
-     * Get database-specific pagination hints.
-     * 
-     * @param offset the offset value
-     * @param limit  the limit value
-     * @return pagination hint string (empty if not applicable)
-     */
-    String getPaginationHint(long offset, long limit);
-
-    /**
-     * Get database-specific escape character for wildcard characters.
-     * 
-     * @return escape character
-     */
-    char getWildcardEscapeChar();
-
-    /**
-     * Get SQL for escaping a string pattern.
-     * 
-     * @param pattern the pattern to escape
-     * @return escaped pattern
-     */
-    String escapePattern(String pattern);
-
-    /**
      * Get the opening quote character for identifiers.
      *
      * @return opening quote character (e.g., "`" for MySQL, "\"" for PostgreSQL)
@@ -106,7 +59,13 @@ public interface CapabilityProvider {
         if (identifier == null || identifier.isEmpty()) {
             return "";
         }
-        return getOpenQuote() + identifier + getCloseQuote();
+        String open = getOpenQuote();
+        String close = getCloseQuote();
+        // 标识符内出现闭合引号时必须转义（"→"" / `→`` / ]→]]），
+        // 否则可以提前闭合标识符并注入 SQL。
+        String escaped = close == null || close.isEmpty()
+                ? identifier : identifier.replace(close, close + close);
+        return open + escaped + close;
     }
 
     /**

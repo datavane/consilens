@@ -38,7 +38,11 @@ public class SQLServerMetadataQueryGenerator extends BaseMetadataQueryGenerator 
         return "SELECT kcu.COLUMN_NAME, kcu.ORDINAL_POSITION " +
                 "FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE kcu " +
                 "JOIN INFORMATION_SCHEMA.TABLE_CONSTRAINTS tc " +
+                // 约束名只在 schema 内唯一；少了 schema/table 限定，跨 schema 同名主键会串列
                 "ON kcu.CONSTRAINT_NAME = tc.CONSTRAINT_NAME " +
+                "AND kcu.CONSTRAINT_SCHEMA = tc.CONSTRAINT_SCHEMA " +
+                "AND kcu.TABLE_SCHEMA = tc.TABLE_SCHEMA " +
+                "AND kcu.TABLE_NAME = tc.TABLE_NAME " +
                 "WHERE tc.CONSTRAINT_TYPE = 'PRIMARY KEY' " +
                 "AND kcu.TABLE_SCHEMA = '" + escapeString(schemaName) + "' " +
                 "AND kcu.TABLE_NAME = '" + escapeString(tableName) + "' " +

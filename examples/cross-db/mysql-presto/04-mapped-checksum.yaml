@@ -1,0 +1,75 @@
+# MySQL vs Presto 字段映射比对配置
+# 目标：覆盖 comparison.mappings，并演示 column / expression / literal 三种映射方式
+
+source:
+  type: mysql
+  name: source-mysql-mapped
+  connection:
+    url: jdbc:mysql://127.0.0.1:13306/mydb?useUnicode=true&characterEncoding=UTF-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+    username: ${env.MYSQL_USER}
+    password: ${env.MYSQL_PASSWORD}
+  resource:
+    type: table
+    name: users
+
+target:
+  type: presto
+  name: target-presto-mapped
+  connection:
+    url: jdbc:presto://127.0.0.1:8085/mysql/mydb_target
+    username: ${env.PRESTO_USER}
+    password: ${env.PRESTO_PASSWORD}
+  resource:
+    type: table
+    name: users
+
+comparison:
+  keys:
+    source:
+      - id
+    target:
+      - id
+
+  mappings:
+    - name: user_id
+      source:
+        column: id
+      target:
+        column: id
+      key: true
+
+    - name: normalized_name
+      source:
+        expression: "UPPER(name)"
+      target:
+        expression: "UPPER(name)"
+
+    - name: email
+      source:
+        column: email
+      target:
+        column: email
+
+    - name: normalized_phone
+      source:
+        expression: "REPLACE(phone, '+86', '')"
+      target:
+        expression: "REPLACE(phone, '+86', '')"
+
+    - name: source_system
+      source:
+        literal: "seed-users"
+      target:
+        literal: "seed-users"
+
+strategy:
+  mode: checksum
+  algorithm: xor
+  bisectionFactor: 8
+  bisectionThreshold: 8000
+  batchSize: 1000
+
+result:
+  sinks:
+    - format: console
+      type: result

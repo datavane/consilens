@@ -17,12 +17,38 @@ jobs:
           java-version: '11'
           distribution: 'temurin'
           cache: maven
+      - name: Capture JDK 11
+        run: echo "JAVA11_HOME=$JAVA_HOME" >> "$GITHUB_ENV"
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: maven
+      - name: Capture JDK 17
+        run: echo "JAVA17_HOME=$JAVA_HOME" >> "$GITHUB_ENV"
 
       - name: Build Release Package
-        run: mvn clean package -DskipTests -Prelease -B
+        run: JAVA17_HOME="$JAVA17_HOME" JAVA_HOME="$JAVA11_HOME" scripts/release/release-check.sh
+
+      - name: Stage release assets and checksums
+        run: |
+          set -euo pipefail
+          rm -rf release-assets
+          mkdir -p release-assets
+          cp consilens-dist/target/consilens-*.tar.gz release-assets/
+          cp consilens-dist/target/bom.json consilens-dist/target/bom.xml release-assets/
+          find consilens-server/target -maxdepth 1 -name 'consilens-server-*.jar' \
+            ! -name '*-sources.jar' ! -name '*-javadoc.jar' -exec cp {} release-assets/ \;
+          find consilens-mcp/target -maxdepth 1 -name 'consilens-mcp-*.jar' \
+            ! -name 'original-*' ! -name '*-shaded.jar' -exec cp {} release-assets/ \;
+          (cd release-assets && sha256sum * > SHA256SUMS)
+          (cd release-assets && sha256sum -c SHA256SUMS)
+          cat release-assets/SHA256SUMS
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: consilens-dist/target/consilens-*.tar.gz
+          files: release-assets/*
           generate_release_notes: true

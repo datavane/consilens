@@ -1,5 +1,6 @@
 package com.consilens.sink.csv;
 
+import com.consilens.common.io.PathSupport;
 import com.consilens.core.diff.DiffRow;
 import com.consilens.core.lifecycle.DiffContext;
 import com.consilens.sink.api.ColumnValueInterpolator;
@@ -37,7 +38,10 @@ public class CsvDiffRecordSink implements Sink {
     private static final List<String> DEFAULT_COLUMNS = Arrays.asList("operation", "primaryKey", "sourceValues", "targetValues");
 
     private BufferedWriter writer;
+    /** 容差内记录写旁挂文件：不改变主文件的列契约，也不混进"差异行数"。 */
+    private BufferedWriter withinToleranceWriter;
     private CsvSinkConfig sinkConfig;
+    private Path mainPath;
 
     @Override
     public void open(SinkConfig config, DiffContext context) throws IOException {
@@ -46,30 +50,77 @@ public class CsvDiffRecordSink implements Sink {
         String resolvedPath = ColumnValueInterpolator.resolvePath(
                 path != null ? path : "diff-record-${taskId}.csv", context);
         Path filePath = Paths.get(resolvedPath);
-        if (filePath.getParent() != null) {
-            Files.createDirectories(filePath.getParent());
-        }
+        mainPath = filePath;
+        PathSupport.ensureParent(filePath);
         writer = Files.newBufferedWriter(filePath);
         if (sinkConfig.isIncludeHeader()) {
-            writeHeader();
+            writeHeader(writer);
+        }
+        // 同路径重跑时清掉上一轮的旁挂文件：否则本轮没有容差内行时，上一轮的旧文件会被误当成这次的结论
+        Path stale = withinTolerancePath();
+        try {
+            if (Files.deleteIfExists(stale)) {
+                log.debug("Removed stale within-tolerance report: {}", stale);
+            }
+        } catch (IOException e) {
+            // 清不掉旧文件最多让报告多一份过期样本，不该让整次 compare 失败（failOnSinkError 默认 true）
+            log.warn("Failed to remove stale within-tolerance report {}: {}", stale, e.getMessage());
         }
     }
 
-    private void writeHeader() throws IOException {
-        List<String> headers;
+    private List<String> headers() {
         if (sinkConfig.isMergeMode()) {
-            headers = buildMergeHeaders();
-        } else if (sinkConfig.hasCustomColumns()) {
-            headers = new ArrayList<>();
-            for (ColumnMapping col : sinkConfig.getColumns()) {
-                headers.add(col.getName());
-            }
-        } else {
-            headers = DEFAULT_COLUMNS;
+            return buildMergeHeaders();
         }
-        writer.write(String.join(sinkConfig.getDelimiter(), headers));
-        writer.newLine();
-        writer.flush();
+        if (sinkConfig.hasCustomColumns()) {
+            List<String> custom = new ArrayList<>();
+            for (ColumnMapping col : sinkConfig.getColumns()) {
+                custom.add(col.getName());
+            }
+            return custom;
+        }
+        return DEFAULT_COLUMNS;
+    }
+
+    private void writeHeader(BufferedWriter target) throws IOException {
+        // 表头同样走 CSV 转义：自定义列名可能含分隔符/引号
+        target.write(String.join(sinkConfig.getDelimiter(),
+                headers().stream().map(this::escapeCSV).collect(java.util.stream.Collectors.toList())));
+        target.newLine();
+        target.flush();
+    }
+
+    /**
+     * 容差内（未计入差异）的行写到 {@code <name>.within-tolerance.csv}：既能在报告里单独看到，
+     * 又不会污染主文件的差异行数和列契约。文件在第一次收到这类行时才创建。
+     */
+    @Override
+    public void onWithinToleranceRecords(List<DiffRow> rows, DiffContext context) throws IOException {
+        if (rows == null || rows.isEmpty()) {
+            return;
+        }
+        if (withinToleranceWriter == null) {
+            withinToleranceWriter = Files.newBufferedWriter(withinTolerancePath());
+            if (sinkConfig.isIncludeHeader()) {
+                writeHeader(withinToleranceWriter);
+            }
+        }
+        for (DiffRow row : rows) {
+            withinToleranceWriter.write(buildLine(row, context));
+            withinToleranceWriter.newLine();
+        }
+        withinToleranceWriter.flush();
+    }
+
+    /** 主文件同目录、同名加 {@code .within-tolerance} 后缀；无扩展名时直接追加后缀。 */
+    Path withinTolerancePath() {
+        String fileName = mainPath.getFileName().toString();
+        int dot = fileName.lastIndexOf('.');
+        String suffix = ".within-tolerance.csv";
+        String sibling = dot > 0
+                ? fileName.substring(0, dot) + suffix
+                : fileName + suffix;
+        return mainPath.getParent() == null ? Paths.get(sibling) : mainPath.getParent().resolve(sibling);
     }
 
     @Override
@@ -154,10 +205,36 @@ public class CsvDiffRecordSink implements Sink {
         }
     }
 
+
+    /**
+     * 防止 CSV 注入：以 = + @ 或（非数字的）- 开头的单元格会被 Excel/Sheets 当作公式执行。
+     * 这类值统一加一个前导单引号，让表格软件按文本显示；纯数字（含负数）保持原样，
+     * 否则会把 -12.5 这类合法数值改坏。
+     */
+    private static String defuseFormula(String value) {
+        if (value == null || value.isEmpty()) {
+            return value;
+        }
+        char first = value.charAt(0);
+        boolean risky;
+        if (first == '=' || first == '+' || first == '@') {
+            risky = true;
+        } else if (first == '-') {
+            risky = !NUMERIC.matcher(value).matches();
+        } else {
+            risky = first == '\t' || first == '\r';
+        }
+        return risky ? "'" + value : value;
+    }
+
+    private static final java.util.regex.Pattern NUMERIC =
+            java.util.regex.Pattern.compile("-?\\d+(\\.\\d+)?([eE][-+]?\\d+)?");
+
     private String escapeCSV(String value) {
         if (value == null) return "";
+        value = defuseFormula(value);
         String delim = sinkConfig.getDelimiter();
-        if (value.contains(delim) || value.contains("\"") || value.contains("\n")) {
+        if (value.contains(delim) || value.contains("\"") || value.contains("\n") || value.contains("\r")) {
             return "\"" + value.replace("\"", "\"\"") + "\"";
         }
         return value;
@@ -165,9 +242,30 @@ public class CsvDiffRecordSink implements Sink {
 
     @Override
     public void close() throws IOException {
-        if (writer != null) {
-            writer.close();
-            log.info("CsvDiffRecordSink closed: {}", sinkConfig != null ? sinkConfig.getPath() : "");
+        // 两个 writer 必须都尝试关闭：主文件 close 抛异常时也要释放旁挂文件句柄
+        IOException failure = null;
+        try {
+            if (writer != null) {
+                writer.close();
+                log.info("CsvDiffRecordSink closed: {}", sinkConfig != null ? sinkConfig.getPath() : "");
+            }
+        } catch (IOException e) {
+            failure = e;
+        }
+        try {
+            if (withinToleranceWriter != null) {
+                withinToleranceWriter.close();
+                log.info("CsvDiffRecordSink within-tolerance report closed: {}", withinTolerancePath());
+            }
+        } catch (IOException e) {
+            if (failure == null) {
+                failure = e;
+            } else {
+                failure.addSuppressed(e);
+            }
+        }
+        if (failure != null) {
+            throw failure;
         }
     }
 

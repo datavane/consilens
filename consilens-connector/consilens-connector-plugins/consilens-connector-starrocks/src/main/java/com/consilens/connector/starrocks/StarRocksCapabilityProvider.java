@@ -52,18 +52,4 @@ public class StarRocksCapabilityProvider extends BaseCapabilityProvider {
         return EnumSet.copyOf(STARROCKS_FEATURES);
     }
 
-    @Override
-    public String getDefaultSchema() {
-        return "starrocks";
-    }
-
-    @Override
-    public char getWildcardEscapeChar() {
-        return '\\';
-    }
-
-    @Override
-    public String getPaginationHint(long offset, long limit) {
-        return ""; // StarRocks doesn't need pagination hints
-    }
 }

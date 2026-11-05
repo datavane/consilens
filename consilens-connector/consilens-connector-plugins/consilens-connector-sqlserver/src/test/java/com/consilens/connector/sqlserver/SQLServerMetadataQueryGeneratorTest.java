@@ -43,6 +43,9 @@ class SQLServerMetadataQueryGeneratorTest {
 
         assertTrue(sql.contains("INFORMATION_SCHEMA"));
         assertTrue(sql.contains("PRIMARY KEY"));
+        // 约束名只在 schema 内唯一，join 必须带 schema/table 限定
+        assertTrue(sql.contains("kcu.CONSTRAINT_SCHEMA = tc.CONSTRAINT_SCHEMA"), sql);
+        assertTrue(sql.contains("kcu.TABLE_SCHEMA = tc.TABLE_SCHEMA"), sql);
     }
 
     @Test

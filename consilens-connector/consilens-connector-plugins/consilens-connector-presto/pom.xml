@@ -8,7 +8,7 @@
     <parent>
         <groupId>com.consilens</groupId>
         <artifactId>consilens-connector-plugins</artifactId>
-        <version>0.2.0</version>
+        <version>0.1-SNAPSHOT</version>
     </parent>
     
     <artifactId>consilens-connector-presto</artifactId>
@@ -60,11 +60,13 @@
             <scope>test</scope>
         </dependency>
         
-        <!-- Presto JDBC Driver (for testing) -->
+        <!-- Presto JDBC Driver（PrestoDB 系，与 prestodb/presto 服务端同源）。
+             注意：不要引入 io.prestosql:presto-jdbc（PrestoSQL/Trino 系），两者类名同为
+             com.facebook.presto.jdbc.*，同时出现在 classpath 会互相覆盖。 -->
         <dependency>
             <groupId>com.facebook.presto</groupId>
             <artifactId>presto-jdbc</artifactId>
-            <version>0.284</version>
+            <version>0.286</version>
         </dependency>
     </dependencies>
 </project>

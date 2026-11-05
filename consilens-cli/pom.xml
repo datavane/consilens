@@ -8,7 +8,7 @@
     <parent>
         <groupId>com.consilens</groupId>
         <artifactId>consilens</artifactId>
-        <version>0.2.0</version>
+        <version>0.1-SNAPSHOT</version>
     </parent>
 
     <artifactId>consilens-cli</artifactId>
@@ -31,55 +31,44 @@
 
         <dependency>
             <groupId>com.consilens</groupId>
+            <artifactId>consilens-sdk</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>com.consilens</groupId>
+            <artifactId>consilens-cluster-api</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>com.consilens</groupId>
+            <artifactId>consilens-cluster-runtime</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>com.consilens</groupId>
+            <artifactId>consilens-cluster-yarn</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>com.consilens</groupId>
+            <artifactId>consilens-cluster-kubernetes</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>com.consilens</groupId>
             <artifactId>consilens-connector-all</artifactId>
             <version>${project.version}</version>
         </dependency>
 
         <dependency>
             <groupId>com.consilens</groupId>
+            <artifactId>consilens-connector-testkit</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>com.consilens</groupId>
             <artifactId>consilens-sink-all</artifactId>
-        </dependency>
-
-        <dependency>
-            <groupId>com.consilens</groupId>
-            <artifactId>consilens-ai-core</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-
-        <dependency>
-            <groupId>com.consilens</groupId>
-            <artifactId>consilens-ai-analyzer-rulebased</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-
-        <dependency>
-            <groupId>com.consilens</groupId>
-            <artifactId>consilens-ai-llm-api</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-
-        <dependency>
-            <groupId>com.consilens</groupId>
-            <artifactId>consilens-ai-llm-noop</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-
-        <dependency>
-            <groupId>com.consilens</groupId>
-            <artifactId>consilens-ai-llm-ollama</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-
-        <dependency>
-            <groupId>com.consilens</groupId>
-            <artifactId>consilens-ai-llm-openai</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-
-        <dependency>
-            <groupId>com.consilens</groupId>
-            <artifactId>consilens-ai-llm-deepseek</artifactId>
-            <version>${project.version}</version>
         </dependency>
 
         <!-- CLI -->
@@ -157,6 +146,81 @@
                 </configuration>
             </plugin>
 
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-shade-plugin</artifactId>
+                <version>3.5.3</version>
+                <executions>
+                    <execution>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>shade</goal>
+                        </goals>
+                        <configuration>
+                            <createDependencyReducedPom>false</createDependencyReducedPom>
+                            <filters>
+                                <filter>
+                                    <artifact>*:*</artifact>
+                                    <excludes>
+                                        <exclude>META-INF/*.SF</exclude>
+                                        <exclude>META-INF/*.DSA</exclude>
+                                        <exclude>META-INF/*.RSA</exclude>
+                                    </excludes>
+                                </filter>
+                            </filters>
+                            <transformers>
+                                <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
+                                <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
+                                    <mainClass>com.consilens.cli.ConsilensCliApplication</mainClass>
+                                    <manifestEntries>
+                                        <Implementation-Title>${project.artifactId}</Implementation-Title>
+                                        <Implementation-Version>${project.version}</Implementation-Version>
+                                    </manifestEntries>
+                                </transformer>
+                            </transformers>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+
         </plugins>
     </build>
+
+    <profiles>
+        <profile>
+            <id>yarn-client</id>
+            <dependencies>
+                <dependency>
+                    <groupId>io.netty</groupId>
+                    <artifactId>netty-resolver</artifactId>
+                    <version>4.1.68.Final</version>
+                </dependency>
+                <dependency>
+                    <groupId>org.apache.hadoop</groupId>
+                    <artifactId>hadoop-yarn-client</artifactId>
+                    <version>${hadoop.version}</version>
+                </dependency>
+                <dependency>
+                    <groupId>org.apache.hadoop</groupId>
+                    <artifactId>hadoop-yarn-api</artifactId>
+                    <version>${hadoop.version}</version>
+                </dependency>
+                <dependency>
+                    <groupId>org.apache.hadoop</groupId>
+                    <artifactId>hadoop-common</artifactId>
+                    <version>${hadoop.version}</version>
+                </dependency>
+            </dependencies>
+        </profile>
+        <profile>
+            <id>kubernetes-client</id>
+            <dependencies>
+                <dependency>
+                    <groupId>io.fabric8</groupId>
+                    <artifactId>kubernetes-client</artifactId>
+                    <version>${fabric8.kubernetes.version}</version>
+                </dependency>
+            </dependencies>
+        </profile>
+    </profiles>
 </project>

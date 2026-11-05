@@ -1,0 +1,71 @@
+{
+  "source": {
+    "type": "mysql",
+    "name": "source-mysql",
+    "connection": {
+      "url": "jdbc:mysql://127.0.0.1:13306/consilens_demo?useUnicode=true&characterEncoding=UTF-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true",
+      "username": "${env.MYSQL_USER}",
+      "password": "${env.MYSQL_PASSWORD}"
+    },
+    "resource": {
+      "type": "table",
+      "name": "CONSILENS_PERFORMANCE_DEMO_TABLE"
+    }
+  },
+  "target": {
+    "type": "oracle",
+    "name": "target-oracle",
+    "connection": {
+      "url": "jdbc:oracle:thin:@127.0.0.1:1521:ORCL",
+      "username": "${env.ORACLE_USER}",
+      "password": "${env.ORACLE_PASSWORD}"
+    },
+    "resource": {
+      "type": "table",
+      "name": "CONSILENS_PERFORMANCE_DEMO_TABLE"
+    }
+  },
+  "comparison": {
+    "keys": {
+      "source": [
+        "record_id"
+      ],
+      "target": [
+        "record_id"
+      ]
+    },
+    "fields": {
+      "source": [
+        "col_tinyint",
+        "col_int",
+        "col_decimal",
+        "amount",
+        "status",
+        "updated_at"
+      ],
+      "target": [
+        "col_tinyint",
+        "col_int",
+        "col_decimal",
+        "amount",
+        "status",
+        "updated_at"
+      ]
+    }
+  },
+  "strategy": {
+    "mode": "checksum",
+    "algorithm": "xor",
+    "bisectionFactor": 8,
+    "bisectionThreshold": 8000,
+    "batchSize": 1000
+  },
+  "result": {
+    "sinks": [
+      {
+        "format": "console",
+        "type": "result"
+      }
+    ]
+  }
+}

@@ -14,9 +14,6 @@ public class NoopDiffLifecycle implements DiffLifecycle {
     public void onDiffStart(DiffContext context) {}
 
     @Override
-    public void onSegmentComplete(SegmentResult result) {}
-
-    @Override
     public void onDifferencesFound(List<DiffRow> diffs, DiffContext context) {}
 
     @Override

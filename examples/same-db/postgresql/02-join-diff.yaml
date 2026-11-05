@@ -1,0 +1,46 @@
+# PostgreSQL 同库 join 差异比对配置
+# 目标：orders vs orders_backup，覆盖 TARGET_MISSING + MISMATCH。基线：total=2。
+
+source:
+  type: postgresql
+  name: source-PostgreSQL
+  connection:
+    url: jdbc:postgresql://127.0.0.1:5432/consilens_demo?currentSchema=public
+    username: ${env.PG_USER}
+    password: ${env.PG_PASSWORD}
+  resource:
+    type: table
+    name: public.orders
+
+target:
+  type: postgresql
+  name: target-PostgreSQL
+  connection:
+    url: jdbc:postgresql://127.0.0.1:5432/consilens_demo?currentSchema=public
+    username: ${env.PG_USER}
+    password: ${env.PG_PASSWORD}
+  resource:
+    type: table
+    name: public.orders_backup
+
+comparison:
+  keys:
+    source: [order_id]
+    target: [order_id]
+  fields:
+    source: [customer_id, amount, status, created_at]
+    target: [customer_id, amount, status, created_at]
+
+strategy:
+  mode: join
+  algorithm: concat
+  bisectionFactor: 4
+  bisectionThreshold: 5000
+  batchSize: 500
+  localCompare:
+    mode: row-hash
+
+result:
+  sinks:
+    - format: console
+      type: result

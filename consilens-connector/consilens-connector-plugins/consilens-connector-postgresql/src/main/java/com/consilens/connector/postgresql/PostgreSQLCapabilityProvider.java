@@ -55,18 +55,4 @@ public class PostgreSQLCapabilityProvider extends BaseCapabilityProvider {
         return EnumSet.copyOf(POSTGRESQL_FEATURES);
     }
 
-    @Override
-    public String getDefaultSchema() {
-        return "public"; // PostgreSQL default schema is "public"
-    }
-
-    @Override
-    public char getWildcardEscapeChar() {
-        return '\\';
-    }
-
-    @Override
-    public String getPaginationHint(long offset, long limit) {
-        return ""; // PostgreSQL doesn't need pagination hints
-    }
 }

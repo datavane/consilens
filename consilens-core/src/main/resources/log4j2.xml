@@ -6,8 +6,8 @@
     </Properties>
 
     <Appenders>
-        <!-- 控制台输出 -->
-        <Console name="Console" target="SYSTEM_OUT">
+        <!-- 控制台输出到 stderr，保证 stdout 只承载命令结果（JSON/Markdown/verdict） -->
+        <Console name="Console" target="SYSTEM_ERR">
             <PatternLayout pattern="${LOG_PATTERN}"/>
         </Console>
 

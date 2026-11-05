@@ -61,13 +61,18 @@ class TrinoSqlQueryGeneratorTest {
         String sql = generator.getChecksumSQL("default", "users", columns, Arrays.asList("id"), types, null);
         assertTrue(sql.toLowerCase().contains("md5"));
     }
-
     @Test
-    void testGetFullOuterJoinSQL() {
-        List<String> joinColumns = Arrays.asList("id");
-        String sql = generator.getFullOuterJoinSQL("table1", "table2", joinColumns, null);
+    void testChecksumSqlWithSingleComparedColumnDoesNotEmitOneArgConcat() {
+        List<String> columns = Arrays.asList("name");
+        Map<String, DataType> types = new HashMap<>();
+        types.put("id", DataType.INTEGER);
+        types.put("name", DataType.VARCHAR);
 
-        assertTrue(sql.contains("FULL OUTER JOIN"));
+        String sql = generator.getChecksumSQL("default", "users", columns, Arrays.asList("id"), types, null);
+
+        // Trino 的 CONCAT 至少两个参数，单列比较不能生成 CONCAT(name)
+        assertFalse(sql.contains("CONCAT(name)"), sql);
+        assertFalse(sql.contains("CONCAT("), sql);
     }
 
     @Test

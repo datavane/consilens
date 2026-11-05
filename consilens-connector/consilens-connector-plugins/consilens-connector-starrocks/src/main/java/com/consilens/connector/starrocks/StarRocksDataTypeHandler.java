@@ -42,6 +42,17 @@ public class StarRocksDataTypeHandler extends BaseDataTypeHandler {
         super(capabilityProvider, normalizationConfig);
     }
 
+    /**
+     * 科学计数渲染：转发到 {@link BaseDataTypeHandler#mysqlFamilyScientificFloatExpression(String)}
+     * 的共享实现——mysql 族各方言必须逐字同形，不能各自拷贝。
+     */
+    @Override
+    protected String scientificFloatExpression(String quotedCol) {
+        return mysqlFamilyScientificFloatExpression(quotedCol);
+    }
+
+
+
     @Override
     public TypeDescriptor convertToTypeDescriptor(String originType) {
         if (originType == null || originType.isBlank()) {
@@ -197,7 +208,7 @@ public class StarRocksDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeString(String quotedCol) {
-        return "COALESCE(TRIM(" + quotedCol + "), '')";
+        return "COALESCE(TRIM(" + quotedCol + "), " + stringNullReplacement() + ")";
     }
 
     /**
@@ -206,7 +217,7 @@ public class StarRocksDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeInteger(String quotedCol) {
-        return "COALESCE(TRIM(CAST(" + quotedCol + " AS CHAR)), '0')";
+        return "COALESCE(TRIM(CAST(" + quotedCol + " AS CHAR)), '')";
     }
 
     /**
@@ -224,20 +235,19 @@ public class StarRocksDataTypeHandler extends BaseDataTypeHandler {
         if (precision == 0) {
             // Return integer format without decimal point
             if (rounding) {
-                return "COALESCE(TRIM(CAST(ROUND(" + quotedCol + ", 0) AS CHAR)), '0')";
+                return "COALESCE(TRIM(CAST(ROUND(" + quotedCol + ", 0) AS CHAR)), '')";
             } else {
-                return "COALESCE(TRIM(CAST(TRUNCATE(" + quotedCol + ", 0) AS CHAR)), '0')";
+                return "COALESCE(TRIM(CAST(TRUNCATE(" + quotedCol + ", 0) AS CHAR)), '')";
             }
         }
         
-        String defaultValue = "0." + "0".repeat(precision);
         if (rounding) {
             // CAST to DECIMAL(38,precision) then to CHAR
             // StarRocks preserves trailing zeros when casting DECIMAL to CHAR
-            return "COALESCE(CAST(CAST(" + quotedCol + " AS DECIMAL(38," + precision + ")) AS CHAR), '" + defaultValue + "')";
+            return "COALESCE(CAST(CAST(" + quotedCol + " AS DECIMAL(38," + precision + ")) AS CHAR), '')";
         } else {
             // StarRocks TRUNCATE + CAST: truncate first, then convert
-            return "COALESCE(CAST(CAST(TRUNCATE(" + quotedCol + ", " + precision + ") AS DECIMAL(38," + precision + ")) AS CHAR), '" + defaultValue + "')";
+            return "COALESCE(CAST(CAST(TRUNCATE(" + quotedCol + ", " + precision + ") AS DECIMAL(38," + precision + ")) AS CHAR), '')";
         }
     }
 
@@ -248,28 +258,27 @@ public class StarRocksDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeFloat(String quotedCol) {
-        // Get precision from config, default to 4
-        int precision = getPrecision("float", 4);
+        // Get precision from config, default to 6
+        int precision = getPrecision("float", 6);
         // Get rounding from config, default to true (round half up)
         boolean rounding = getRounding("float", true);
         
         if (precision == 0) {
             // Return integer format without decimal point
             if (rounding) {
-                return "COALESCE(TRIM(CAST(ROUND(CAST(" + quotedCol + " AS DOUBLE), 0) AS CHAR)), '0')";
+                return "COALESCE(TRIM(CAST(ROUND(CAST(" + quotedCol + " AS DOUBLE), 0) AS CHAR)), '')";
             } else {
-                return "COALESCE(TRIM(CAST(TRUNCATE(CAST(" + quotedCol + " AS DOUBLE), 0) AS CHAR)), '0')";
+                return "COALESCE(TRIM(CAST(TRUNCATE(CAST(" + quotedCol + " AS DOUBLE), 0) AS CHAR)), '')";
             }
         }
         
-        String defaultValue = "0." + "0".repeat(precision);
         if (rounding) {
             // Cast FLOAT to DOUBLE first, then to DECIMAL(38,precision), then to CHAR
             // StarRocks preserves trailing zeros when casting DECIMAL to CHAR
-            return "COALESCE(CAST(CAST(CAST(" + quotedCol + " AS DOUBLE) AS DECIMAL(38," + precision + ")) AS CHAR), '" + defaultValue + "')";
+            return "COALESCE(CAST(CAST(CAST(" + quotedCol + " AS DOUBLE) AS DECIMAL(38," + precision + ")) AS CHAR), '')";
         } else {
             // StarRocks TRUNCATE + CAST: truncate first, then convert
-            return "COALESCE(CAST(CAST(TRUNCATE(CAST(" + quotedCol + " AS DOUBLE), " + precision + ") AS DECIMAL(38," + precision + ")) AS CHAR), '" + defaultValue + "')";
+            return "COALESCE(CAST(CAST(TRUNCATE(CAST(" + quotedCol + " AS DOUBLE), " + precision + ") AS DECIMAL(38," + precision + ")) AS CHAR), '')";
         }
     }
 
@@ -305,10 +314,8 @@ public class StarRocksDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeDateTime(String quotedCol) {
-        String sourceTimezone = resolveStarRocksSourceTimezone("Asia/Shanghai");
         String targetTimezone = resolveStarRocksTimezone("datetime", "+00:00");
-        return "COALESCE(DATE_FORMAT(CONVERT_TZ(" + quotedCol + ", '" + sourceTimezone + "', '"
-                + targetTimezone + "'), '" + resolveStarRocksTemporalFormat("datetime",
+        return "COALESCE(DATE_FORMAT(" + tzShiftByAnchor(quotedCol, targetTimezone) + ", '" + resolveStarRocksTemporalFormat("datetime",
                 "%Y-%m-%d %H:%i:%s", "%Y-%m-%d") + "'), '')";
     }
 
@@ -322,10 +329,8 @@ public class StarRocksDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeTimestamp(String quotedCol) {
-        String sourceTimezone = resolveStarRocksSourceTimezone("Asia/Shanghai");
         String targetTimezone = resolveStarRocksTimezone("timestamp", "+00:00");
-        return "COALESCE(DATE_FORMAT(CONVERT_TZ(" + quotedCol + ", '" + sourceTimezone + "', '"
-                + targetTimezone + "'), '" + resolveStarRocksTemporalFormat("timestamp",
+        return "COALESCE(DATE_FORMAT(" + tzShiftByAnchor(quotedCol, targetTimezone) + ", '" + resolveStarRocksTemporalFormat("timestamp",
                 "%Y-%m-%d %H:%i:%s", "%Y-%m-%d") + "'), '')";
     }
 
@@ -335,13 +340,8 @@ public class StarRocksDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeTimestampWithTimezone(String quotedCol) {
-        return "COALESCE(DATE_FORMAT(CONVERT_TZ(" + quotedCol + ", @@session.time_zone, '"
-                + resolveStarRocksTimezone("timestamp_with_timezone", "+00:00") + "'), '" + resolveStarRocksTemporalFormat("timestamp_with_timezone",
+        return "COALESCE(DATE_FORMAT(" + tzShiftByAnchor(quotedCol, resolveStarRocksTimezone("timestamp_with_timezone", "+00:00")) + ", '" + resolveStarRocksTemporalFormat("timestamp_with_timezone",
                 "%Y-%m-%d %H:%i:%s", "%Y-%m-%d") + "'), '')";
-    }
-
-    private String resolveStarRocksSourceTimezone(String defaultTimezone) {
-        return escapeSqlLiteral(defaultTimezone);
     }
 
     private String resolveStarRocksTimezone(String dataTypeName, String defaultTimezone) {
@@ -375,7 +375,7 @@ public class StarRocksDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeBoolean(String quotedCol) {
-        return "CASE WHEN " + quotedCol + " = 1 THEN '1' ELSE '0' END";
+        return "CASE WHEN " + quotedCol + " IS NULL THEN '' WHEN " + quotedCol + " = 1 THEN '1' ELSE '0' END";
     }
 
     /**
@@ -404,7 +404,7 @@ public class StarRocksDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeDefault(String quotedCol) {
-        return "COALESCE(TRIM(CAST(" + quotedCol + " AS CHAR)), '0')";
+        return "COALESCE(TRIM(CAST(" + quotedCol + " AS CHAR)), '')";
     }
 
     @Override

@@ -1,0 +1,22 @@
+source:
+  type: mysql
+  name: generated-source
+  connection: { url: "${env.BENCHMARK_JDBC_URL}", username: "${env.BENCHMARK_DB_USER}", password: "${env.BENCHMARK_DB_PASSWORD}" }
+  resource: { type: table, name: "${env.BENCHMARK_SOURCE_TABLE:benchmark_source}" }
+target:
+  type: mysql
+  name: generated-target
+  connection: { url: "${env.BENCHMARK_JDBC_URL}", username: "${env.BENCHMARK_DB_USER}", password: "${env.BENCHMARK_DB_PASSWORD}" }
+  resource: { type: table, name: "${env.BENCHMARK_TARGET_TABLE:benchmark_target}" }
+comparison:
+  keys: { source: [id], target: [id] }
+  fields: { source: [payload, amount], target: [payload, amount] }
+strategy:
+  mode: checksum
+  algorithm: xor
+  bisectionFactor: 8
+  bisectionThreshold: 8000
+  localCompare: { mode: row-hash }
+  maxDifferences: 100000000
+result:
+  sinks: [{ format: console, type: result }]

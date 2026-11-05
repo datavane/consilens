@@ -14,10 +14,8 @@ import com.consilens.core.diff.DiffResult;
 import com.consilens.core.diff.DiffRow;
 import com.consilens.core.lifecycle.DiffContext;
 import com.consilens.core.lifecycle.DiffLifecycle;
-import com.consilens.core.lifecycle.SegmentResult;
 import org.junit.jupiter.api.Test;
 
-import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -60,21 +58,35 @@ class DiffServiceTest {
     }
 
     @Test
-    @SuppressWarnings("unchecked")
-    void shouldConvertTemporalComparisonModeToNormalizationRule() throws Exception {
-        DiffService service = new DiffService();
+    void shouldConvertTemporalComparisonModeToNormalizationRule() {
         TypeNormalizationRule rule = new TypeNormalizationRule();
         rule.setTimezone("UTC");
         rule.setComparisonMode("DATE_ONLY");
 
-        Method method = DiffService.class.getDeclaredMethod("toNormalizationRules", String.class, TypeNormalizationRule.class);
-        method.setAccessible(true);
+        CliConfiguration config = createConfig();
+        com.consilens.cli.model.normalization.NormalizationConfig normalization =
+                new com.consilens.cli.model.normalization.NormalizationConfig();
+        normalization.setGlobal(Map.of("timestamp", rule));
+        config.setNormalization(normalization);
 
-        List<NormalizationRule> rules = (List<NormalizationRule>) method.invoke(service, "timestamp", rule);
+        List<NormalizationRule> rules = new CompareRequestFactory().create(config)
+                .getNormalizationSpec().getGlobal();
 
         assertEquals(1, rules.size());
         assertEquals("format_datetime", rules.get(0).getOperation());
         assertEquals(Map.of("timezone", "UTC", "comparisonMode", "DATE_ONLY"), rules.get(0).getParams());
+    }
+
+    @Test
+    void shouldFailWhenRuntimeReturnsNoStatistics() {
+        DiffResult noStats = DiffResult.builder()
+                .differences(List.of(DiffRow.removed(List.of(1), List.of("Alice"), List.of("name"))))
+                .build();
+        TestableDiffService service = new TestableDiffService(new RecordingLifecycle(false), request -> noStats);
+
+        Exception exception = assertThrows(Exception.class, () -> service.performDiff(createConfig()));
+
+        assertTrue(exception.getMessage().contains("no statistics"), exception.getMessage());
     }
 
     @Test
@@ -128,7 +140,6 @@ class DiffServiceTest {
                         .bisectionFactor(4)
                         .bisectionThreshold(1000L)
                         .batchSize(100)
-                        .enableProfiling(false)
                         .localCompare(LocalCompareConfig.builder().mode("full").build())
                         .build())
                 .build();
@@ -169,10 +180,6 @@ class DiffServiceTest {
         @Override
         public void onDiffStart(DiffContext context) {
             events.add("start");
-        }
-
-        @Override
-        public void onSegmentComplete(SegmentResult result) {
         }
 
         @Override

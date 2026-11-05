@@ -12,6 +12,7 @@ import lombok.extern.slf4j.Slf4j;
 
 import java.sql.*;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Default implementation of AbstractDatabaseAdapter.
@@ -25,7 +26,8 @@ public class DefaultDatabaseAdapter extends AbstractDatabaseAdapter {
     
     // Cache for COUNT query results to avoid redundant database calls
     // Key: COUNT SQL query, Value: row count
-    private final Map<String, Long> countCache = new HashMap<>();
+    // count() 会被多个段/多个线程同时调用：HashMap 并发 put 在扩容时可能丢数据甚至成环
+    private final Map<String, Long> countCache = new ConcurrentHashMap<>();
 
     public DefaultDatabaseAdapter(String name, ConnectionPool connectionPool, DatabaseDialect dialect, String url, ChecksumAlgorithm checksumAlgorithm) {
         super(name, connectionPool, dialect, checksumAlgorithm);
@@ -47,10 +49,28 @@ public class DefaultDatabaseAdapter extends AbstractDatabaseAdapter {
             }
 
             // First check if table exists
-            DatabaseMetaData metaData = conn.getMetaData();
+            // Use JDBC metadata first, but fall back to dialect-specific query
+            // because some JDBC drivers (e.g., ClickHouse 0.4.6) have bugs in getTables()
             boolean tableExists = false;
+            DatabaseMetaData metaData = conn.getMetaData();
             try (ResultSet tables = metaData.getTables(null, schemaName, tableName, new String[]{"TABLE"})) {
                 tableExists = tables.next();
+            }
+
+            // Fallback: if JDBC metadata says table doesn't exist, try dialect-specific query
+            // This handles cases where JDBC driver metadata is buggy (e.g., ClickHouse)
+            if (!tableExists) {
+                String checkSql = dialect.getMetadataQueryGenerator().getTableExistsSQL(schemaName, tableName);
+                log.debug("JDBC metadata did not find table {}.{}, trying dialect-specific query: {}", schemaName, tableName, checkSql);
+                try (Statement stmt = conn.createStatement();
+                     ResultSet rs = stmt.executeQuery(checkSql)) {
+                    if (rs.next() && rs.getInt(1) > 0) {
+                        tableExists = true;
+                        log.debug("Dialect-specific query confirmed table {}.{} exists", schemaName, tableName);
+                    }
+                } catch (SQLException fallbackEx) {
+                    log.debug("Dialect-specific table check also failed: {}", fallbackEx.getMessage());
+                }
             }
 
             if (!tableExists) {
@@ -81,10 +101,20 @@ public class DefaultDatabaseAdapter extends AbstractDatabaseAdapter {
 
                     // Use dialect's type mapping instead of manual mapping
                     DataType dataType = dialect.getDataTypeHandler().convertToDataType(columnType);
-                    
+
+                    // For Oracle NUMBER type, JDBC driver returns just "NUMBER" without precision/scale,
+                    // so convertToDataType returns DECIMAL. Refine using precision/scale from metadata.
+                    if ("NUMBER".equalsIgnoreCase(columnType) && scale == 0 && precision > 0) {
+                        if (precision <= 9) {
+                            dataType = DataType.INTEGER;
+                        } else if (precision <= 18) {
+                            dataType = DataType.BIGINT;
+                        }
+                    }
+
                     // Log type conversion at DEBUG level
-                    log.debug("Column '{}': JDBC TYPE_NAME='{}' -> DataType.{}", 
-                            columnName, columnType, dataType);
+                    log.debug("Column '{}': JDBC TYPE_NAME='{}' (precision={}, scale={}) -> DataType.{}",
+                            columnName, columnType, precision, scale, dataType);
 
                     ColumnInfo columnInfo = ColumnInfo.builder()
                             .name(columnName)
@@ -119,104 +149,6 @@ public class DefaultDatabaseAdapter extends AbstractDatabaseAdapter {
         }
     }
 
-    /**
-     * Create DataType from dialect-mapped type information.
-     * Uses the dialect's getDataTypeMapping method for database-specific type
-     * mapping.
-     */
-    private DataType createDataTypeFromMappedType(String mappedType) {
-        // Extract base type name without parameters (e.g., "VARCHAR(50)" -> "VARCHAR",
-        // "DECIMAL(12,2)" -> "DECIMAL")
-        String baseType = mappedType;
-        int parenIndex = mappedType.indexOf('(');
-        if (parenIndex > 0) {
-            baseType = mappedType.substring(0, parenIndex).trim();
-        }
-
-        // Map dialect types to core DataType enum - simplified since dialect already
-        // did the heavy lifting
-        switch (baseType.toUpperCase()) {
-            case "VARCHAR":
-            case "VARCHAR2":
-            case "TEXT":
-            case "LONGVARCHAR":
-            case "LONG VARCHAR":
-            case "STRING": // BigQuery
-                return DataType.VARCHAR;
-            case "CHAR":
-            case "CHARACTER":
-                return DataType.CHAR;
-            case "CLOB":
-            case "LONGTEXT": // MySQL
-            case "MEDIUMTEXT": // MySQL
-            case "TINYTEXT": // MySQL
-                return DataType.CLOB;
-            case "INTEGER":
-            case "INT":
-            case "MEDIUMINT":
-            case "INT4": // PostgreSQL
-            case "INT64": // BigQuery
-                return DataType.INTEGER;
-            case "SMALLINT":
-            case "INT2":
-                return DataType.SMALLINT;
-            case "TINYINT":
-                return DataType.TINYINT;
-            case "BIGINT":
-            case "INT8":
-                return DataType.BIGINT;
-            case "FLOAT":
-            case "FLOAT4":
-            case "FLOAT64": // BigQuery
-                return DataType.FLOAT;
-            case "REAL":
-                return DataType.REAL;
-            case "DOUBLE":
-            case "DOUBLE PRECISION":
-            case "FLOAT8":
-                return DataType.DOUBLE;
-            case "DECIMAL":
-            case "NUMERIC":
-            case "BIGNUMERIC": // BigQuery
-                return DataType.DECIMAL;
-            case "DATE":
-                return DataType.DATE;
-            case "TIME":
-                return DataType.TIME;
-            case "TIMESTAMP":
-            case "DATETIME":
-            case "TIMESTAMPTZ": // PostgreSQL
-                return DataType.DATETIME;
-            case "TIMESTAMP WITH TIME ZONE":
-            case "TIMESTAMP_TZ":
-                return DataType.TIMESTAMP;
-            case "BOOLEAN":
-            case "BOOL":
-                return DataType.BOOLEAN;
-            case "BIT":
-                return DataType.BIT;
-            case "BLOB":
-            case "BYTES": // BigQuery
-                return DataType.BLOB;
-            case "LONGBLOB":
-            case "MEDIUMBLOB": // MySQL
-            case "TINYBLOB": // MySQL
-            case "LONG VARBINARY":
-                return DataType.LONGBLOB;
-            case "BINARY":
-                return DataType.BINARY;
-            case "VARBINARY":
-            case "BYTEA": // PostgreSQL
-                return DataType.VARBINARY;
-            case "JSON":
-            case "JSONB": // PostgreSQL
-                return DataType.JSON;
-            default:
-                log.warn("Unknown mapped type: {}, defaulting to VARCHAR", mappedType);
-                return DataType.VARCHAR;
-        }
-    }
-
     @Override
     public long count(TableSegment segment) {
         try {
@@ -229,7 +161,7 @@ public class DefaultDatabaseAdapter extends AbstractDatabaseAdapter {
                 return cachedCount;
             }
 
-            log.info("Executing count query: {}", countSql);
+            log.debug("Executing count query: {}", countSql);
 
             Optional<Long> result = queryForObject(countSql, Long.class);
             long count = result.orElse(0L);

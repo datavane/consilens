@@ -6,7 +6,7 @@
     <parent>
         <groupId>com.consilens</groupId>
         <artifactId>consilens-sink</artifactId>
-        <version>0.2.0</version>
+        <version>0.1-SNAPSHOT</version>
     </parent>
 
     <artifactId>consilens-sink-plugins</artifactId>
@@ -26,6 +26,7 @@
         <module>consilens-sink-json</module>
         <module>consilens-sink-csv</module>
         <module>consilens-sink-console</module>
+        <module>consilens-sink-jsonl</module>
         <module>consilens-sink-all</module>
     </modules>
 </project>

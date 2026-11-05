@@ -13,7 +13,6 @@ import com.consilens.connector.api.write.TypedOutputRow;
 import com.consilens.connector.api.write.TypedOutputValue;
 import com.consilens.core.diff.DiffRow;
 import com.consilens.core.lifecycle.DiffContext;
-import com.consilens.core.lifecycle.SegmentResult;
 import com.consilens.sink.api.Sink;
 import com.consilens.sink.api.model.ColumnMapping;
 import com.consilens.sink.api.model.SinkConfig;
@@ -33,6 +32,8 @@ import java.util.Map;
 
 @Slf4j
 public class TableDiffRecordSink implements Sink {
+
+    private static final ObjectMapper JSON_MAPPER = new ObjectMapper();
 
     private HikariDataSource dataSource;
     private TableSinkConfig sinkConfig;
@@ -55,7 +56,7 @@ public class TableDiffRecordSink implements Sink {
         }
         TableColumnNames.validateUniqueSanitizedColumns(sinkConfig.getColumns(), "TableDiffRecordSink columns");
         dataSource = createDataSource(sinkConfig);
-        tableName = sinkConfig.resolveTableName();
+        tableName = sinkConfig.resolveTableName("diff", context.getTaskId());
 
         sourceColumns = context.getSourceColumnNames() != null ? context.getSourceColumnNames() : new ArrayList<>();
         targetColumns = context.getTargetColumnNames() != null ? context.getTargetColumnNames() : new ArrayList<>();
@@ -105,11 +106,6 @@ public class TableDiffRecordSink implements Sink {
                 throw e;
             }
         }
-    }
-
-    @Override
-    public void onSegmentComplete(SegmentResult segmentResult) {
-        log.debug("TableDiffRecordSink segment={} done", segmentResult.getSegmentIndex());
     }
 
     @Override
@@ -302,15 +298,11 @@ public class TableDiffRecordSink implements Sink {
         if (list == null || list.isEmpty()) {
             return "[]";
         }
-        StringBuilder sb = new StringBuilder("[");
-        for (int i = 0; i < list.size(); i++) {
-            if (i > 0) {
-                sb.append(",");
-            }
-            sb.append("\"").append(list.get(i).replace("\\", "\\\\").replace("\"", "\\\"")).append("\"");
+        try {
+            return JSON_MAPPER.writeValueAsString(list);
+        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+            throw new IllegalStateException("Failed to serialize changed columns", e);
         }
-        sb.append("]");
-        return sb.toString();
     }
 
     private TableSinkConfig parseConfig(String properties) throws Exception {
@@ -329,7 +321,11 @@ public class TableDiffRecordSink implements Sink {
         hikari.setJdbcUrl(config.getUrl());
         hikari.setUsername(config.getUsername());
         hikari.setPassword(config.getPassword());
-        hikari.setDriverClassName(config.resolveDriver());
+        String driverClassName = config.resolveDriver();
+        if (driverClassName != null) {
+            // null = 让 DriverManager 按 URL 推断（未知方言也能连，不再硬失败）
+            hikari.setDriverClassName(driverClassName);
+        }
         hikari.setMaximumPoolSize(config.getMaxPoolSize());
         return new HikariDataSource(hikari);
     }

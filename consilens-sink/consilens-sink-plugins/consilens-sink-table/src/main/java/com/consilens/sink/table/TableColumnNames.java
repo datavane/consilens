@@ -13,7 +13,19 @@ public final class TableColumnNames {
     }
 
     public static String sanitize(String column) {
-        return column.replaceAll("[^a-zA-Z0-9_]", "_");
+        if (column == null || column.isBlank()) {
+            throw new IllegalArgumentException("column name is required");
+        }
+        String sanitized = column.replaceAll("[^a-zA-Z0-9_]", "_");
+        if (sanitized.isBlank()) {
+            throw new IllegalArgumentException("column name has no usable characters: " + column);
+        }
+        // SQL 标识符不能以数字开头；默认列名来自源表列，可能是 "1" 这类带引号标识符。
+        char first = sanitized.charAt(0);
+        if (!Character.isLetter(first) && first != '_') {
+            sanitized = "c_" + sanitized;
+        }
+        return sanitized;
     }
 
     public static void validateUniqueSanitizedColumns(List<ColumnMapping> columns, String context) {
@@ -22,8 +34,8 @@ public final class TableColumnNames {
         }
         Set<String> sanitizedNames = new HashSet<>();
         for (ColumnMapping column : columns) {
-            if (column == null || column.getName() == null) {
-                continue;
+            if (column == null || column.getName() == null || column.getName().isBlank()) {
+                throw new IllegalArgumentException(context + " contains a column without a name");
             }
             String sanitized = sanitize(column.getName()).toLowerCase();
             if (!sanitizedNames.add(sanitized)) {
@@ -39,8 +51,8 @@ public final class TableColumnNames {
         }
         Set<String> names = new HashSet<>();
         for (OutputColumnSpec column : columns) {
-            if (column == null || column.getColumnName() == null) {
-                continue;
+            if (column == null || column.getColumnName() == null || column.getColumnName().isBlank()) {
+                throw new IllegalArgumentException(context + " contains a column without a name");
             }
             String normalized = column.getColumnName().toLowerCase();
             if (!names.add(normalized)) {

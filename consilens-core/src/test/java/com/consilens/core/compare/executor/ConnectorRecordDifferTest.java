@@ -1,5 +1,6 @@
 package com.consilens.core.compare.executor;
 
+import com.consilens.connector.api.ConnectorException;
 import com.consilens.connector.api.dataset.DatasetHandle;
 import com.consilens.connector.api.dataset.DatasetMetadata;
 import com.consilens.connector.api.dataset.FilterPushdownProvider;
@@ -28,9 +29,11 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.math.BigDecimal;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ConnectorRecordDifferTest {
 
@@ -59,6 +62,25 @@ class ConnectorRecordDifferTest {
         assertEquals(1L, result.getStatistics().getMismatchCount());
         assertEquals(3L, result.getStatistics().getTotalDifferences());
         assertEquals(3, result.getDifferences().size());
+    }
+
+    @Test
+    void shouldPropagateBudgetExceededInsteadOfWrappingIt() {
+        CompareSegment source = segment("source_orders", List.of(
+                record("1", "A"),
+                record("2", "B")));
+        CompareSegment target = segment("target_orders", List.of(
+                record("1", "A"),
+                record("2", "B")));
+
+        assertThrows(com.consilens.core.exception.BudgetExceededException.class,
+                () -> new ConnectorRecordDiffer().diff(
+                        source,
+                        target,
+                        CompareExecutionSettings.builder()
+                                .validateUniqueKeys(true)
+                                .maxRowsScanned(1L)
+                                .build()));
     }
 
     @Test
@@ -181,7 +203,10 @@ class ConnectorRecordDifferTest {
                         .validateUniqueKeys(false)
                         .build());
 
-        assertEquals(3L, result.getStatistics().getTotalDifferences());
+        // 开放档按多重集语义：值相等的行互相抵消，仅 (1,B) 无对侧行 → 1 条差异
+        // （与 checksum/streaming 的多重集配对结论一致）。
+        assertEquals(1L, result.getStatistics().getTotalDifferences());
+        assertEquals(1L, result.getStatistics().getTargetMissingCount());
     }
 
     @Test
@@ -198,6 +223,22 @@ class ConnectorRecordDifferTest {
     }
 
     @Test
+    void shouldAllowDiffCountAtConfiguredLimit() {
+        CompareSegment source = segment("source_orders", List.of(record("1", "A")));
+        CompareSegment target = segment("target_orders", List.of());
+
+        DiffResult result = new ConnectorRecordDiffer().diff(
+                source,
+                target,
+                CompareExecutionSettings.builder()
+                        .validateUniqueKeys(true)
+                        .maxDifferences(1L)
+                        .build());
+
+        assertEquals(1L, result.getStatistics().getTotalDifferences());
+    }
+
+    @Test
     void shouldFailWhenDiffCountExceedsConfiguredLimit() {
         CompareSegment source = segment("source_orders", List.of(record("1", "A"), record("2", "B")));
         CompareSegment target = segment("target_orders", List.of());
@@ -211,6 +252,82 @@ class ConnectorRecordDifferTest {
                         .build()));
     }
 
+    @Test
+    void shouldKeepRawValuesInDiffOutput() {
+        SchemaDescriptor schema = SchemaDescriptor.builder()
+                .fields(List.of(
+                        FieldDescriptor.builder().name("id").canonicalType("varchar").build(),
+                        FieldDescriptor.builder().name("value").canonicalType("decimal").build()))
+                .fieldMap(Map.of(
+                        "id", FieldDescriptor.builder().name("id").canonicalType("varchar").build(),
+                        "value", FieldDescriptor.builder().name("value").canonicalType("decimal").build()))
+                .build();
+        CompareSegment source = segment("source_orders", schema, null,
+                List.of(record(Map.of("id", "1", "value", new BigDecimal("1.2300")))));
+        CompareSegment target = segment("target_orders", schema, null,
+                List.of(record(Map.of("id", "1", "value", new BigDecimal("2.3400")))));
+
+        DiffResult result = new ConnectorRecordDiffer().diff(
+                source, target, CompareExecutionSettings.builder().validateUniqueKeys(true).build());
+
+        assertEquals(List.of("1", new BigDecimal("1.2300")), result.getDifferences().get(0).getSourceValues().get());
+        assertEquals(List.of("1", new BigDecimal("2.3400")), result.getDifferences().get(0).getTargetValues().get());
+    }
+
+    @Test
+    void shouldUseConfiguredDecimalScaleForStreamingValues() {
+        com.consilens.connector.api.model.SchemaDescriptor schema = com.consilens.connector.api.model.SchemaDescriptor.builder()
+                .fields(List.of(
+                        com.consilens.connector.api.model.FieldDescriptor.builder()
+                                .name("id").canonicalType("varchar").build(),
+                        com.consilens.connector.api.model.FieldDescriptor.builder()
+                                .name("value").canonicalType("decimal").build()))
+                .fieldMap(Map.of(
+                        "id", com.consilens.connector.api.model.FieldDescriptor.builder()
+                                .name("id").canonicalType("varchar").build(),
+                        "value", com.consilens.connector.api.model.FieldDescriptor.builder()
+                                .name("value").canonicalType("decimal").build()))
+                .build();
+        CompareSegment source = segment("source_orders", schema, null, List.of(
+                record(Map.of("id", "1", "value", new BigDecimal("0.123456")))));
+        CompareSegment target = segment("target_orders", schema, null, List.of(
+                record(Map.of("id", "1", "value", new BigDecimal("0.123457")))));
+
+        DiffResult atDefault = new ConnectorRecordDiffer().diff(source, target,
+                CompareExecutionSettings.builder().build());
+        assertEquals(0L, atDefault.getStatistics().getTotalDifferences(),
+                "默认 4 位小数会把第 5/6 位差异抹平");
+
+        DiffResult atConfigured = new ConnectorRecordDiffer().diff(source, target,
+                CompareExecutionSettings.builder().decimalScale(6).build());
+        assertEquals(1L, atConfigured.getStatistics().getMismatchCount(),
+                "配置 6 位后应看到第 6 位差异");
+    }
+
+    @Test
+    void shouldKeepHighPrecisionDecimalKeysDistinctInStreamingMode() {
+        SchemaDescriptor schema = SchemaDescriptor.builder()
+                .fields(List.of(
+                        FieldDescriptor.builder().name("id").canonicalType("decimal").build(),
+                        FieldDescriptor.builder().name("value").canonicalType("varchar").build()))
+                .fieldMap(Map.of(
+                        "id", FieldDescriptor.builder().name("id").canonicalType("decimal").build(),
+                        "value", FieldDescriptor.builder().name("value").canonicalType("varchar").build()))
+                .build();
+        CompareSegment source = segment("source_orders", schema, null, List.of(
+                record(Map.of("id", new BigDecimal("1.00001"), "value", "A")),
+                record(Map.of("id", new BigDecimal("1.00002"), "value", "A"))));
+        CompareSegment target = segment("target_orders", schema, null, List.of(
+                record(Map.of("id", new BigDecimal("1.00002"), "value", "A"))));
+
+        DiffResult result = new ConnectorRecordDiffer().diff(
+                source, target, CompareExecutionSettings.builder().build());
+
+        assertEquals(1L, result.getStatistics().getTotalDifferences());
+        assertEquals(1L, result.getStatistics().getTargetMissingCount());
+        assertEquals(0L, result.getStatistics().getMismatchCount());
+    }
+
     private CompareSegment segment(String tableName, List<CanonicalRecord> records) {
         return segment(tableName, ComparisonSpec.builder().fields(List.of("value")).build(), records);
     }
@@ -219,10 +336,63 @@ class ConnectorRecordDifferTest {
         return segment(tableName, schema(List.of("id", "value")), comparisons, records);
     }
 
+    @Test
+    void shouldMatchKeyColumnsCaseInsensitively() {
+        SchemaDescriptor schema = schema(List.of("ID", "VALUE"));
+        CompareSegment source = segment("source_orders", schema, null,
+                List.of(record(Map.of("ID", "1", "VALUE", "A"))), List.of("id"));
+        CompareSegment target = segment("target_orders", schema, null,
+                List.of(record(Map.of("ID", "1", "VALUE", "A"))), List.of("id"));
+
+        DiffResult result = new ConnectorRecordDiffer().diff(
+                source, target, CompareExecutionSettings.builder().validateUniqueKeys(true).build());
+
+        assertEquals(0L, result.getStatistics().getTotalDifferences(),
+                "大写元数据列名 + 小写 key 配置不应产生重复列/假差异");
+    }
+
+    @Test
+    void shouldRejectMissingComparisonColumn() {
+        SchemaDescriptor schema = schema(List.of("id", "value"));
+        CompareSegment source = segment("source_orders", schema,
+                ComparisonSpec.builder().fields(List.of("missing")).build(),
+                List.of(record("1", "A")));
+        CompareSegment target = segment("target_orders", schema,
+                ComparisonSpec.builder().fields(List.of("missing")).build(),
+                List.of(record("1", "A")));
+
+        ConnectorException exception = assertThrows(ConnectorException.class,
+                () -> new ConnectorRecordDiffer().diff(source, target,
+                        CompareExecutionSettings.builder().build()));
+        assertTrue(exception.getMessage().contains("not present in the input schema"));
+    }
+
+    @Test
+    void shouldRejectMissingKeyColumn() {
+        SchemaDescriptor schema = schema(List.of("id", "value"));
+        CompareSegment source = segment("source_orders", schema, null,
+                List.of(record("1", "A")), List.of("missing"));
+        CompareSegment target = segment("target_orders", schema, null,
+                List.of(record("1", "A")), List.of("missing"));
+
+        ConnectorException exception = assertThrows(ConnectorException.class,
+                () -> new ConnectorRecordDiffer().diff(source, target,
+                        CompareExecutionSettings.builder().build()));
+        assertTrue(exception.getMessage().contains("not present in the input schema"));
+    }
+
     private CompareSegment segment(String tableName,
                                    SchemaDescriptor schema,
                                    ComparisonSpec comparisons,
                                    List<CanonicalRecord> records) {
+        return segment(tableName, schema, comparisons, records, List.of("id"));
+    }
+
+    private CompareSegment segment(String tableName,
+                                   SchemaDescriptor schema,
+                                   ComparisonSpec comparisons,
+                                   List<CanonicalRecord> records,
+                                   List<String> keys) {
         ResourceLocator resource = ResourceLocator.builder()
                 .type("table")
                 .name(tableName)
@@ -230,7 +400,7 @@ class ConnectorRecordDifferTest {
         return CompareSegment.builder()
                 .dataset(new TestDatasetHandle(resource, schema, records))
                 .resource(resource)
-                .keySpec(KeySpec.builder().fields(List.of("id")).build())
+                .keySpec(KeySpec.builder().fields(keys).build())
                 .comparisons(comparisons)
                 .schema(schema)
                 .build();
@@ -248,7 +418,9 @@ class ConnectorRecordDifferTest {
         for (Map.Entry<String, Object> entry : rawValues.entrySet()) {
             values.put(entry.getKey(), CanonicalValue.builder().type("varchar").value(entry.getValue()).build());
         }
-        return new TestRecord(RecordKey.builder().parts(List.of(rawValues.get("id"))).build(), values);
+        Object key = rawValues.containsKey("id")
+                ? rawValues.get("id") : rawValues.values().iterator().next();
+        return new TestRecord(RecordKey.builder().parts(List.of(key)).build(), values);
     }
 
     private SchemaDescriptor schema(List<String> columns) {

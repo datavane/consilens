@@ -7,6 +7,8 @@ import com.consilens.core.database.adpter.DatabaseAdapter.RowMapper;
 import com.consilens.core.database.connection.ConnectionPool;
 import com.consilens.core.diff.DiffResult;
 import com.consilens.core.diff.DiffResult.InfoTreeNode;
+import com.consilens.core.diff.DiffOperation;
+import com.consilens.core.diff.InfoTreeRecorder;
 import com.consilens.core.thread.ConcurrencyConfig;
 import com.consilens.core.thread.ExecutorProvider;
 import com.consilens.connector.api.model.TablePath;
@@ -21,8 +23,10 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.math.BigDecimal;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -49,7 +53,7 @@ class ChecksumDifferTest {
 
         @BeforeEach
         void setUp() {
-                config = new TableDiffer.DifferConfig(4, 1000, false, ChecksumAlgorithm.CONCAT);
+                config = new TableDiffer.DifferConfig(4, 1000, ChecksumAlgorithm.CONCAT);
                 differ = new ChecksumDiffer(config);
 
                 // Create test table segments
@@ -63,6 +67,136 @@ class ChecksumDifferTest {
                 stubAdapterSegmentData(mockAdapter2, 1000L, "default");
         }
 
+        @Test
+        @DisplayName("P1-11: 校验和缓存键覆盖行集选择维度")
+        void cacheKeyCoversRowSelectionDimensions() throws Exception {
+                java.lang.reflect.Method method = ChecksumDiffer.class.getDeclaredMethod(
+                                "generateChecksumCacheKey", TableSegment.class);
+                method.setAccessible(true);
+
+                TableSegment base = TableSegment.builder()
+                                .tablePath(TablePath.of("t1"))
+                                .keyColumns(List.of("id"))
+                                .extraColumns(List.of("v"))
+                                .minKey(Optional.of(List.of(1)))
+                                .maxKey(Optional.of(List.of(9)))
+                                .build();
+                TableSegment inclusive = base.toBuilder().upperBoundInclusive(true).build();
+                TableSegment limited = base.toBuilder()
+                                .limitOffset(Optional.of(new TableSegment.LimitOffset(10, 0))).build();
+                TableSegment relation = base.toBuilder()
+                                .relationSource(new TableSegment.RelationSource("(select 1) x", "x")).build();
+
+                String baseKey = (String) method.invoke(differ, base);
+                assertNotEquals(baseKey, method.invoke(differ, inclusive), "开闭区间必须区分");
+                assertNotEquals(baseKey, method.invoke(differ, limited), "limit/offset 必须区分");
+                assertNotEquals(baseKey, method.invoke(differ, relation), "relation SQL 必须区分");
+        }
+
+        @Test
+        @DisplayName("P0-2: 数值边界与字符串主键混比按数值，纯字符串键仍按字典序")
+        void compareKeyPartUsesNumericOrderForNumericBounds() throws Exception {
+                java.lang.reflect.Method method = ChecksumDiffer.class.getDeclaredMethod(
+                                "compareKeyPart", Object.class, Object.class);
+                method.setAccessible(true);
+
+                // 边界来自 JDBC 是 BigDecimal、行内主键是字符串：必须按数值 9999 < 20000
+                assertTrue((Integer) method.invoke(null, new BigDecimal("9999"), "20000") < 0);
+                // 两侧都是字符串时保持字典序（VARCHAR 键不能按数值比较）
+                assertTrue((Integer) method.invoke(null, "9999", "20000") > 0);
+                // NULL 视为最小
+                assertTrue((Integer) method.invoke(null, null, "1") < 0);
+        }
+
+        @Test
+        @DisplayName("P1-4: 行哈希发现重复键时回退全量多重集比较")
+        void shouldFallBackToFullCompareWhenRowHashFindsDuplicateKeys() throws Exception {
+                TableDiffer.DifferConfig rowHashConfig = new TableDiffer.DifferConfig(
+                                4, 1000, ChecksumAlgorithm.CONCAT, LocalCompareMode.ROW_HASH,
+                                ConcurrencyConfig.defaultConfig());
+                ChecksumDiffer rowHashDiffer = new ChecksumDiffer(rowHashConfig);
+                try {
+                        lenient().doAnswer(invocation -> {
+                                DatabaseAdapter.RowHashConsumer consumer = invocation.getArgument(1);
+                                // 同键两行：row-hash 无法配对，必须整体回退到全量比较
+                                consumer.accept(Arrays.asList(1L), "hash-a");
+                                consumer.accept(Arrays.asList(1L), "hash-b");
+                                return null;
+                        }).when(mockAdapter1).forEachSegmentRowHash(any(TableSegment.class), any());
+                        lenient().when(mockAdapter1.querySegment(any(TableSegment.class)))
+                                        .thenReturn(Collections.<Object[]>emptyList());
+                        lenient().when(mockAdapter2.querySegment(any(TableSegment.class)))
+                                        .thenReturn(Collections.<Object[]>emptyList());
+
+                        invokeLocalComparison(rowHashDiffer, segment1, segment2,
+                                        new InfoTreeRecorder("root"), "seg-dup", false).join();
+
+                        verify(mockAdapter1).querySegment(any(TableSegment.class));
+                } finally {
+                        rowHashDiffer.close();
+                }
+        }
+
+        private CompletableFuture<Void> invokeLocalComparison(ChecksumDiffer target,
+                        TableSegment table1, TableSegment table2,
+                        InfoTreeRecorder recorder, String segmentId, boolean depthCapped) throws Exception {
+                java.lang.reflect.Method method = ChecksumDiffer.class.getDeclaredMethod(
+                                "performLocalComparison", TableSegment.class, TableSegment.class,
+                                InfoTreeRecorder.class, String.class, boolean.class);
+                method.setAccessible(true);
+                @SuppressWarnings("unchecked")
+                CompletableFuture<Void> future = (CompletableFuture<Void>) method.invoke(
+                                target, table1, table2, recorder, segmentId, depthCapped);
+                return future;
+        }
+
+        @Test
+        @DisplayName("可空键兜底必须去掉区间边界：否则 NULL 行仍然取不出来")
+        void nullableKeyFallbackStripsBounds() throws Exception {
+                java.lang.reflect.Method method = ChecksumDiffer.class.getDeclaredMethod(
+                                "unbounded", TableSegment.class);
+                method.setAccessible(true);
+                TableSegment bounded = TableSegment.builder()
+                                .tablePath(TablePath.of("t1"))
+                                .keyColumns(List.of("id"))
+                                .extraColumns(List.of("v"))
+                                .minKey(Optional.of(List.of(1)))
+                                .maxKey(Optional.of(List.of(9)))
+                                .build();
+
+                TableSegment unbounded = (TableSegment) method.invoke(null, bounded);
+
+                // 带边界的段会生成 "id >= 1"，NULL 与任何值比较都是 UNKNOWN，行就取不出来
+                assertFalse(unbounded.isBounded(), "整表归一化键比较不能带区间谓词");
+                assertEquals(bounded.getKeyColumns(), unbounded.getKeyColumns());
+                assertEquals(bounded.getExtraColumns(), unbounded.getExtraColumns());
+        }
+
+        @Test
+        @DisplayName("预算拒绝原样上抛，不被包成 IOException 式的执行失败")
+        void budgetExceededSurfacesUnwrapped() throws Exception {
+                TableDiffer.DifferConfig budgetConfig = new TableDiffer.DifferConfig(
+                                4, 1000, ChecksumAlgorithm.CONCAT, LocalCompareMode.FULL,
+                                ConcurrencyConfig.defaultConfig(), 1_000_000L, false, 4, false,
+                                Long.MAX_VALUE, 1L, Long.MAX_VALUE);
+                ChecksumDiffer budgetDiffer = new ChecksumDiffer(budgetConfig);
+                try {
+                        // 两侧校验和不同 -> 必须走本地比较 -> 第一次累计行数就超预算
+                        stubAdapterSegmentData(mockAdapter1, 1000L, "left");
+                        stubAdapterSegmentData(mockAdapter2, 1000L, "right");
+
+                        CompletableFuture<DiffResult> future = budgetDiffer.diffTables(segment1, segment2);
+
+                        Throwable failure = assertThrows(java.util.concurrent.ExecutionException.class,
+                                        future::get).getCause();
+                        Throwable root = getRootCause(failure);
+                        assertTrue(root instanceof com.consilens.core.exception.BudgetExceededException,
+                                        "expected BudgetExceededException but was " + root);
+                } finally {
+                        budgetDiffer.close();
+                }
+        }
+
         @Nested
         @DisplayName("配置验证测试")
         class ConfigurationValidationTests {
@@ -74,7 +208,7 @@ class ChecksumDifferTest {
                         // When & Then
                         IllegalArgumentException exception = assertThrows(
                                         IllegalArgumentException.class,
-                                        () -> new ChecksumDiffer(new TableDiffer.DifferConfig(10, 5, false,
+                                        () -> new ChecksumDiffer(new TableDiffer.DifferConfig(10, 5,
                                                 ChecksumAlgorithm.CONCAT)));
                         assertTrue(exception.getMessage().contains("Bisection factor must be lower than threshold"));
                 }
@@ -86,7 +220,7 @@ class ChecksumDifferTest {
                         // When & Then
                         IllegalArgumentException exception = assertThrows(
                                         IllegalArgumentException.class,
-                                        () -> new ChecksumDiffer(new TableDiffer.DifferConfig(1, 10, false,
+                                        () -> new ChecksumDiffer(new TableDiffer.DifferConfig(1, 10,
                                                 ChecksumAlgorithm.CONCAT)));
                         assertTrue(exception.getMessage().contains("Bisection factor must be at least 2"));
                 }
@@ -96,7 +230,7 @@ class ChecksumDifferTest {
                 void testBisectionThresholdMustBePositive() {
                         IllegalArgumentException exception = assertThrows(
                                         IllegalArgumentException.class,
-                                        () -> new ChecksumDiffer(new TableDiffer.DifferConfig(4, 0, false,
+                                        () -> new ChecksumDiffer(new TableDiffer.DifferConfig(4, 0,
                                                 ChecksumAlgorithm.CONCAT)));
                         assertTrue(exception.getMessage().contains("Bisection threshold must be greater than 0"));
                 }
@@ -107,7 +241,7 @@ class ChecksumDifferTest {
                         // Given: bisectionFactor=4 < bisectionThreshold=100 (valid)
                         // When & Then
                         assertDoesNotThrow(() -> new ChecksumDiffer(
-                                        new TableDiffer.DifferConfig(100, 1000, false,
+                                        new TableDiffer.DifferConfig(100, 1000,
                                                 ChecksumAlgorithm.CONCAT)));
                 }
         }
@@ -174,7 +308,9 @@ class ChecksumDifferTest {
 
                         // When
                         CompletableFuture<DiffResult> future = differ.diffTables(segment1, segment2);
-                        DiffResult result = future.get();
+                        // 这里的预算只是“防挂死”，不是性能断言：mock 的 10w 行分块在慢机上要几秒，
+                        // 原来的 5s 会把正常执行误判成超时（本机实测该用例 >5s）。
+                        DiffResult result = future.get(60, TimeUnit.SECONDS);
 
                         // Then
                         assertNotNull(result);
@@ -190,7 +326,6 @@ class ChecksumDifferTest {
                         differ = new ChecksumDiffer(new TableDiffer.DifferConfig(
                                         4,
                                         1000,
-                                        false,
                                         ChecksumAlgorithm.CONCAT,
                                         LocalCompareMode.ROW_HASH,
                                         ConcurrencyConfig.defaultConfig()));
@@ -208,6 +343,10 @@ class ChecksumDifferTest {
                                         .thenReturn(Map.of(List.of(1), "source-row-hash"));
                         when(mockAdapter2.querySegmentRowHashes(any(TableSegment.class)))
                                         .thenReturn(Map.of(List.of(1), "target-row-hash"));
+                        doCallRealMethod().when(mockAdapter1)
+                                        .forEachSegmentRowHash(any(TableSegment.class), any());
+                        doCallRealMethod().when(mockAdapter2)
+                                        .forEachSegmentRowHash(any(TableSegment.class), any());
 
                         when(mockAdapter1.querySegmentByKeys(any(TableSegment.class), anySet()))
                                         .thenReturn(Collections.singletonList(
@@ -408,6 +547,158 @@ class ChecksumDifferTest {
                                         "标准分裂节点应该全部使用 factor=2");
                         assertTrue(standardSplitNodes.stream().noneMatch(node -> node.getSplitFactor() == config.getBisectionFactor()),
                                         "递归子段不应该继续沿用初始 N 分段因子");
+                }
+        }
+
+        @Nested
+        @DisplayName("尾部键空间覆盖测试")
+        class TailKeySpaceTests {
+
+                /**
+                 * 分段基座取两侧键范围并集：较大表的键空间之外的较小表行不再依赖尾扫，
+                 * 而是落入"一侧有行、另一侧无行"的段里由常规段比较报出。
+                 *
+                 * <p>场景：source 有 0..99（100 行），target 有 0..94 加 200/201（97 行）——
+                 * target 行数更少但键范围更宽。并集基座为 [0,201]，因此 200/201 所在段上
+                 * source 为空、target 有行 → SOURCE_MISSING；95..99 只存在于 source → TARGET_MISSING。
+                 */
+                @Test
+                @DisplayName("并集分段覆盖较小表的越界行（不依赖尾扫）")
+                void shouldCoverSmallerSideKeySpaceThroughUnionSegments() throws Exception {
+                        List<Object[]> sourceRows = new ArrayList<>();
+                        for (long i = 0; i < 100; i++) {
+                                sourceRows.add(new Object[] { i, "name_" + i, "value_" + i });
+                        }
+                        List<Object[]> targetRows = new ArrayList<>();
+                        for (long i = 0; i < 95; i++) {
+                                targetRows.add(new Object[] { i, "name_" + i, "value_" + i });
+                        }
+                        targetRows.add(new Object[] { 200L, "name_200", "value_200" });
+                        targetRows.add(new Object[] { 201L, "name_201", "value_201" });
+
+                        lenient().when(mockAdapter1.countAndBounds(any(TableSegment.class)))
+                                        .thenReturn(new ChecksumResult(100, null, Arrays.asList(0L), Arrays.asList(100L)));
+                        lenient().when(mockAdapter2.countAndBounds(any(TableSegment.class)))
+                                        .thenReturn(new ChecksumResult(97, null, Arrays.asList(0L), Arrays.asList(201L)));
+                        stubRangeAwareData(mockAdapter1, sourceRows);
+                        stubRangeAwareData(mockAdapter2, targetRows);
+
+                        DiffResult result = differ.diffTables(segment1, segment2).get();
+
+                        List<Long> sourceMissing = new ArrayList<>();
+                        List<Long> targetMissing = new ArrayList<>();
+                        for (var row : result.getDifferences()) {
+                                long key = ((Number) row.getPrimaryKey().get(0)).longValue();
+                                if (row.getOperation() == DiffOperation.SOURCE_MISSING) {
+                                        sourceMissing.add(key);
+                                } else if (row.getOperation() == DiffOperation.TARGET_MISSING) {
+                                        targetMissing.add(key);
+                                } else {
+                                        fail("远端稀疏键的公共区间完全相同，不应出现 MISMATCH: " + row.getPrimaryKey());
+                                }
+                        }
+                        assertEquals(List.of(200L, 201L), sourceMissing, "target 越界行应记为 source 缺失");
+                        assertEquals(List.of(95L, 96L, 97L, 98L, 99L), targetMissing,
+                                        "source 独有行应记为 target 缺失");
+                }
+
+                /** 让 count / countAndChecksum / querySegment 都按段范围真实取数。 */
+                private void stubRangeAwareData(DatabaseAdapter adapter, List<Object[]> rows) {
+                        lenient().when(adapter.count(any(TableSegment.class)))
+                                        .thenAnswer(invocation -> rowsInRange(rows, invocation.getArgument(0)).size());
+                        lenient().when(adapter.countAndChecksum(any(TableSegment.class)))
+                                        .thenAnswer(invocation -> {
+                                                List<Object[]> inRange = rowsInRange(rows, invocation.getArgument(0));
+                                                StringBuilder checksum = new StringBuilder();
+                                                for (Object[] row : inRange) {
+                                                        checksum.append(row[0]).append(';');
+                                                }
+                                                return new ChecksumResult(inRange.size(), checksum.toString(),
+                                                                Arrays.asList(0L), Arrays.asList(0L));
+                                        });
+                        lenient().when(adapter.querySegment(any(TableSegment.class)))
+                                        .thenAnswer(invocation -> rowsInRange(rows, invocation.getArgument(0)));
+                        lenient().when(adapter.querySegmentByKeys(any(TableSegment.class), anySet()))
+                                        .thenAnswer(invocation -> {
+                                                Set<List<Object>> keys = invocation.getArgument(1);
+                                                return rows.stream()
+                                                                .filter(row -> keys.contains(List.of(row[0])))
+                                                                .collect(Collectors.toList());
+                                        });
+                }
+
+                private List<Object[]> rowsInRange(List<Object[]> rows, TableSegment segment) {
+                        Optional<List<Object>> minKey = segment.getMinKey();
+                        Optional<List<Object>> maxKey = segment.getMaxKey();
+                        return rows.stream().filter(row -> {
+                                long key = ((Number) row[0]).longValue();
+                                boolean aboveMin = minKey.isEmpty() || key >= ((Number) minKey.get().get(0)).longValue();
+                                boolean belowMax = maxKey.isEmpty()
+                                                || (segment.isUpperBoundInclusive()
+                                                                ? key <= ((Number) maxKey.get().get(0)).longValue()
+                                                                : key < ((Number) maxKey.get().get(0)).longValue());
+                                return aboveMin && belowMax;
+                        }).collect(Collectors.toList());
+                }
+
+                /**
+                 * 分段边界取自较大表的键空间，较小表中落在该空间外的行不会被任何分段访问：
+                 * source 有 0..99，target 与 source 公共区间完全一致，但多了 200/201 两行
+                 * （target maxKey=201 > source maxKey=100）。这两行必须由尾扫补报，
+                 * 且等值极值兜底不能把它们重复计数。
+                 */
+                @Test
+                @DisplayName("尾扫把超出对端键范围的行各报一次，不重复计数")
+                void shouldReportTailRowsOutsideTheOtherSidesKeyRangeExactlyOnce() throws Exception {
+                        lenient().when(mockAdapter1.countAndBounds(any(TableSegment.class)))
+                                        .thenAnswer(invocation -> new ChecksumResult(100, null,
+                                                        Arrays.asList(0L), Arrays.asList(100L)));
+                        lenient().when(mockAdapter2.countAndBounds(any(TableSegment.class)))
+                                        .thenAnswer(invocation -> new ChecksumResult(99, null,
+                                                        Arrays.asList(0L), Arrays.asList(201L)));
+                        // 公共区间两侧完全一致：校验和相同，主流程不再产生差异
+                        lenient().when(mockAdapter1.countAndChecksum(any(TableSegment.class)))
+                                        .thenAnswer(invocation -> new ChecksumResult(100, "shared",
+                                                        Arrays.asList(0L), Arrays.asList(100L)));
+                        lenient().when(mockAdapter2.countAndChecksum(any(TableSegment.class)))
+                                        .thenAnswer(invocation -> new ChecksumResult(99, "shared",
+                                                        Arrays.asList(0L), Arrays.asList(100L)));
+                        lenient().when(mockAdapter1.querySegment(any(TableSegment.class))).thenReturn(List.of());
+                        lenient().when(mockAdapter2.querySegment(any(TableSegment.class)))
+                                        .thenAnswer(invocation -> {
+                                                TableSegment segment = invocation.getArgument(0);
+                                                // 区间尾扫按 [source maxKey, ∞) 取数
+                                                boolean tailFetch = segment.getMinKey().isPresent()
+                                                                && ((Number) segment.getMinKey().get().get(0)).longValue() == 100L;
+                                                if (tailFetch) {
+                                                        return List.of(
+                                                                        new Object[] { 200L, "name_200", "value_200" },
+                                                                        new Object[] { 201L, "name_201", "value_201" });
+                                                }
+                                                return List.of();
+                                        });
+                        // 等值极值兜底：source 侧查不到这两个键，target 侧查得到
+                        lenient().when(mockAdapter1.querySegmentByKeys(any(TableSegment.class), anySet()))
+                                        .thenReturn(List.of());
+                        lenient().when(mockAdapter2.querySegmentByKeys(any(TableSegment.class), anySet()))
+                                        .thenAnswer(invocation -> {
+                                                Set<List<Object>> keys = invocation.getArgument(1);
+                                                return keys.stream()
+                                                                .map(key -> new Object[] { key.get(0), "name_" + key.get(0),
+                                                                                "value_" + key.get(0) })
+                                                                .collect(Collectors.toList());
+                                        });
+
+                        DiffResult result = differ.diffTables(segment1, segment2).get();
+
+                        // 用 list 计数（不是 set）：等值极值兜底若把同一行重复计入，总数会变成 3
+                        List<Long> sourceMissingKeys = new ArrayList<>();
+                        for (var row : result.getDifferences()) {
+                                assertEquals(DiffOperation.SOURCE_MISSING, row.getOperation());
+                                sourceMissingKeys.add(((Number) row.getPrimaryKey().get(0)).longValue());
+                        }
+                        assertEquals(List.of(200L, 201L), sourceMissingKeys,
+                                        "两个越界行各报一次；等值极值兜底不得重复计数");
                 }
         }
 
@@ -696,4 +987,55 @@ class ChecksumDifferTest {
                                 .map(bounds -> ((Number) bounds.get(0)).longValue())
                                 .orElse(totalRows);
         }
+
+
+    @Test
+    @DisplayName("P2-3: 深度上限时 FULL 模式改用行哈希兜底，而不是整段拉全列")
+    void shouldFallBackToRowHashAtDepthCap() throws Exception {
+        InfoTreeRecorder recorder = new InfoTreeRecorder("root");
+
+        invokeLocalComparison(segment1, segment2, recorder, "seg-depth", true).join();
+
+        verify(mockAdapter1).forEachSegmentRowHash(eq(segment1), any());
+        verify(mockAdapter2).forEachSegmentRowHash(eq(segment2), any());
+    }
+
+    @Test
+    @DisplayName("P2-3: 未到深度上限时 FULL 模式仍走全量本地比较")
+    void shouldUseFullComparisonWhenNotDepthCapped() throws Exception {
+        when(mockAdapter1.querySegment(any())).thenReturn(Collections.<Object[]>emptyList());
+        when(mockAdapter2.querySegment(any())).thenReturn(Collections.<Object[]>emptyList());
+        InfoTreeRecorder recorder = new InfoTreeRecorder("root");
+
+        invokeLocalComparison(segment1, segment2, recorder, "seg-full", false).join();
+
+        verify(mockAdapter1, never()).forEachSegmentRowHash(any(), any());
+        verify(mockAdapter1).querySegment(any());
+    }
+
+    @Test
+    @DisplayName("P2-3: 深度上限下行哈希失败则回退全量比较，且不掩盖失败原因之外的行为")
+    void shouldFallBackToFullCompareWhenRowHashFails() throws Exception {
+        doThrow(new RuntimeException("row hash unsupported")).when(mockAdapter1)
+                .forEachSegmentRowHash(any(), any());
+        when(mockAdapter1.querySegment(any())).thenReturn(Collections.<Object[]>emptyList());
+        when(mockAdapter2.querySegment(any())).thenReturn(Collections.<Object[]>emptyList());
+        InfoTreeRecorder recorder = new InfoTreeRecorder("root");
+
+        invokeLocalComparison(segment1, segment2, recorder, "seg-fallback", true).join();
+
+        verify(mockAdapter1).querySegment(any());
+    }
+
+    private CompletableFuture<Void> invokeLocalComparison(TableSegment table1, TableSegment table2,
+            InfoTreeRecorder recorder, String segmentId, boolean depthCapped) throws Exception {
+        java.lang.reflect.Method method = ChecksumDiffer.class.getDeclaredMethod(
+                "performLocalComparison", TableSegment.class, TableSegment.class,
+                InfoTreeRecorder.class, String.class, boolean.class);
+        method.setAccessible(true);
+        @SuppressWarnings("unchecked")
+        CompletableFuture<Void> future = (CompletableFuture<Void>) method.invoke(
+                differ, table1, table2, recorder, segmentId, depthCapped);
+        return future;
+    }
 }

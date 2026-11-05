@@ -55,6 +55,16 @@ class MySQLSqlQueryGeneratorTest {
     }
 
     @Test
+    void shouldOmitEmptyKeyPredicateInsteadOfGeneratingInvalidInClause() {
+        String sql = generator.getSelectByKeysSQL("test_db", "test_table",
+                List.of("`id`"), List.of("id"),
+                List.<List<Object>>of(List.of()), null, List.of("id"));
+
+        assertFalse(sql.contains("IN ()"), sql);
+        assertFalse(sql.contains("WHERE"), sql);
+    }
+
+    @Test
     void testGetChecksumSQL() {
         Map<String, DataType> types = new HashMap<>();
         types.put("id", DataType.INTEGER);
@@ -88,18 +98,6 @@ class MySQLSqlQueryGeneratorTest {
         assertFalse(sql.contains("CREATE TEMPORARY"));
         assertFalse(sql.contains("`(SELECT"));
     }
-
-    @Test
-    void testGetFullOuterJoinSQL() {
-        String sql = generator.getFullOuterJoinSQL("table1", "table2",
-                Arrays.asList("id"), null);
-
-        assertTrue(sql.contains("LEFT JOIN"));
-        assertTrue(sql.contains("RIGHT JOIN"));
-        assertTrue(sql.contains("UNION"));
-        assertTrue(sql.contains("IS NULL"));
-    }
-
     @Test
     void testGetBatchInsertSQL() {
         String sql = generator.getBatchInsertSQL("test_table",
@@ -140,6 +138,10 @@ class MySQLSqlQueryGeneratorTest {
 
         // Verify MD5 and CONCAT_WS with canonical separator
         assertTrue(sql.contains("MD5(CONCAT_WS('|', "), "Should use MD5(CONCAT_WS('|', ...))");
+
+        // P1-2: 值内 '|' 必须双写，否则 ('a|b','c') 与 ('a','b|c') 会拼成同一串
+        assertTrue(sql.contains("REPLACE("), "Should escape separator inside values");
+        assertTrue(sql.contains(", '|', '||')"), "Separator must be doubled, not dropped");
 
         // Verify row_hash alias
         assertTrue(sql.contains("AS row_hash"), "Should alias MD5 result as row_hash");
@@ -263,4 +265,36 @@ class MySQLSqlQueryGeneratorTest {
     }
 
 
+
+    @Test
+    void shouldEscapeQuotedColumnNamesInJoinDiffDetailSql() {
+        Map<String, DataType> types = Map.of("id", DataType.VARCHAR,
+                "odd'name", DataType.VARCHAR);
+        String sql = generator.getJoinDiffDetailSQL("db", "t1", "t1",
+                List.of("id"), List.of("odd'name"), List.of("odd'name"), null, types,
+                "db", "t2", "t2",
+                List.of("id"), List.of("odd'name"), List.of("odd'name"), null, types);
+
+        assertTrue(sql.contains("AS `odd'name_1`"), sql);
+        assertTrue(sql.contains("AS `odd'name_2`"), sql);
+        assertFalse(sql.contains("AS odd'name_1"), sql);
+        // 变更列 JSON 里的列名必须按 SQL 字符串字面量转义（MySQL 单引号双写）
+        assertTrue(sql.contains("THEN '\"odd''name\"'"), sql);
+    }
+
+    @Test
+    void testNullKeyPresenceUsesNormalizedEquality() {
+        // t1 键为 NULL、t2 键为 ''：归一化 join 认为二者相等，存在性判断也必须跟随，
+        // 否则会统计成 source_missing，并漏掉真实的值差异。
+        Map<String, DataType> types = Map.of("id", DataType.VARCHAR);
+        String sql = generator.getJoinDiffStatsSQL("db", "t1", "t1",
+                List.of("id"), List.of("name"), null, types,
+                "db", "t2", "t2",
+                List.of("id"), List.of("name"), null, types);
+
+        assertTrue(sql.contains("COALESCE"), "归一化表达式必须出现在存在性判断里");
+        assertTrue(sql.contains("AND NOT (HEX(COALESCE"), "缺失判断必须排除归一化后相等的行");
+        assertFalse(sql.contains("WHERE (t1.`id` IS NULL AND NOT (t2.`id` IS NULL))"),
+                "不能再退回裸 IS NULL 的存在性判断");
+    }
 }

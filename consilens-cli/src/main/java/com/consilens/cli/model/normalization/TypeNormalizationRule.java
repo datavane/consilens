@@ -65,4 +65,25 @@ public class TypeNormalizationRule {
      */
     @JsonProperty("nullValue")
     private String nullValue;
+
+    /**
+     * 数值绝对容差（float/double/decimal）；null 表示不容差。
+     * 容差在终局本地比较生效；checksum 候选回查天然兼容。
+     */
+    @JsonProperty("tolerance")
+    private Double tolerance;
+
+    /**
+     * 数值相对容差（0..1）；与绝对容差任一满足即判等。
+     */
+    @JsonProperty("relativeTolerance")
+    private Double relativeTolerance;
+
+    /**
+     * 会话时区（IANA 名称或 +08:00 偏移）。连接级信息按类型配置语法只能挂在某条规则上，
+     * core 侧会把任意规则里的这个参数读成两侧归一化时区。
+     */
+    @JsonProperty("sessionTimeZone")
+    @com.fasterxml.jackson.annotation.JsonAlias("session_time_zone")
+    private String sessionTimeZone;
 }

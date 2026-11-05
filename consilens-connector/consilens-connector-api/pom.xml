@@ -6,7 +6,7 @@
     <parent>
         <groupId>com.consilens</groupId>
         <artifactId>consilens-connector</artifactId>
-        <version>0.2.0</version>
+        <version>0.1-SNAPSHOT</version>
     </parent>
 
     <artifactId>consilens-connector-api</artifactId>
@@ -21,7 +21,17 @@
         <dependency>
             <groupId>com.consilens</groupId>
             <artifactId>consilens-common</artifactId>
-            <version>0.2.0</version>
+            <version>0.1-SNAPSHOT</version>
+        </dependency>
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-annotations</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <version>${junit.version}</version>
+            <scope>test</scope>
         </dependency>
     </dependencies>
 

@@ -25,8 +25,6 @@ public final class TypeDescriptor implements Serializable {
     private final Integer numericScale;
 
     private final Integer length;
-    private final String charset;
-    private final String collation;
     private final boolean textType;
     private final boolean blobType;
 
@@ -39,8 +37,6 @@ public final class TypeDescriptor implements Serializable {
     private final List<StructField> fields;
 
     private final List<String> enumValues;
-    private final Integer srid;
-    private final String comment;
 
     private TypeDescriptor(Builder builder) {
         this.type = Objects.requireNonNull(builder.type, "type cannot be null");
@@ -48,11 +44,11 @@ public final class TypeDescriptor implements Serializable {
         this.nullable = builder.nullable;
         this.bitWidth = builder.bitWidth;
         this.unsigned = builder.unsigned;
-        this.numericPrecision = builder.numericPrecision;
-        this.numericScale = builder.numericScale;
+        this.numericPrecision = type == DataType.DECIMAL_TYPE && builder.numericPrecision == null
+                ? Integer.valueOf(38) : builder.numericPrecision;
+        this.numericScale = type == DataType.DECIMAL_TYPE && builder.numericScale == null
+                ? Integer.valueOf(0) : builder.numericScale;
         this.length = builder.length;
-        this.charset = builder.charset;
-        this.collation = builder.collation;
         this.textType = builder.textType;
         this.blobType = builder.blobType;
         this.withTimezone = builder.withTimezone;
@@ -62,8 +58,6 @@ public final class TypeDescriptor implements Serializable {
         this.valueType = builder.valueType;
         this.fields = immutableCopy(builder.fields);
         this.enumValues = immutableCopy(builder.enumValues);
-        this.srid = builder.srid;
-        this.comment = builder.comment;
         validate();
     }
 
@@ -83,9 +77,6 @@ public final class TypeDescriptor implements Serializable {
     }
 
     private void validate() {
-        if (type == DataType.DECIMAL_TYPE && numericPrecision == null) {
-            throw new IllegalArgumentException("DECIMAL_TYPE requires numericPrecision");
-        }
         if (type == DataType.ARRAY_TYPE && elementType == null) {
             throw new IllegalArgumentException("ARRAY_TYPE requires elementType");
         }
@@ -129,14 +120,6 @@ public final class TypeDescriptor implements Serializable {
         return length;
     }
 
-    public String getCharset() {
-        return charset;
-    }
-
-    public String getCollation() {
-        return collation;
-    }
-
     public boolean isTextType() {
         return textType;
     }
@@ -173,14 +156,6 @@ public final class TypeDescriptor implements Serializable {
         return enumValues;
     }
 
-    public Integer getSrid() {
-        return srid;
-    }
-
-    public String getComment() {
-        return comment;
-    }
-
     @Override
     public boolean equals(Object o) {
         if (this == o) {
@@ -201,23 +176,19 @@ public final class TypeDescriptor implements Serializable {
                 && Objects.equals(numericPrecision, that.numericPrecision)
                 && Objects.equals(numericScale, that.numericScale)
                 && Objects.equals(length, that.length)
-                && Objects.equals(charset, that.charset)
-                && Objects.equals(collation, that.collation)
                 && Objects.equals(timePrecision, that.timePrecision)
                 && Objects.equals(elementType, that.elementType)
                 && Objects.equals(keyType, that.keyType)
                 && Objects.equals(valueType, that.valueType)
                 && Objects.equals(fields, that.fields)
-                && Objects.equals(enumValues, that.enumValues)
-                && Objects.equals(srid, that.srid)
-                && Objects.equals(comment, that.comment);
+                && Objects.equals(enumValues, that.enumValues);
     }
 
     @Override
     public int hashCode() {
         return Objects.hash(type, originType, nullable, bitWidth, unsigned, numericPrecision, numericScale,
-                length, charset, collation, textType, blobType, withTimezone, timePrecision, elementType,
-                keyType, valueType, fields, enumValues, srid, comment);
+                length, textType, blobType, withTimezone, timePrecision, elementType,
+                keyType, valueType, fields, enumValues);
     }
 
     @Override
@@ -241,8 +212,6 @@ public final class TypeDescriptor implements Serializable {
         private Integer numericPrecision;
         private Integer numericScale;
         private Integer length;
-        private String charset;
-        private String collation;
         private boolean textType;
         private boolean blobType;
         private boolean withTimezone;
@@ -252,8 +221,6 @@ public final class TypeDescriptor implements Serializable {
         private TypeDescriptor valueType;
         private List<StructField> fields;
         private List<String> enumValues;
-        private Integer srid;
-        private String comment;
 
         private Builder(DataType type) {
             this.type = type;
@@ -268,8 +235,6 @@ public final class TypeDescriptor implements Serializable {
             this.numericPrecision = descriptor.numericPrecision;
             this.numericScale = descriptor.numericScale;
             this.length = descriptor.length;
-            this.charset = descriptor.charset;
-            this.collation = descriptor.collation;
             this.textType = descriptor.textType;
             this.blobType = descriptor.blobType;
             this.withTimezone = descriptor.withTimezone;
@@ -279,8 +244,6 @@ public final class TypeDescriptor implements Serializable {
             this.valueType = descriptor.valueType;
             this.fields = descriptor.fields;
             this.enumValues = descriptor.enumValues;
-            this.srid = descriptor.srid;
-            this.comment = descriptor.comment;
         }
 
         public Builder originType(String originType) {
@@ -315,16 +278,6 @@ public final class TypeDescriptor implements Serializable {
 
         public Builder length(Integer length) {
             this.length = length;
-            return this;
-        }
-
-        public Builder charset(String charset) {
-            this.charset = charset;
-            return this;
-        }
-
-        public Builder collation(String collation) {
-            this.collation = collation;
             return this;
         }
 
@@ -370,16 +323,6 @@ public final class TypeDescriptor implements Serializable {
 
         public Builder enumValues(List<String> enumValues) {
             this.enumValues = enumValues;
-            return this;
-        }
-
-        public Builder srid(Integer srid) {
-            this.srid = srid;
-            return this;
-        }
-
-        public Builder comment(String comment) {
-            this.comment = comment;
             return this;
         }
 

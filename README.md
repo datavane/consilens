@@ -33,6 +33,8 @@ Consilens 用于验证数据同步、迁移、ETL、回填后的结果是否一�
 | Presto | `consilens-connector-presto` | 内置（待验证） |
 | Trino | `consilens-connector-trino` | 内置（待验证） |
 | TiDB | `consilens-connector-tidb` | 内置（待验证） |
+| 本地 CSV / JSONL / Parquet / ORC / S3 | `consilens-connector-file` | 已实现（streaming 计划；Parquet 由 DuckDB 读取，ORC 由 Apache ORC 读取，S3 由 AWS SDK 下载） |
+| Iceberg（本地/S3 warehouse） | `consilens-connector-iceberg` | 已实现（当前/指定 snapshot；Parquet/ORC 数据文件；分区裁剪；position/equality deletes，delete 文件支持 Parquet/Avro/ORC） |
 
 说明：`内置（待验证）` 表示仓库里已有对应连接器模块，但 README 目前只把已完成端到端验证的数据库作为对外首推能力。
 
@@ -57,7 +59,14 @@ checksum 比对
 ### 构建
 
 ```bash
-mvn clean package -DskipTests -Prelease
+./mvnw -B package
+JAVA_HOME=$(/usr/libexec/java_home -v 17) ./mvnw -Pconsilens-mcp -pl consilens-mcp package
+```
+
+完整发布门禁可以直接运行：
+
+```bash
+scripts/release/release-check.sh
 ```
 
 ### 执行
@@ -65,6 +74,16 @@ mvn clean package -DskipTests -Prelease
 ```bash
 ./bin/consilens-cli.sh diff -c config.yaml
 ```
+
+### MCP Server（可选）
+
+仓库提供 `consilens-mcp` 模块，把 plan / validate / run / artifact 等能力暴露为 MCP 工具，供外部 Agent、IDE 或平台调用。MCP 只是协议适配层，不包含模型客户端、会话或审批逻辑。
+
+```bash
+JAVA_HOME=$(/usr/libexec/java_home -v 17) ./mvnw -Pconsilens-mcp -pl consilens-mcp package
+```
+
+使用方式见 [consilens-mcp/README.md](./consilens-mcp/README.md)。
 
 ### 最小配置示例
 
@@ -115,7 +134,6 @@ strategy:
   bisectionFactor: 8
   bisectionThreshold: 5000
   batchSize: 1000
-  enableProfiling: false
 
 result:
   sinks:
@@ -144,6 +162,28 @@ result:
 - [连接器与数据源支持](./docs/03-插件与数据库支持.md)
 - [架构设计](./docs/04-架构设计.md)
 - [开发指南](./docs/05-开发指南.md)
+- [集群提交指南](./docs/06-集群提交指南.md)
+- [CI 集成](./docs/07-CI集成.md)
+- [数据契约](./docs/08-数据契约.md)
+- [指标比对](./docs/09-指标比对.md)
+- [增量窗口与 checkpoint](./docs/10-增量窗口.md)
+- [连接器认证](./docs/11-连接器认证.md)
+- [SDK 嵌入指南](./docs/12-SDK嵌入指南.md)
+- [S3 数据源](./docs/13-S3数据源.md)
+- [兼容性策略](./docs/14-兼容性策略.md)
+- [Iceberg 数据源](./docs/15-Iceberg数据源.md)
+- [发布流程](./docs/16-发布流程.md)
+- [本地文件基准](./docs/17-文件基准.md)
+- [DuckDB 行级比对](./docs/18-DuckDB行级比对.md)
+
+## 参与与治理
+
+- [安全策略](./SECURITY.md)
+- [支持渠道](./SUPPORT.md)
+
+## 许可证
+
+Apache License 2.0，详见 [LICENSE](./LICENSE)。
 
 ## 社交媒体
 

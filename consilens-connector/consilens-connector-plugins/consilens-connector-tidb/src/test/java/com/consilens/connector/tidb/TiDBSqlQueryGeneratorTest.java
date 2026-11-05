@@ -64,20 +64,9 @@ class TiDBSqlQueryGeneratorTest {
 
         assertTrue(sql.contains("MD5(GROUP_CONCAT"));
         assertTrue(sql.contains("CONCAT_WS"));
-        assertTrue(sql.contains("ORDER BY"));
+        assertTrue(sql.contains("ORDER BY pk_key, row_checksum LIMIT 18446744073709551615"), sql);
+        assertFalse(sql.contains("LIMIT 10000000"));
     }
-
-    @Test
-    void testGetFullOuterJoinSQL() {
-        String sql = generator.getFullOuterJoinSQL("table1", "table2",
-                Arrays.asList("id"), null);
-
-        assertTrue(sql.contains("LEFT JOIN"));
-        assertTrue(sql.contains("RIGHT JOIN"));
-        assertTrue(sql.contains("UNION"));
-        assertTrue(sql.contains("IS NULL"));
-    }
-
     @Test
     void testGetBatchInsertSQL() {
         String sql = generator.getBatchInsertSQL("test_table",

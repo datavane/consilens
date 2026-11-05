@@ -35,7 +35,8 @@ public final class TestDatabaseHelper {
         poolConfig.setMaxPoolSize(5);
         poolConfig.setMinIdle(1);
         poolConfig.setConnectionTimeout(10000);
-        poolConfig.setValidationQuery("SELECT 1");
+        // Use connector-specific validation query (Oracle requires SELECT 1 FROM DUAL)
+        poolConfig.setValidationQuery(getValidationQuery(connectorType));
 
         ConnectionPool pool = ConnectionPoolFactory.createPool(
                 jdbcUrl, username, password, connectorType, poolConfig);
@@ -44,18 +45,45 @@ public final class TestDatabaseHelper {
     }
 
     /**
+     * Returns the appropriate validation query for the given connector type.
+     * Oracle requires "SELECT 1 FROM DUAL" while most other databases accept "SELECT 1".
+     */
+    private static String getValidationQuery(String connectorType) {
+        if ("oracle".equalsIgnoreCase(connectorType)) {
+            return "SELECT 1 FROM DUAL";
+        }
+        return "SELECT 1";
+    }
+
+    /**
      * Creates a test table in the database.
      */
     public static void createTestTable(DatabaseAdapter adapter, String tableName) throws Exception {
         try (Connection conn = adapter.getConnection();
              Statement stmt = conn.createStatement()) {
-            stmt.execute("DROP TABLE IF EXISTS " + tableName);
-            stmt.execute("CREATE TABLE " + tableName + " ("
-                    + "id INT PRIMARY KEY, "
-                    + "name VARCHAR(100), "
-                    + "value DECIMAL(10,2), "
-                    + "status VARCHAR(20)"
-                    + ")");
+            // Drop table if exists (syntax varies by database)
+            if ("oracle".equalsIgnoreCase(adapter.getConnectorType())) {
+                // Oracle doesn't support DROP TABLE IF EXISTS, use PL/SQL block
+                stmt.execute("BEGIN EXECUTE IMMEDIATE 'DROP TABLE " + tableName + " CASCADE CONSTRAINTS'; EXCEPTION WHEN OTHERS THEN NULL; END;");
+            } else {
+                stmt.execute("DROP TABLE IF EXISTS " + tableName);
+            }
+            // Create table with database-specific column types
+            if ("oracle".equalsIgnoreCase(adapter.getConnectorType())) {
+                stmt.execute("CREATE TABLE " + tableName + " ("
+                        + "id NUMBER(10) PRIMARY KEY, "
+                        + "name VARCHAR2(100), "
+                        + "value NUMBER(10,2), "
+                        + "status VARCHAR2(20)"
+                        + ")");
+            } else {
+                stmt.execute("CREATE TABLE " + tableName + " ("
+                        + "id INT PRIMARY KEY, "
+                        + "name VARCHAR(100), "
+                        + "value DECIMAL(10,2), "
+                        + "status VARCHAR(20)"
+                        + ")");
+            }
         }
     }
 

@@ -4,7 +4,6 @@ import com.consilens.connector.api.model.TablePath;
 import com.consilens.core.diff.DiffResult;
 import com.consilens.core.diff.DiffRow;
 import com.consilens.core.lifecycle.DiffContext;
-import com.consilens.core.lifecycle.SegmentResult;
 import com.consilens.sink.api.model.SinkConfig;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -17,7 +16,6 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
-import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -76,6 +74,43 @@ class ConsoleSinkStructuredOutputTest {
     }
 
     @Test
+    void shouldListWithinToleranceRowsSeparatelyFromDifferences() throws Exception {
+        ConsoleResultSink sink = new ConsoleResultSink();
+        DiffContext context = diffContext();
+        DiffRow within = DiffRow.withinTolerance(List.of(1),
+                List.of("1", "10.500000"), List.of("1", "10.504000"),
+                List.of("id", "amount"), List.of("id", "amount"),
+                List.of("amount"), List.of("amount"), Map.of("amount", 0.004));
+
+        sink.open(resultSinkConfig(), context);
+        sink.onResult(DiffResult.builder()
+                .differences(List.of())
+                .withinToleranceDifferences(List.of(within))
+                .statistics(DiffResult.DiffStatistics.builder()
+                        .sourceRowCount(1)
+                        .targetRowCount(1)
+                        .mismatchCount(0)
+                        .unchangedCount(1)
+                        .totalDifferences(0)
+                        .withinToleranceCount(1)
+                        .build())
+                .infoTree(Optional.empty())
+                .sourceTablePath(TablePath.fromString("mydb.users"))
+                .targetTablePath(TablePath.fromString("public.users"))
+                .build(), context);
+
+        JsonNode resultNode = readFirstJsonLine(out);
+        assertEquals("EQUAL", resultNode.get("status").asText());
+        assertEquals(0, resultNode.get("statistics").get("totalDifferences").asInt());
+        assertEquals(1, resultNode.get("statistics").get("withinToleranceCount").asInt());
+        JsonNode block = resultNode.get("withinTolerance");
+        assertTrue(block != null, "容差内行必须在结果里单列，不能因为不计入总数就消失");
+        assertEquals(1, block.get("count").asInt());
+        assertEquals(1, block.get("rows").size());
+        assertEquals("amount", block.get("rows").get(0).get("columns").get(0).asText());
+    }
+
+    @Test
     void shouldPrintStructuredDiffRecordsAndRespectMaxRows() throws Exception {
         ConsoleDiffRecordSink sink = new ConsoleDiffRecordSink();
         DiffContext context = diffContext();
@@ -84,18 +119,9 @@ class ConsoleSinkStructuredOutputTest {
 
         sink.open(config, context);
         sink.onDiffRecords(List.of(diffRow(), diffRow()), context);
-        sink.onSegmentComplete(SegmentResult.builder()
-                .segmentIndex(3)
-                .sourceRowsScanned(10)
-                .targetRowsScanned(10)
-                .differencesFound(1)
-                .totalDifferencesAccumulated(1)
-                .duration(Duration.ofMillis(25))
-                .context(context)
-                .build());
 
         List<JsonNode> lines = readJsonLines(out);
-        assertEquals(3, lines.size());
+        assertEquals(2, lines.size());
         assertEquals("diff-record", lines.get(0).get("event").asText());
         assertEquals("mismatch", lines.get(0).get("operation").asText());
         assertEquals("42", lines.get(0).get("primaryKeyString").asText());
@@ -103,9 +129,6 @@ class ConsoleSinkStructuredOutputTest {
 
         assertEquals("diff-record-truncated", lines.get(1).get("event").asText());
         assertEquals(1, lines.get(1).get("maxRows").asInt());
-
-        assertEquals("segment-complete", lines.get(2).get("event").asText());
-        assertEquals(3, lines.get(2).get("segmentIndex").asInt());
 
         String plainOutput = out.toString(StandardCharsets.UTF_8);
         assertFalse(plainOutput.contains("[DIFF RESULT]"));
@@ -152,7 +175,6 @@ class ConsoleSinkStructuredOutputTest {
                         .mismatchCount(1)
                         .unchangedCount(99)
                         .totalDifferences(1)
-                        .differencePercentage(0.01d)
                         .processingTimeMs(12L)
                         .build())
                 .infoTree(Optional.empty())

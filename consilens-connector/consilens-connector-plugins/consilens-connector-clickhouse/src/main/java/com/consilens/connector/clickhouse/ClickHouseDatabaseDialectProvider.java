@@ -1,5 +1,6 @@
 package com.consilens.connector.clickhouse;
 
+import com.consilens.connector.api.ConnectorTypes;
 import com.consilens.connector.api.DatabaseDialect;
 import com.consilens.connector.api.DatabaseDialectProvider;
 
@@ -9,7 +10,17 @@ public class ClickHouseDatabaseDialectProvider implements DatabaseDialectProvide
 
     @Override
     public String getConnectorType() {
-        return "clickhouse";
+        return ConnectorTypes.CLICKHOUSE;
+    }
+
+    @Override
+    public boolean supportsJdbcUrl(String jdbcUrl) {
+        return jdbcUrl.contains("clickhouse");
+    }
+
+    @Override
+    public int getJdbcUrlMatchPriority() {
+        return 140;
     }
 
     @Override

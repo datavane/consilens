@@ -1,0 +1,199 @@
+# 性能/全字段比对配置 - MySQL vs tidb
+# 目标：覆盖全字段（43 列）比对 + table result sink + diff-record mergeDefaults。
+# 基线：totalMin=4（刻意差异），全字段跨库可能产生类型级差异，不做精确断言。
+
+source:
+  type: mysql
+  name: source-mysql
+  connection:
+    url: jdbc:mysql://127.0.0.1:13306/consilens_demo?useUnicode=true&characterEncoding=UTF-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+    username: ${env.MYSQL_USER}
+    password: ${env.MYSQL_PASSWORD}
+  resource:
+    type: table
+    name: consilens_performance_demo_table
+
+target:
+  type: tidb
+  name: target-tidb
+  connection:
+    url: jdbc:mysql://127.0.0.1:4000/consilens_demo?useUnicode=true&characterEncoding=UTF-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+    username: ${env.TIDB_USER}
+    password: ${env.TIDB_PASSWORD}
+  resource:
+    type: table
+    name: consilens_performance_demo_table
+
+comparison:
+  keys:
+    source: [record_id]
+    target: [record_id]
+  fields:
+    source:
+      - col_tinyint
+      - col_smallint
+      - col_mediumint
+      - col_int
+      - col_bigint
+      - col_unsigned_int
+      - col_float
+      - col_double
+      - col_decimal
+      - col_numeric
+      - col_char
+      - col_varchar_50
+      - col_varchar_100
+      - col_varchar_255
+      - col_text
+      - col_mediumtext
+      - col_binary
+      - col_varbinary
+      - col_blob
+      - col_date
+      - col_datetime
+      - col_timestamp
+      - col_time
+      - col_boolean
+      - col_tinyint_bool
+      - col_enum
+      - col_set
+      - col_json
+      - user_name
+      - email
+      - phone
+      - address
+      - city
+      - country
+      - postal_code
+      - amount
+      - balance
+      - credit_limit
+      - status
+      - category
+      - priority
+      - score
+      - created_at
+      - updated_at
+    target:
+      - col_tinyint
+      - col_smallint
+      - col_mediumint
+      - col_int
+      - col_bigint
+      - col_unsigned_int
+      - col_float
+      - col_double
+      - col_decimal
+      - col_numeric
+      - col_char
+      - col_varchar_50
+      - col_varchar_100
+      - col_varchar_255
+      - col_text
+      - col_mediumtext
+      - col_binary
+      - col_varbinary
+      - col_blob
+      - col_date
+      - col_datetime
+      - col_timestamp
+      - col_time
+      - col_boolean
+      - col_tinyint_bool
+      - col_enum
+      - col_set
+      - col_json
+      - user_name
+      - email
+      - phone
+      - address
+      - city
+      - country
+      - postal_code
+      - amount
+      - balance
+      - credit_limit
+      - status
+      - category
+      - priority
+      - score
+      - created_at
+      - updated_at
+strategy:
+  mode: checksum
+  algorithm: xor
+  bisectionFactor: 8
+  bisectionThreshold: 8000
+  batchSize: 1000
+
+concurrency:
+  io:
+    core: 8
+    max: 32
+    queueSize: 10000
+    keepAliveSeconds: 60
+    threadNamePrefix: consilens-io-
+  cpu:
+    core: 4
+    max: 8
+    queueSize: 10000
+    keepAliveSeconds: 60
+    threadNamePrefix: consilens-cpu-
+
+result:
+  sinks:
+    - format: console
+      type: result
+    - format: table
+      type: result
+      properties:
+        type: mysql
+        url: jdbc:mysql://127.0.0.1:13306/diff_results?useUnicode=true&characterEncoding=UTF-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+        username: ${env.MYSQL_USER}
+        password: ${env.MYSQL_PASSWORD}
+        driver: com.mysql.cj.jdbc.Driver
+        maxPoolSize: 10
+        tableName: dv_actual_values
+        suffixTimestamp: true
+        createTable: true
+        dropIfExists: false
+        defaultColumnLength: 500
+        batchSize: 1000
+        columns:
+          - name: job_execution_id
+            defaultValue: "12121212"
+            columnType: bigint(20)
+          - name: metric_name
+            defaultValue: "multi_table_accuracy"
+            columnType: varchar(255)
+          - name: unique_code
+            defaultValue: "6JM4IH1FQCZTC2ZEMDQ8UVCGNJXQZLAU14MBUNSS3NC="
+            columnType: varchar(255)
+          - name: actual_value
+            value: ${totalDifferences}
+            columnType: decimal(20,4)
+          - name: data_time
+            defaultValue: "2025-05-26 22:35:35"
+            columnType: datetime
+          - name: create_time
+            defaultValue: "2025-05-26 22:35:35"
+            columnType: datetime
+          - name: update_time
+            defaultValue: "2025-05-26 22:35:35"
+            columnType: datetime
+    - format: table
+      type: diff-record
+      properties:
+        type: mysql
+        url: jdbc:mysql://127.0.0.1:13306/diff_results?useUnicode=true&characterEncoding=UTF-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+        username: ${env.MYSQL_USER}
+        password: ${env.MYSQL_PASSWORD}
+        driver: com.mysql.cj.jdbc.Driver
+        maxPoolSize: 10
+        prefix: diff_results_
+        suffixTimestamp: true
+        createTable: true
+        dropIfExists: false
+        defaultColumnLength: 500
+        batchSize: 1000
+        mergeDefaults: true

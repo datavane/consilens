@@ -3,7 +3,6 @@ package com.consilens.sink.console;
 import com.consilens.core.diff.DiffResult;
 import com.consilens.core.diff.DiffRow;
 import com.consilens.core.lifecycle.DiffContext;
-import com.consilens.core.lifecycle.SegmentResult;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.io.IOException;
@@ -57,6 +56,10 @@ final class ConsoleOutputSupport {
         LinkedHashMap<String, Object> payload = basePayload("result", context);
         payload.put("status", result != null && result.hasDifferences() ? "DIFF" : "EQUAL");
         payload.put("statistics", result != null ? result.getStatisticsMap() : Map.of());
+        Map<String, Object> withinTolerance = withinTolerancePayload(result);
+        if (!withinTolerance.isEmpty()) {
+            payload.put("withinTolerance", withinTolerance);
+        }
         if (includeSummary) {
             payload.put("summary", safeSummary(result));
         }
@@ -66,15 +69,36 @@ final class ConsoleOutputSupport {
         return payload;
     }
 
-    static Map<String, Object> segmentPayload(SegmentResult segmentResult) {
-        LinkedHashMap<String, Object> payload = basePayload("segment-complete", segmentResult.getContext());
-        payload.put("segmentIndex", segmentResult.getSegmentIndex());
-        payload.put("sourceRowsScanned", segmentResult.getSourceRowsScanned());
-        payload.put("targetRowsScanned", segmentResult.getTargetRowsScanned());
-        payload.put("differencesFound", segmentResult.getDifferencesFound());
-        payload.put("totalDifferencesAccumulated", segmentResult.getTotalDifferencesAccumulated());
-        payload.put("durationMs", segmentResult.getDuration() != null ? segmentResult.getDuration().toMillis() : null);
-        return payload;
+    /**
+     * 容差内样本单独成块：让"差了多少但没算差异"在报告里可见。
+     * 行数受 withinToleranceSamples 控制，count 始终是全集计数。
+     */
+    private static Map<String, Object> withinTolerancePayload(DiffResult result) {
+        if (result == null || result.getStatistics() == null
+                || result.getStatistics().getWithinToleranceCount() <= 0) {
+            return Map.of();
+        }
+        Map<String, Object> block = new LinkedHashMap<>();
+        block.put("count", result.getStatistics().getWithinToleranceCount());
+        List<Map<String, Object>> rows = new ArrayList<>();
+        List<DiffRow> samples = result.getWithinToleranceDifferences();
+        if (samples != null) {
+            for (DiffRow row : samples) {
+                Map<String, Object> item = new LinkedHashMap<>();
+                item.put("primaryKey", row.getPrimaryKey());
+                item.put("columns", row.getMetadata() == null
+                        ? List.of() : row.getMetadata().get(DiffRow.METADATA_TOLERANCE_COLUMNS));
+                item.put("sourceValues", row.getAllSourceValues());
+                item.put("targetValues", row.getAllTargetValues());
+                if (row.getMetadata() != null
+                        && row.getMetadata().get(DiffRow.METADATA_TOLERANCE_DELTAS) != null) {
+                    item.put("deltas", row.getMetadata().get(DiffRow.METADATA_TOLERANCE_DELTAS));
+                }
+                rows.add(item);
+            }
+        }
+        block.put("rows", rows);
+        return block;
     }
 
     static Map<String, Object> truncationPayload(DiffContext context, long maxRows) {

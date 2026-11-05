@@ -1,0 +1,38 @@
+# S3 对象 vs 本地 CSV
+# 需自行准备 bucket、对象与凭据；仓库不包含真实凭据。
+# 凭据建议走 AWS 默认链：AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY（或 IAM role）。
+# MinIO / LocalStack 等兼容存储按需配置 s3Endpoint 与 s3PathStyle。
+source:
+  type: file
+  name: source-s3
+  resource:
+    type: file
+    path: s3://consilens-demo/export/orders/*.parquet
+    options:
+      format: parquet
+      s3Region: us-east-1
+      s3Endpoint: http://127.0.0.1:9000
+      s3PathStyle: true
+
+target:
+  type: file
+  name: target-csv
+  resource:
+    type: file
+    name: ./examples/files/data/source.csv
+    format: csv
+    hasHeader: true
+    delimiter: ","
+
+comparison:
+  keys:
+    source: [id]
+    target: [id]
+  fields:
+    source: [name, amount]
+    target: [name, amount]
+
+result:
+  sinks:
+    - format: console
+      type: result

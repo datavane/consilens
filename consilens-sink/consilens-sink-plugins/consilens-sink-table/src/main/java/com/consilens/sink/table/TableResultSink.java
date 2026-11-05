@@ -43,7 +43,7 @@ public class TableResultSink implements Sink {
         sinkConfig = parseConfig(config.getProperties());
         TableColumnNames.validateUniqueSanitizedColumns(sinkConfig.getColumns(), "TableResultSink columns");
         dataSource = createDataSource(sinkConfig);
-        tableName = sinkConfig.resolveTableName();
+        tableName = sinkConfig.resolveTableName("result", context.getTaskId());
 
         DatabaseDialect dialect = DatabaseDialects.require(sinkConfig.resolveDatabaseType());
         writeCompiler = dialect.getTableWriteCompiler();
@@ -235,7 +235,11 @@ public class TableResultSink implements Sink {
         hikari.setJdbcUrl(config.getUrl());
         hikari.setUsername(config.getUsername());
         hikari.setPassword(config.getPassword());
-        hikari.setDriverClassName(config.resolveDriver());
+        String driverClassName = config.resolveDriver();
+        if (driverClassName != null) {
+            // null = 让 DriverManager 按 URL 推断（未知方言也能连，不再硬失败）
+            hikari.setDriverClassName(driverClassName);
+        }
         hikari.setMaximumPoolSize(config.getMaxPoolSize());
         return new HikariDataSource(hikari);
     }

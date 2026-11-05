@@ -27,10 +27,12 @@ public class DefaultNormalizationOperationRegistry implements NormalizationOpera
                 setOf("trim", "nullValue")));
         result.put("format_number", definition("format_number",
                 setOf("integer", "decimal", "float"),
-                setOf("precision", "rounding")));
+                setOf("precision", "rounding", "tolerance", "relativeTolerance")));
         result.put("format_datetime", definition("format_datetime",
                 setOf("date", "time", "time_with_timezone", "datetime", "timestamp", "timestamp_with_timezone"),
-                setOf("format", "timezone", "comparisonMode")));
+                // sessionTimeZone/session_time_zone 由 CompareExecutionSettings 读取，用来在两侧
+                // 时区不同时对齐 TIMESTAMP 口径；这里不放行的话，文档里的写法会被校验直接拒绝。
+                setOf("format", "timezone", "comparisonMode", "sessionTimeZone", "session_time_zone")));
         result.put("encode", definition("encode",
                 setOf("binary"),
                 setOf("format", "encoding", "uppercase")));

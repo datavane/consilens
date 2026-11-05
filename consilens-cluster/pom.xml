@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.consilens</groupId>
+        <artifactId>consilens</artifactId>
+        <version>0.1-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>consilens-cluster</artifactId>
+    <packaging>pom</packaging>
+
+    <name>consilens cluster</name>
+    <description>Cluster execution modules for Consilens comparisons</description>
+
+    <modules>
+        <module>consilens-cluster-api</module>
+        <module>consilens-cluster-runtime</module>
+        <module>consilens-cluster-yarn</module>
+        <module>consilens-cluster-kubernetes</module>
+        <module>consilens-cluster-application</module>
+    </modules>
+</project>

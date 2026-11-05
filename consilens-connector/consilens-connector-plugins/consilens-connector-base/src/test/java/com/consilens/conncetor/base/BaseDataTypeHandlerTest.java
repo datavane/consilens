@@ -40,7 +40,8 @@ class BaseDataTypeHandlerTest {
 
     @Test
     void shouldNormalizeBitAsBoolean() {
-        assertEquals("CASE WHEN \"flag\" = TRUE THEN '1' ELSE '0' END",
+        // NULL 哨兵统一为空串（与各方言一致），而不是 '0'
+        assertEquals("CASE WHEN \"flag\" IS NULL THEN '' WHEN \"flag\" = TRUE THEN '1' ELSE '0' END",
                 handler.normalizeColumn("flag", DataType.BIT));
     }
 
@@ -72,31 +73,6 @@ class BaseDataTypeHandlerTest {
         @Override
         public Set<DatabaseFeature> getSupportedFeatures() {
             return Collections.emptySet();
-        }
-
-        @Override
-        public String getDefaultSchema() {
-            return "public";
-        }
-
-        @Override
-        public String getCatalogSeparator() {
-            return ".";
-        }
-
-        @Override
-        public String getPaginationHint(long offset, long limit) {
-            return "";
-        }
-
-        @Override
-        public char getWildcardEscapeChar() {
-            return '\\';
-        }
-
-        @Override
-        public String escapePattern(String pattern) {
-            return pattern;
         }
 
         @Override

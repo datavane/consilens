@@ -5,6 +5,7 @@ import com.consilens.connector.api.CapabilityProvider;
 import com.consilens.connector.api.model.DataType;
 import com.consilens.conncetor.base.BaseDataTypeHandler;
 
+import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 
@@ -26,6 +27,33 @@ public class OracleDataTypeHandler extends BaseDataTypeHandler {
     public OracleDataTypeHandler(CapabilityProvider capabilityProvider, Map<String, ?> normalizationConfig) {
         super(capabilityProvider, normalizationConfig);
     }
+
+    /**
+     * 科学计数渲染（与 Java {@code %.6e} 同形）。
+     *
+     * <p>不能用 {@code TO_CHAR(v,'FM9.999999EEEE')}：Oracle 会先把 BINARY_DOUBLE 隐式转成
+     * NUMBER，`1e300` 直接 ORA-01426（numeric overflow）、`1e-300` 退化为 {@code 0.e+00}。
+     * 因此与 MySQL 族同法构造：尾数 + 指数，POWER 显式用 BINARY_DOUBLE 求幂，指数先转
+     * NUMBER 再 TO_CHAR（否则 {@code TO_CHAR(BINARY_DOUBLE)} 会输出 {@code 3.0E+002} 形式）。
+     *
+     * <p>已知边界：第 7 位有效数字恰好为 `.5` 的平局值，Oracle 的 ROUND 与 Java 的
+     * `%.6e` 可能相差一档（其余取值逐字一致）。
+     */
+    @Override
+    protected String scientificFloatExpression(String quotedCol) {
+        String e0 = "FLOOR(LOG(10, ABS(" + quotedCol + ")))";
+        String mant = "ABS(" + quotedCol + ")/POWER(TO_BINARY_DOUBLE(10), " + e0 + ")";
+        String carry = "CASE WHEN ROUND(" + mant + ", 6) >= 10 THEN 1 ELSE 0 END";
+        String exp = e0 + " + " + carry;
+        String packed = "CASE WHEN " + carry + " = 1 THEN ABS(" + quotedCol
+                + ")/POWER(TO_BINARY_DOUBLE(10), " + e0 + " + 1) ELSE " + mant + " END";
+        return "CASE WHEN " + quotedCol + " < 0 THEN '-' ELSE '' END || "
+                + "TO_CHAR(" + packed + ", 'FM0.000000') || 'e' || "
+                + "CASE WHEN (" + exp + ") < 0 THEN '-' ELSE '+' END || "
+                + "CASE WHEN ABS(" + exp + ") < 10 THEN '0' || TO_CHAR(CAST(ABS(" + exp + ") AS NUMBER)) "
+                + "ELSE TO_CHAR(CAST(ABS(" + exp + ") AS NUMBER)) END";
+    }
+
 
     @Override
     public TypeDescriptor convertToTypeDescriptor(String originType) {
@@ -57,7 +85,9 @@ public class OracleDataTypeHandler extends BaseDataTypeHandler {
                         if (precision <= 9) {
                             return TypeDescriptor.builder(com.consilens.common.enums.DataType.INTEGER_TYPE).originType(originType).bitWidth(32).build();
                         }
-                        if (precision <= 18) {
+                        if (precision <= 19) {
+                            // NUMBER(19) 是本数据集 bigint/键列的物理形态（见设计 §5.2），
+                            // 归一到 64 位整数；真正的 19 位定点列用 NUMBER(20,0) 表达。
                             return TypeDescriptor.builder(com.consilens.common.enums.DataType.INTEGER_TYPE).originType(originType).bitWidth(64).build();
                         }
                     }
@@ -93,7 +123,11 @@ public class OracleDataTypeHandler extends BaseDataTypeHandler {
             case "LONG RAW":
                 return TypeDescriptor.builder(com.consilens.common.enums.DataType.BINARY_TYPE).originType(originType).blobType(true).build();
             case "DATE":
-                return TypeDescriptor.builder(com.consilens.common.enums.DataType.TIMESTAMP_TYPE).originType(originType).build();
+                // 默认按 DATE 语义（date-only）渲染，与其它方言的 DATE 列对齐；
+                // Oracle DATE 物理上含时分秒，需要保留时可用 normalization.date.comparisonMode=DATETIME 开启。
+                return TypeDescriptor.builder(dateIncludesTime()
+                        ? com.consilens.common.enums.DataType.TIMESTAMP_TYPE
+                        : com.consilens.common.enums.DataType.DATE_TYPE).originType(originType).build();
             case "TIMESTAMP":
                 return TypeDescriptor.builder(com.consilens.common.enums.DataType.TIMESTAMP_TYPE).originType(originType).timePrecision(extractLength(upperType)).build();
             case "TIMESTAMP WITH TIME ZONE":
@@ -175,12 +209,24 @@ public class OracleDataTypeHandler extends BaseDataTypeHandler {
     }
 
     /**
+     * RAWTOHEX only accepts RAW; on BLOB it raises ORA-00932. BLOB columns are
+     * rendered via DBMS_LOB.SUBSTR (first 2000 bytes, enough for the demo data),
+     * producing the same upper-case hex as RAWTOHEX on RAW columns.
+     */
+    @Override
+    protected String normalizeBlob(String quotedCol) {
+        return "COALESCE(RAWTOHEX(DBMS_LOB.SUBSTR(" + quotedCol + ", 2000, 1)), '')";
+    }
+
+    /**
      * Oracle-specific string normalization.
      * Use TRIM to remove leading/trailing spaces for cross-database consistency.
      */
     @Override
     protected String normalizeString(String quotedCol) {
-        return "COALESCE(TRIM(" + quotedCol + "), '')";
+        // TEXT columns are CLOB in Oracle: TRIM/concat on CLOB mixed with CHAR
+        // raises ORA-00932, so render through TO_CHAR first.
+        return "COALESCE(TRIM(TO_CHAR(" + quotedCol + ")), " + stringNullReplacement() + ")";
     }
 
     /**
@@ -189,7 +235,7 @@ public class OracleDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeInteger(String quotedCol) {
-        return "COALESCE(TRIM(TO_CHAR(" + quotedCol + ")), '0')";
+        return "COALESCE(TRIM(TO_CHAR(" + quotedCol + ")), '')";
     }
 
     /**
@@ -207,18 +253,18 @@ public class OracleDataTypeHandler extends BaseDataTypeHandler {
         // If precision is 0, return integer format without decimal point
         if (precision == 0) {
             String roundFunction = rounding ? "ROUND" : "TRUNC";
-            return "COALESCE(TRIM(TO_CHAR(" + roundFunction + "(" + quotedCol + ", 0), 'FM999999999999990')), '0')";
+            return "COALESCE(TRIM(TO_CHAR(" + roundFunction + "(" + quotedCol + ", 0), '"
+                    + decimalFormatMask(0).replace(".", "") + "')), '')";
         }
 
-        String formatPattern = "FM999999999999990." + "0".repeat(precision);
-        String defaultValue = "0." + "0".repeat(precision);
+        String formatPattern = decimalFormatMask(precision);
 
         if (rounding) {
             // Round half up: apply ROUND then format
-            return "COALESCE(TO_CHAR(ROUND(" + quotedCol + ", " + precision + "), '" + formatPattern + "'), '" + defaultValue + "')";
+            return "COALESCE(TO_CHAR(ROUND(" + quotedCol + ", " + precision + "), '" + formatPattern + "'), '')";
         } else {
             // Truncate: apply TRUNC then format
-            return "COALESCE(TO_CHAR(TRUNC(" + quotedCol + ", " + precision + "), '" + formatPattern + "'), '" + defaultValue + "')";
+            return "COALESCE(TO_CHAR(TRUNC(" + quotedCol + ", " + precision + "), '" + formatPattern + "'), '')";
         }
     }
 
@@ -229,36 +275,50 @@ public class OracleDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeFloat(String quotedCol) {
-        // Get precision from config, default to 4
-        int precision = getPrecision("float", 4);
+        // Get precision from config, default to 6
+        int precision = getPrecision("float", 6);
         // Get rounding config, default to true (round half up)
         boolean rounding = getRounding("float", true);
 
         // If precision is 0, return integer format without decimal point
         if (precision == 0) {
             String roundFunction = rounding ? "ROUND" : "TRUNC";
-            return "COALESCE(TRIM(TO_CHAR(" + roundFunction + "(CAST(" + quotedCol + " AS BINARY_DOUBLE), 0), 'FM999999999999990')), '0')";
+            return "COALESCE(TRIM(TO_CHAR(" + roundFunction + "(CAST(" + quotedCol
+                    + " AS BINARY_DOUBLE), 0), '" + decimalFormatMask(0).replace(".", "") + "')), '')";
         }
 
-        String formatPattern = "FM999999999999990." + "0".repeat(precision);
-        String defaultValue = "0." + "0".repeat(precision);
+        String formatPattern = decimalFormatMask(precision);
 
         if (rounding) {
             // Round half up: apply ROUND then format
-            return "COALESCE(TO_CHAR(ROUND(CAST(" + quotedCol + " AS BINARY_DOUBLE), " + precision + "), '" + formatPattern + "'), '" + defaultValue + "')";
+            return "COALESCE(TO_CHAR(ROUND(CAST(" + quotedCol + " AS BINARY_DOUBLE), " + precision + "), '" + formatPattern + "'), '')";
         } else {
             // Truncate: apply TRUNC then format
-            return "COALESCE(TO_CHAR(TRUNC(CAST(" + quotedCol + " AS BINARY_DOUBLE), " + precision + "), '" + formatPattern + "'), '" + defaultValue + "')";
+            return "COALESCE(TO_CHAR(TRUNC(CAST(" + quotedCol + " AS BINARY_DOUBLE), " + precision + "), '" + formatPattern + "'), '')";
         }
     }
 
     /**
      * Oracle-specific date normalization: YYYY-MM-DD format.
      */
+    /**
+     * Oracle DATE 物理上含时分秒。默认与其它方言的 DATE 一样只渲染日期；
+     * 配置 {@code normalization.date.comparisonMode=DATETIME} 后保留时分秒（并映射为 TIMESTAMP）。
+     */
     @Override
     protected String normalizeDate(String quotedCol) {
+        if (dateIncludesTime()) {
+            return "COALESCE(TO_CHAR(" + quotedCol + ", '" + resolveOracleTemporalFormat("date",
+                    "YYYY-MM-DD HH24:MI:SS", "YYYY-MM-DD") + "'), '')";
+        }
         return "COALESCE(TO_CHAR(" + quotedCol + ", '" + resolveOracleTemporalFormat("date",
                 "YYYY-MM-DD", "YYYY-MM-DD") + "'), '')";
+    }
+
+    /** normalization.date.comparisonMode=DATETIME 时保留 Oracle DATE 的时分秒。 */
+    private boolean dateIncludesTime() {
+        String mode = getComparisonMode("date");
+        return mode != null && "DATETIME".equalsIgnoreCase(mode.trim());
     }
 
     /**
@@ -288,12 +348,11 @@ public class OracleDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeDateTime(String quotedCol) {
-        String expression = quotedCol;
-        String targetTimezone = getTimezone("datetime", null);
-        if (targetTimezone != null && !targetTimezone.isBlank()) {
-            expression = "CAST(" + quotedCol + " AS TIMESTAMP WITH TIME ZONE) AT TIME ZONE '"
-                    + resolveOracleTimezone("datetime", "UTC") + "'";
-        }
+        // Always canonicalize to UTC (see normalizeTimestamp note); a
+        // config-conditional literal fallback desynchronizes Oracle from the
+        // other mysql-family dialects whose session zones differ.
+        String expression = "FROM_TZ(CAST(" + quotedCol + " AS TIMESTAMP), SESSIONTIMEZONE) AT TIME ZONE '"
+                + resolveOracleTimezone("datetime", "UTC") + "'";
         return "COALESCE(TO_CHAR(" + expression + ", '" + resolveOracleTemporalFormat("datetime",
                 "YYYY-MM-DD HH24:MI:SS", "YYYY-MM-DD") + "'), '')";
     }
@@ -308,8 +367,13 @@ public class OracleDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeTimestamp(String quotedCol) {
-        return "COALESCE(TO_CHAR(CAST(" + quotedCol + " AS TIMESTAMP WITH TIME ZONE) AT TIME ZONE '"
-                + resolveOracleTimezone("timestamp", "UTC") + "', '" + resolveOracleTemporalFormat("timestamp",
+        // Interpret the stored wall-clock in the session zone and render UTC,
+        // matching the mysql CONVERT_TZ(session -> UTC) convention. TO_CHAR on
+        // the raw column keeps the literal (session-zone) wall clock and the
+        // local-compare path would leak NLS-formatted strings instead.
+        return "COALESCE(TO_CHAR(FROM_TZ(CAST(" + quotedCol + " AS TIMESTAMP), SESSIONTIMEZONE) AT TIME ZONE '"
+                + resolveOracleTimezone("timestamp", "UTC") + "', '"
+                + resolveOracleTemporalFormat("timestamp",
                 "YYYY-MM-DD HH24:MI:SS", "YYYY-MM-DD") + "'), '')";
     }
 
@@ -338,7 +402,11 @@ public class OracleDataTypeHandler extends BaseDataTypeHandler {
         Set<String> timeTokens = temporalTokens("HH24", "HH12", "HH", "MI", "SS", "FF", "FF1", "FF2", "FF3",
                 "FF4", "FF5", "FF6", "FF7", "FF8", "FF9", "AM", "PM");
         if ("date".equals(dataTypeName)) {
-            return dateTokens;
+            Set<String> tokens = new HashSet<>(dateTokens);
+            if (dateIncludesTime()) {
+                tokens.addAll(timeTokens);
+            }
+            return tokens;
         }
         if ("time".equals(dataTypeName) || "time_with_timezone".equals(dataTypeName)) {
             return timeTokens;
@@ -348,19 +416,11 @@ public class OracleDataTypeHandler extends BaseDataTypeHandler {
     }
 
     /**
-     * Oracle-specific blob normalization: convert to uppercase hexadecimal.
-     */
-    @Override
-    protected String normalizeBlob(String quotedCol) {
-        return "COALESCE(RAWTOHEX(" + quotedCol + "), '')";
-    }
-
-    /**
      * Oracle-specific boolean normalization: '0' or '1'.
      */
     @Override
     protected String normalizeBoolean(String quotedCol) {
-        return "CASE WHEN " + quotedCol + " = 1 THEN '1' ELSE '0' END";
+        return "CASE WHEN " + quotedCol + " IS NULL THEN '' WHEN " + quotedCol + " = 1 THEN '1' ELSE '0' END";
     }
 
     /**
@@ -376,7 +436,7 @@ public class OracleDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeDefault(String quotedCol) {
-        return "COALESCE(TRIM(TO_CHAR(" + quotedCol + ")), '0')";
+        return "COALESCE(TRIM(TO_CHAR(" + quotedCol + ")), '')";
     }
 
     @Override
@@ -404,8 +464,9 @@ public class OracleDataTypeHandler extends BaseDataTypeHandler {
             case "long":
                 return DataType.TEXT;
             case "date":
-                // Oracle DATE contains time, so map to TIMESTAMP to preserve it
-                return DataType.TIMESTAMP;
+                // 默认 Map to DATE（date-only），与 mysql DATE 对齐；
+                // comparisonMode=DATETIME 时映射为 TIMESTAMP，保留 Oracle DATE 的时分秒。
+                return dateIncludesTime() ? DataType.TIMESTAMP : DataType.DATE;
             case "timestamp":
             case "timestamp with time zone":
             case "timestamp with local time zone":
@@ -416,9 +477,10 @@ public class OracleDataTypeHandler extends BaseDataTypeHandler {
             case "double precision":
             case "binary_double":
                 return DataType.DOUBLE;
-            case "blob":
             case "raw":
             case "long raw":
+                return DataType.VARBINARY;
+            case "blob":
             case "bfile":
                 return DataType.BLOB;
             case "rowid":

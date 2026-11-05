@@ -15,7 +15,6 @@ import java.util.concurrent.Executor;
  *
  * <p>Key capabilities:
  * <ul>
- *   <li><b>Adaptive sampling</b> — samples primary key distribution to find balanced split points</li>
  *   <li><b>Checkpoint selection</b> — uses {@link CheckpointSelector} to pick boundary keys
  *       that produce roughly equal-sized segments</li>
  *   <li><b>Multi-type keys</b> — supports both numeric and string primary keys</li>
@@ -32,32 +31,16 @@ public class IntelligentSegmenter {
 
     private final CheckpointSelector checkpointSelector;
     private final DatabaseAdapter databaseAdapter;
-    private final int sampleSize;
-    private final boolean enableAdaptiveSampling;
-
-    /**
-     * Creates a segmenter with default settings (sampleSize=1000, adaptive sampling enabled).
-     *
-     * @param databaseAdapter the database adapter for executing sampling queries
-     */
-    public IntelligentSegmenter(DatabaseAdapter databaseAdapter) {
-        this(databaseAdapter, CheckpointSelector.defaultSelector(), 1000, true);
-    }
 
     /**
      * Creates a segmenter with full configuration.
      *
-     * @param databaseAdapter          the database adapter for executing sampling queries
-     * @param checkpointSelector       strategy for selecting split-point keys
-     * @param sampleSize               number of rows to sample for distribution analysis
-     * @param enableAdaptiveSampling   whether to adjust sample size based on table characteristics
+     * @param databaseAdapter    the database adapter for executing segmentation queries
+     * @param checkpointSelector strategy for selecting split-point keys
      */
-    public IntelligentSegmenter(DatabaseAdapter databaseAdapter, CheckpointSelector checkpointSelector,
-                                int sampleSize, boolean enableAdaptiveSampling) {
+    public IntelligentSegmenter(DatabaseAdapter databaseAdapter, CheckpointSelector checkpointSelector) {
         this.databaseAdapter = databaseAdapter;
         this.checkpointSelector = checkpointSelector;
-        this.sampleSize = sampleSize;
-        this.enableAdaptiveSampling = enableAdaptiveSampling;
     }
 
     /**
@@ -83,8 +66,8 @@ public class IntelligentSegmenter {
             }
 
             // Extract key bounds
-            KeyVector minKey = extractKeyVector(table.getMinKey().orElse(null));
-            KeyVector maxKey = extractKeyVector(table.getMaxKey().orElse(null));
+            KeyVector minKey = KeyVector.fromKeyObject(table.getMinKey().orElse(null));
+            KeyVector maxKey = KeyVector.fromKeyObject(table.getMaxKey().orElse(null));
 
             if (minKey == null || maxKey == null) {
                 log.warn("Cannot extract key bounds, creating single segment");
@@ -118,19 +101,12 @@ public class IntelligentSegmenter {
                 return List.of(table);
             }
 
-            // Perform adaptive sampling if enabled
-            SamplingResult samplingResult = null;
-            if (enableAdaptiveSampling) {
-                samplingResult = performSampling(table, minKey, maxKey);
-            }
-
             // Choose checkpoints
-            List<KeyVector> checkpoints = checkpointSelector.chooseAdaptiveCheckpoints(
+            List<KeyVector> checkpoints = checkpointSelector.chooseCheckpoints(
                     minKey,
                     maxKey,
                     Math.max(2, maxSegments + 1),
-                    estimateTableSize(table),
-                    samplingResult);
+                    true);
 
             // Validate checkpoints
             if (!checkpointSelector.validateCheckpoints(checkpoints, minKey, maxKey)) {
@@ -152,40 +128,6 @@ public class IntelligentSegmenter {
     }
 
     /**
-     * Perform sampling to analyze data distribution.
-     */
-    private SamplingResult performSampling(TableSegment table, KeyVector minKey, KeyVector maxKey) {
-        try {
-            log.debug("Performing sampling for table: {}", table.getTablePath());
-
-            // Build sampling query
-            String samplingQuery = buildSamplingQuery(table, minKey, maxKey, sampleSize);
-
-            // Execute sampling - for now, simplify by using a basic query approach
-            // This is a temporary implementation - in production, you'd implement proper sampling
-            log.debug("Sampling functionality temporarily simplified for compilation");
-
-            // Estimate total rows
-            long totalRows = estimateTableSize(table);
-
-            return SamplingResult.empty();
-
-        } catch (Exception e) {
-            log.warn("Sampling failed, proceeding without distribution info", e);
-            return SamplingResult.empty();
-        }
-    }
-
-    /**
-     * Build sampling query for the given table segment.
-     */
-    private String buildSamplingQuery(TableSegment table, KeyVector minKey, KeyVector maxKey, int limit) {
-        // Prefer adapter-generated SQL to keep SQL generation centralized.
-        // The segment bounds (min/max) are already reflected in the segment's WHERE clause.
-        return table.getDatabase().buildKeySamplingQuery(table, 0, limit);
-    }
-
-    /**
      * Estimate table size using database statistics.
      */
     private long estimateTableSize(TableSegment table) {
@@ -197,57 +139,6 @@ public class IntelligentSegmenter {
         } catch (Exception e) {
             log.warn("Failed to estimate table size, using default", e);
             return 1000000; // Default estimate
-        }
-    }
-
-    /**
-     * Extract KeyVector from optional list.
-     */
-    private KeyVector extractKeyVector(Object keyObject) {
-        if (keyObject == null) {
-            return null;
-        }
-
-        if (keyObject instanceof List) {
-            List<?> keyList = (List<?>) keyObject;
-            List<Comparable> comparableValues = new ArrayList<>();
-            for (Object value : keyList) {
-                if (value instanceof Comparable) {
-                    comparableValues.add((Comparable<?>) value);
-                } else {
-                    throw new IllegalArgumentException("Key values must be comparable: " + value);
-                }
-            }
-            return new KeyVector(comparableValues);
-        } else if (keyObject instanceof Comparable) {
-            return new KeyVector((Comparable<?>) keyObject);
-        } else {
-            throw new IllegalArgumentException("Unsupported key object type: " + keyObject.getClass());
-        }
-    }
-
-    /**
-     * Extract key from ResultSet.
-     */
-    private KeyVector extractKeyFromResultSet(java.sql.ResultSet rs) throws java.sql.SQLException {
-        try {
-            List<Comparable> values = new ArrayList<>();
-            int columnCount = rs.getMetaData().getColumnCount();
-
-            for (int i = 1; i <= columnCount; i++) {
-                Object value = rs.getObject(i);
-                if (value instanceof Comparable) {
-                    values.add((Comparable<?>) value);
-                } else {
-                    return null; // Skip non-comparable values
-                }
-            }
-
-            return new KeyVector(values);
-
-        } catch (Exception e) {
-            log.debug("Failed to extract key from result set", e);
-            return null;
         }
     }
 
@@ -265,10 +156,13 @@ public class IntelligentSegmenter {
         for (int i = 0; i < checkpoints.size() - 1; i++) {
             KeyVector start = checkpoints.get(i);
             KeyVector end = checkpoints.get(i + 1);
+            boolean isLast = i == checkpoints.size() - 2;
 
             TableSegment segment = originalTable.toBuilder()
                     .minKey(Optional.of(new ArrayList<>(start.toList())))
                     .maxKey(Optional.of(new ArrayList<>(end.toList())))
+                    // 中间段上界排他，避免相邻段共享边界行；最后一段继承父段（根段含上界保证最大行不丢）
+                    .upperBoundInclusive(isLast ? originalTable.isUpperBoundInclusive() : false)
                     .build();
 
             // Verify the database adapter is preserved

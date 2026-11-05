@@ -15,7 +15,10 @@ public final class SensitiveValueMasker {
         if (url == null || url.isBlank()) {
             return "(not set)";
         }
-        String masked = maskSemicolonProperties(maskUserInfo(url));
+        // Oracle thin/oci 的内联凭据没有 "://"，形如 jdbc:oracle:thin:user/pass@host
+        String masked = url.replaceAll(
+                "(?i)(jdbc:[a-z0-9]+:(?:thin|oci):)[^/@\\s]+/[^@\\s]*@", "$1***@");
+        masked = maskSemicolonProperties(maskUserInfo(masked));
         int queryStart = masked.indexOf('?');
         if (queryStart < 0 || queryStart == masked.length() - 1) {
             return masked;

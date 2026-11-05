@@ -1,18 +1,15 @@
 package com.consilens.cli.config;
 
 import com.consilens.cli.model.CliConfiguration;
+import com.consilens.common.io.PathSupport;
 import com.consilens.core.exception.ExceptionHandler;
 import com.consilens.core.util.LogUtils;
 import com.consilens.core.validation.ValidationException;
-import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
-import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
-import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 
 import lombok.Getter;
-import lombok.extern.slf4j.Slf4j;
 
 import java.io.*;
 import java.nio.file.*;
@@ -22,14 +19,12 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 /**
- * Unified configuration manager providing load, cache, validate, and change-listener support.
+ * Unified configuration manager providing load, cache, and validate support.
  */
-@Slf4j
 public class ConfigurationManager {
 
     private final Map<String, ObjectMapper> mappers;
     private final Map<String, CachedConfiguration> configCache;
-    private final Map<String, List<ConfigurationChangeListener>> listeners;
     private final ReentrantReadWriteLock cacheLock;
     private final ConfigNormalizer configNormalizer;
     private final EnvironmentPlaceholderResolver environmentPlaceholderResolver;
@@ -38,10 +33,9 @@ public class ConfigurationManager {
         this(System.getenv());
     }
 
-    ConfigurationManager(Map<String, String> environment) {
+    public ConfigurationManager(Map<String, String> environment) {
         this.mappers = createMappers();
         this.configCache = new ConcurrentHashMap<>();
-        this.listeners = new ConcurrentHashMap<>();
         this.cacheLock = new ReentrantReadWriteLock();
         this.configNormalizer = new ConfigNormalizer();
         this.environmentPlaceholderResolver = new EnvironmentPlaceholderResolver(environment);
@@ -106,7 +100,7 @@ public class ConfigurationManager {
         try {
             config = configNormalizer.normalize(config);
         } catch (ValidationException e) {
-            throw new ConfigurationException("Configuration validation failed: " + e.getMessage(), e);
+            throw new ConfigurationException(e.getMessage(), e);
         }
 
         // Cache configuration
@@ -145,7 +139,7 @@ public class ConfigurationManager {
                 try {
                     config = configNormalizer.normalize(config);
                 } catch (ValidationException e) {
-                    throw new ConfigurationException("Configuration validation failed: " + e.getMessage(), e);
+                    throw new ConfigurationException(e.getMessage(), e);
                 }
                 return config;
             }, "Load configuration from input stream");
@@ -177,21 +171,18 @@ public class ConfigurationManager {
             Path path = Paths.get(outputPath).toAbsolutePath().normalize();
 
             // Create parent directories
-            if (path.getParent() != null) {
-                Files.createDirectories(path.getParent());
-            }
+            PathSupport.ensureParent(path);
 
-            // Configure output mapper
-            mapper.configure(SerializationFeature.INDENT_OUTPUT, true);
+            // Configure output on a copy so the shared mapper stays immutable
+            // and pretty-printing does not leak into other callers.
+            ObjectMapper outputMapper = mapper.copy();
+            outputMapper.configure(SerializationFeature.INDENT_OUTPUT, true);
 
             LogUtils.logDebug("Saving configuration", "path=" + outputPath, "format=" + format);
-            mapper.writeValue(path.toFile(), config);
+            outputMapper.writeValue(path.toFile(), config);
 
             // Evict cache
             invalidateCache(path.toString());
-
-            // Notify listeners
-            notifyConfigurationChange(path.toString(), config);
 
             LogUtils.logOperationSuccess("Configuration saved with path: " + path.toString());
             return null; // Void operation
@@ -209,60 +200,10 @@ public class ConfigurationManager {
             CliConfiguration config = loadConfiguration(configPath, false); // skip cache for validation
             return ValidationResult.success("Configuration file is valid");
         } catch (ConfigurationException e) {
-            return ValidationResult.error("Configuration validation failed: " + e.getMessage());
+            return ValidationResult.error(e.getMessage());
         } catch (Exception e) {
-            return ValidationResult.error("Unexpected error during validation: " + e.getMessage());
-        }
-    }
-
-    /**
-     * Reload configuration, bypassing the cache.
-     *
-     * @param configPath configuration file path
-     * @return reloaded configuration
-     * @throws ConfigurationException if loading fails
-     */
-    public CliConfiguration reloadConfiguration(String configPath) throws ConfigurationException {
-        invalidateCache(Paths.get(configPath).toAbsolutePath().toString());
-        return loadConfiguration(configPath);
-    }
-
-    /**
-     * Register a configuration change listener.
-     *
-     * @param configPath configuration file path
-     * @param listener   listener to register
-     */
-    public void addConfigurationListener(String configPath, ConfigurationChangeListener listener) {
-        listeners.computeIfAbsent(configPath, k -> new ArrayList<>()).add(listener);
-    }
-
-    /**
-     * Remove a configuration change listener.
-     *
-     * @param configPath configuration file path
-     * @param listener   listener to remove
-     */
-    public void removeConfigurationListener(String configPath, ConfigurationChangeListener listener) {
-        List<ConfigurationChangeListener> list = listeners.get(configPath);
-        if (list != null) {
-            list.remove(listener);
-            if (list.isEmpty()) {
-                listeners.remove(configPath);
-            }
-        }
-    }
-
-    /**
-     * Clear all cached configurations.
-     */
-    public void clearCache() {
-        cacheLock.writeLock().lock();
-        try {
-            configCache.clear();
-            LogUtils.logOperationSuccess("Configuration cache cleared");
-        } finally {
-            cacheLock.writeLock().unlock();
+            return ValidationResult.error("Unexpected error during validation: "
+                    + (e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage()));
         }
     }
 
@@ -282,46 +223,17 @@ public class ConfigurationManager {
     }
 
     /**
-     * Returns cache statistics.
-     *
-     * @return cache statistics
-     */
-    public CacheStatistics getCacheStatistics() {
-        cacheLock.readLock().lock();
-        try {
-            return new CacheStatistics(
-                configCache.size(),
-                configCache.values().stream().mapToLong(c -> c.getHitCount()).sum(),
-                configCache.values().stream().filter(c -> {
-                    try {
-                        return c.isExpired(Paths.get(""));
-                    } catch (Exception e) {
-                        return false;
-                    }
-                }).count()
-            );
-        } finally {
-            cacheLock.readLock().unlock();
-        }
-    }
-
-    /**
      * Create ObjectMapper instances for YAML and JSON.
      */
     private Map<String, ObjectMapper> createMappers() {
         Map<String, ObjectMapper> mappers = new HashMap<>();
 
-        // YAML mapper
-        ObjectMapper yamlMapper = new ObjectMapper(new YAMLFactory());
-        yamlMapper.registerModule(new JavaTimeModule());
-        yamlMapper.setSerializationInclusion(JsonInclude.Include.NON_NULL);
+        // Shared, immutable mapper instances: Java time + NON_NULL inclusion.
+        ObjectMapper yamlMapper = CliObjectMappers.yamlWithJavaTimeNonNull();
         mappers.put("yaml", yamlMapper);
         mappers.put("yml", yamlMapper);
 
-        // JSON mapper
-        ObjectMapper jsonMapper = new ObjectMapper();
-        jsonMapper.registerModule(new JavaTimeModule());
-        jsonMapper.setSerializationInclusion(JsonInclude.Include.NON_NULL);
+        ObjectMapper jsonMapper = CliObjectMappers.jsonWithJavaTimeNonNull();
         mappers.put("json", jsonMapper);
 
         return mappers;
@@ -384,29 +296,9 @@ public class ConfigurationManager {
     private CachedConfiguration getCachedConfiguration(String path) {
         cacheLock.readLock().lock();
         try {
-            CachedConfiguration cached = configCache.get(path);
-            if (cached != null) {
-                cached.incrementHitCount();
-            }
-            return cached;
+            return configCache.get(path);
         } finally {
             cacheLock.readLock().unlock();
-        }
-    }
-
-    /**
-     * Notify registered listeners of a configuration change.
-     */
-    private void notifyConfigurationChange(String configPath, CliConfiguration newConfig) {
-        List<ConfigurationChangeListener> list = listeners.get(configPath);
-        if (list != null) {
-            for (ConfigurationChangeListener listener : list) {
-                try {
-                    listener.onConfigurationChanged(configPath, newConfig);
-                } catch (Exception e) {
-                    LogUtils.logWarning("Error notifying configuration listener", e.getMessage());
-                }
-            }
         }
     }
 
@@ -415,7 +307,30 @@ public class ConfigurationManager {
         if (cause instanceof ConfigurationException) {
             return (ConfigurationException) cause;
         }
-        return new ConfigurationException(exception.getMessage(), exception);
+        String detail = deepestMessage(cause);
+        String message = exception.getMessage();
+        if (detail == null || message == null || message.contains(detail)) {
+            return new ConfigurationException(message, exception);
+        }
+        return new ConfigurationException(message + ": " + detail, exception);
+    }
+
+    /**
+     * Parse failures are wrapped as "Load configuration from <path>"; the useful
+     * Jackson/SnakeYAML message (including line/column) lives deeper in the cause
+     * chain.
+     */
+    private static String deepestMessage(Throwable cause) {
+        String best = null;
+        Throwable current = cause;
+        int depth = 0;
+        while (current != null && depth++ < 20) {
+            if (current.getMessage() != null && !current.getMessage().isBlank()) {
+                best = current.getMessage();
+            }
+            current = current.getCause();
+        }
+        return best;
     }
 
     /**
@@ -426,14 +341,11 @@ public class ConfigurationManager {
         private final CliConfiguration config;
         private final Instant createdAt;
         private final long maxAgeMillis;
-        @Getter
-        private long hitCount;
 
         public CachedConfiguration(CliConfiguration config) {
             this.config = config;
             this.createdAt = Instant.now();
             this.maxAgeMillis = 300000; // 5 minutes
-            this.hitCount = 0;
         }
 
         public boolean isExpired(Path path) {
@@ -445,18 +357,6 @@ public class ConfigurationManager {
             }
         }
 
-        public void incrementHitCount() {
-            hitCount++;
-        }
-
-    }
-
-    /**
-     * Listener interface for configuration changes.
-     */
-    @FunctionalInterface
-    public interface ConfigurationChangeListener {
-        void onConfigurationChanged(String configPath, CliConfiguration newConfig);
     }
 
     /**
@@ -480,37 +380,5 @@ public class ConfigurationManager {
             return new ValidationResult(false, message);
         }
 
-    }
-
-    /**
-     * Cache statistics.
-     */
-    public static class CacheStatistics {
-        private final int cacheSize;
-        private final long totalHits;
-        private final long expiredCount;
-
-        public CacheStatistics(int cacheSize, long totalHits, long expiredCount) {
-            this.cacheSize = cacheSize;
-            this.totalHits = totalHits;
-            this.expiredCount = expiredCount;
-        }
-
-        public int getCacheSize() {
-            return cacheSize;
-        }
-
-        public long getTotalHits() {
-            return totalHits;
-        }
-
-        public long getExpiredCount() {
-            return expiredCount;
-        }
-
-        @Override
-        public String toString() {
-            return String.format("Cache[size=%d, hits=%d, expired=%d]", cacheSize, totalHits, expiredCount);
-        }
     }
 }

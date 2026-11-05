@@ -94,6 +94,23 @@ public interface MetadataQueryGenerator {
     String getSchemasSQL();
 
     /**
+     * Generate SQL for fetching the list of databases that can be selected
+     * when configuring a data source or task target.
+     * 
+     * <p>
+     * Defaults to {@link #getSchemasSQL()}, which is correct for dialects
+     * where a schema equals a database (e.g. MySQL). Dialects where schemas
+     * and databases are distinct concepts (e.g. PostgreSQL) must override
+     * this to return real database names.
+     * 
+     * @return SQL query to retrieve database list
+     * @since 1.x
+     */
+    default String getDatabaseListSQL() {
+        return getSchemasSQL();
+    }
+
+    /**
      * Generate SQL for fetching table names in a schema.
      * 
      * @param schemaName the schema name

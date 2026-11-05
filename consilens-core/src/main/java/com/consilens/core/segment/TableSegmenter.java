@@ -16,6 +16,7 @@ import lombok.extern.slf4j.Slf4j;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
+import java.util.function.Function;
 
 /**
  * Enhanced table segmentation system with pluggable strategies.
@@ -38,9 +39,7 @@ public class TableSegmenter {
         this.config = config;
         this.intelligentSegmenter = new IntelligentSegmenter(
                 database,
-                buildCheckpointSelector(config),
-                config.getSampleSize(),
-                true);
+                buildCheckpointSelector(config));
         this.rangeStrategy = new RangeSegmentStrategy(intelligentSegmenter);
         this.rowSampleStrategy = new RowSampleSegmentStrategy();
         this.fallbackStrategy = new FallbackSegmentStrategy(config);
@@ -68,11 +67,15 @@ public class TableSegmenter {
     private CompletableFuture<List<TableSegment>> segment(TableSegment table, int maxSegments) {
         SegmentStrategy strategy = selectStrategy(table);
         return strategy.segment(table, maxSegments, getIoExecutor())
-                .exceptionally(e -> {
+                .handle((segments, error) -> {
+                    if (error == null) {
+                        return CompletableFuture.completedFuture(segments);
+                    }
                     log.error("Segmentation strategy {} failed, falling back to basic segmentation",
-                            strategy.getType(), e);
-                    return fallbackStrategy.segment(table, maxSegments, getIoExecutor()).join();
-                });
+                            strategy.getType(), error);
+                    return fallbackStrategy.segment(table, maxSegments, getIoExecutor());
+                })
+                .thenCompose(Function.identity());
     }
 
     private int determineSegmentCount(TableSegment table, int targetFactor, long threshold) {

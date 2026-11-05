@@ -25,6 +25,12 @@ import java.util.Map;
  */
 public class PostgreSQLSqlQueryGenerator extends BaseSqlQueryGenerator {
 
+    /** 归并比较把 NULL 当空串排在最前；这些方言升序默认 NULLS LAST，必须显式对齐。 */
+    @Override
+    protected String orderByExpression(String column) {
+        return super.orderByExpression(column) + " NULLS FIRST";
+    }
+
     private final CapabilityProvider capabilityProvider;
     private final DataTypeHandler dataTypeHandler;
 
@@ -33,6 +39,25 @@ public class PostgreSQLSqlQueryGenerator extends BaseSqlQueryGenerator {
         super(capabilityProvider);
         this.capabilityProvider = capabilityProvider;
         this.dataTypeHandler = dataTypeHandler;
+    }
+
+
+    /** join 计划比较列的类型归一化处理器（与 checksum 路径同口径）。 */
+    @Override
+    protected com.consilens.connector.api.DataTypeHandler dataTypeHandler() {
+        return this.dataTypeHandler;
+    }
+
+    /** This dialect implements XOR checksum aggregation. */
+    @Override
+    protected boolean supportsXorChecksum() {
+        return true;
+    }
+
+    /** 归一化结果为字符串时，须做字节级比较以规避库内排序规则（如 utf8mb4_0900_ai_ci）。 */
+    @Override
+    protected String binarySafeExpression(String expression) {
+        return "convert_to(" + expression + ", 'UTF8')";
     }
 
     @Override
@@ -63,14 +88,6 @@ public class PostgreSQLSqlQueryGenerator extends BaseSqlQueryGenerator {
             return getChecksumSQLWithConcat(schemaName, tableName, keyColumns, columns, columnDataTypes, whereClause);
         }
     }
-
-    @Override
-    public boolean supportsChecksumAlgorithm(ChecksumAlgorithm checksumAlgorithm) {
-        return checksumAlgorithm == null
-                || checksumAlgorithm == ChecksumAlgorithm.CONCAT
-                || checksumAlgorithm.isXor();
-    }
-
     /**
      * Generate checksum SQL using traditional CONCAT method (backward compatible)
      */
@@ -90,7 +107,7 @@ public class PostgreSQLSqlQueryGenerator extends BaseSqlQueryGenerator {
         } else {
             // BUGFIX: Use only primary key columns for ordering to ensure stable sort
             // This prevents false checksum mismatches when data columns differ
-            sql.append("COALESCE(MD5(STRING_AGG(row_checksum, '|' ORDER BY pk_key)), '') as checksum ");
+            sql.append("COALESCE(MD5(STRING_AGG(row_checksum, '|' ORDER BY pk_key, row_checksum)), '') as checksum ");
             sql.append("FROM (");
             sql.append("SELECT ");
 
@@ -102,7 +119,7 @@ public class PostgreSQLSqlQueryGenerator extends BaseSqlQueryGenerator {
                         sql.append(", '|', ");
                     String column = keyColumns.get(i);
                     DataType dataType = columnDataTypes.get(column);
-                    sql.append(dataTypeHandler.normalizeColumn(column, dataType));
+                    sql.append(escapeHashValue(dataTypeHandler.normalizeColumn(column, dataType)));
                 }
                 sql.append(") as pk_key, ");
             } else {
@@ -116,7 +133,7 @@ public class PostgreSQLSqlQueryGenerator extends BaseSqlQueryGenerator {
                     sql.append(", ");
                 String column = columns.get(i);
                 DataType dataType = columnDataTypes.get(column);
-                sql.append(dataTypeHandler.normalizeColumn(column, dataType));
+                sql.append(escapeHashValue(dataTypeHandler.normalizeColumn(column, dataType)));
             }
             sql.append(")) as row_checksum ");
 
@@ -166,7 +183,7 @@ public class PostgreSQLSqlQueryGenerator extends BaseSqlQueryGenerator {
                 DataType dataType = columnDataTypes.get(col);
                 String normalizedCol = dataTypeHandler.normalizeColumn(col, dataType);
                 
-                sql.append(normalizedCol);
+                sql.append(escapeHashValue(normalizedCol));
             }
             
             sql.append(")), 1, 16))::bit(64)::bigint)::bigint)), 16, '0') as checksum ");
@@ -181,25 +198,6 @@ public class PostgreSQLSqlQueryGenerator extends BaseSqlQueryGenerator {
 
         return sql.toString();
     }
-
-    @Override
-    public String getFullOuterJoinSQL(String table1, String table2,
-            List<String> joinColumns,
-            String whereClause) {
-        // PostgreSQL DOES support native FULL OUTER JOIN!
-        StringBuilder sql = new StringBuilder();
-
-        sql.append("SELECT * FROM ").append(table1)
-                .append(" FULL OUTER JOIN ").append(table2)
-                .append(" ON ").append(buildJoinCondition(table1, table2, joinColumns));
-
-        if (whereClause != null && !whereClause.trim().isEmpty()) {
-            sql.append(" WHERE ").append(whereClause);
-        }
-
-        return sql.toString();
-    }
-
     @Override
     public String getBatchInsertSQL(String tableName, List<String> columns, int batchSize) {
         if (batchSize < 1) {
@@ -232,25 +230,6 @@ public class PostgreSQLSqlQueryGenerator extends BaseSqlQueryGenerator {
 
         return sql.toString();
     }
-
-    /**
-     * Build join condition for the given columns.
-     */
-    private String buildJoinCondition(String table1, String table2, List<String> joinColumns) {
-        StringBuilder condition = new StringBuilder();
-        for (int i = 0; i < joinColumns.size(); i++) {
-            if (i > 0) {
-                condition.append(" AND ");
-            }
-            condition.append(capabilityProvider.quote(table1)).append(".")
-                    .append(capabilityProvider.quote(joinColumns.get(i)))
-                    .append(" = ")
-                    .append(capabilityProvider.quote(table2)).append(".")
-                    .append(capabilityProvider.quote(joinColumns.get(i)));
-        }
-        return condition.toString();
-    }
-
     @Override
     public String getRowHashSQL(String schemaName, String tableName,
             List<String> primaryKeys,
@@ -280,7 +259,7 @@ public class PostgreSQLSqlQueryGenerator extends BaseSqlQueryGenerator {
             DataType dataType = columnDataTypes.get(col);
             // Use dataTypeHandler.normalizeColumn directly (same as getChecksumSQL)
             // normalizeColumn already handles NULL values with COALESCE
-            sql.append(dataTypeHandler.normalizeColumn(col, dataType));
+            sql.append(escapeHashValue(dataTypeHandler.normalizeColumn(col, dataType)));
         }
 
         sql.append(")) AS row_hash");

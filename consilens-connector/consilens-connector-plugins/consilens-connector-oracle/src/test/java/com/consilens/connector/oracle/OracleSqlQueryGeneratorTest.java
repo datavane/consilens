@@ -37,10 +37,17 @@ class OracleSqlQueryGeneratorTest {
     }
 
     @Test
+    void testSingleArgumentLimitClauseUsesOracleFetchSyntax() {
+        // 复合键边界查询只传 limit；基类的 LIMIT n 在 Oracle 上会报 ORA-00933
+        assertEquals("FETCH FIRST 1 ROWS ONLY", generator.getLimitClause(1));
+    }
+
+    @Test
     void testGetCountSQL() {
         String sql = generator.getCountSQL("SYSTEM", "users", null);
         assertTrue(sql.contains("COUNT(*)"));
-        assertTrue(sql.contains("\"SYSTEM\".\"users\""));
+        // 未加引号的标识符按 Oracle 语义折叠为大写
+        assertTrue(sql.contains("\"SYSTEM\".\"USERS\""), sql);
     }
 
     @Test
@@ -59,17 +66,33 @@ class OracleSqlQueryGeneratorTest {
         types.put("created_at", DataType.DATETIME);
 
         String sql = generator.getChecksumSQL("SYSTEM", "users", columns, Arrays.asList("id"), types, null);
-        assertTrue(sql.contains("DBMS_CRYPTO"));
+        assertTrue(sql.contains("STANDARD_HASH"));
+        // 聚合顺序以 (键, 行校验和) 双列确定：仅按键排序时同键多行的聚合顺序不确定
+        assertTrue(sql.contains("LISTAGG(row_checksum, '|') WITHIN GROUP (ORDER BY pk_key, row_checksum)"), sql);
+        assertFalse(sql.contains("DBMS_CRYPTO"));
     }
 
     @Test
-    void testGetFullOuterJoinSQL() {
-        List<String> joinColumns = Arrays.asList("id");
-        String sql = generator.getFullOuterJoinSQL("table1", "table2", joinColumns, null);
+    void testGetJoinDiffDetailSQLKeepsChangedColumnsWhenOnlySomeDiffer() {
+        List<String> keyColumns = Arrays.asList("id");
+        List<String> compareColumns = Arrays.asList("name", "amount", "status");
 
-        assertTrue(sql.contains("FULL OUTER JOIN"));
+        String sql = generator.getJoinDiffDetailSQL("SYSTEM", "users", "t1",
+                keyColumns, compareColumns, compareColumns, null,
+                "SYSTEM", "users", "t2",
+                keyColumns, compareColumns, compareColumns, null);
+
+        // Oracle || treats NULL like '' while MySQL CONCAT_WS skips NULL elements, so
+        // each changed column carries a leading ', ' separator and LTRIM strips the
+        // first one. Unchanged columns therefore cannot null out or corrupt the whole
+        // expression, matching MySQL output such as '["amount", "status"]'.
+        assertTrue(sql.contains("'[' || ', ' || COALESCE(LTRIM("));
+        assertTrue(sql.contains("THEN ', \"name\"'"));
+        assertTrue(sql.contains("THEN ', \"amount\"'"));
+        assertTrue(sql.contains("THEN ', \"status\"'"));
+        assertFalse(sql.contains("ELSE NULL"));
+        assertFalse(sql.contains("CONCAT_WS"));
     }
-
     @Test
     void testGetBatchInsertSQL() {
         List<String> columns = Arrays.asList("id", "name", "email");

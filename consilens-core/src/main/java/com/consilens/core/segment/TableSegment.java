@@ -1,7 +1,10 @@
 package com.consilens.core.segment;
 
+import com.consilens.connector.api.DatabaseDialect;
+import com.consilens.connector.api.SqlQueryGenerator;
 import com.consilens.core.database.adpter.DatabaseAdapter;
 import com.consilens.connector.api.model.TableSchema;
+import com.consilens.connector.api.model.DataType;
 import com.consilens.connector.api.model.TablePath;
 import lombok.Builder;
 
@@ -31,7 +34,10 @@ public class TableSegment {
             "\\s+|<=|>=|<>|!=|=|<|>|\\(|\\)|,|-?\\d+(?:\\.\\d+)?|'(?:''|[^'])*'|[A-Za-z_][A-Za-z0-9_]*");
 
     private static final Set<String> ALLOWED_WHERE_KEYWORDS = Set.of(
-            "AND", "OR", "NOT", "IN", "IS", "NULL", "LIKE", "BETWEEN", "TRUE", "FALSE");
+            "AND", "OR", "NOT", "IN", "IS", "NULL", "LIKE", "BETWEEN", "TRUE", "FALSE",
+            // CAST enables typed literals (e.g. CAST('2026-05-01' AS DATE)) required by
+            // strict-typed dialects (Trino/Presto) that reject date-vs-varchar comparison
+            "CAST");
 
     private static final Set<String> BLOCKED_WHERE_KEYWORDS = Set.of(
             "SELECT", "UNION", "DROP", "DELETE", "INSERT", "UPDATE", "ALTER", "CREATE",
@@ -79,8 +85,6 @@ public class TableSegment {
 
     @Builder.Default
     private boolean upperBoundInclusive = false;
-
-    private boolean caseSensitive;
 
     // Runtime data
     @Builder.Default
@@ -294,16 +298,6 @@ public class TableSegment {
     }
 
     /**
-     * Get row hashes for this segment (primary key + row hash only).
-     * This is much more efficient than getValues() for large segments with many columns.
-     * 
-     * @return Map of primary key values to row hash (MD5 hex string)
-     */
-    public java.util.Map<List<Object>, String> getRowHashes() {
-        return database.querySegmentRowHashes(this);
-    }
-
-    /**
      * Get values for specific primary keys only.
      * This is used to fetch detailed data for rows that have differences.
      * 
@@ -341,97 +335,61 @@ public class TableSegment {
 
         StringBuilder whereBuilder = new StringBuilder();
 
-        // Add key range conditions
-        if (minKey != null && minKey.isPresent() && keyColumns != null && !keyColumns.isEmpty()) {
-            List<Object> minValues = minKey.get();
-            
+        // Add key range conditions. The lower and upper bounds are independent:
+        // tail scans build one-sided segments (e.g. minKey=null, maxKey=<other min>),
+        // and previously gating the whole block on minKey dropped the upper predicate,
+        // turning that scan into a full-table scan reported as one-sided missing rows.
+        boolean hasMinKey = minKey != null && minKey.isPresent();
+        boolean hasMaxKey = maxKey != null && maxKey.isPresent();
+        if (keyColumns != null && !keyColumns.isEmpty() && (hasMinKey || hasMaxKey)) {
             if (keyColumns.size() == 1) {
-                // Single key: simple range check
                 String column = keyColumns.get(0);
-                Object minValue = minValues.get(0);
-                
-                if (minValue != null) {
-                    whereBuilder.append(String.format("%s >= %s", column, formatValue(minValue)));
+
+                // NULL 下界（整列全 NULL 时 MIN 为 NULL）即段起点，无需下界谓词；
+                // 「NULL 排在最前」口径下所有行（含 NULL 行）都在该段内。
+                if (hasMinKey) {
+                    Object minValue = minKey.get().get(0);
+                    if (minValue != null) {
+                        whereBuilder.append(String.format("%s >= %s", column,
+                                formatValue(minValue, columnType(column))));
+                    }
                 }
-                
-                // Always add maxKey condition if it exists (segment upper bound)
-                if (maxKey != null && maxKey.isPresent()) {
-                    List<Object> maxValues = maxKey.get();
-                    Object maxValue = maxValues.get(0);
+
+                if (hasMaxKey) {
+                    Object maxValue = maxKey.get().get(0);
+                    String upperCondition;
                     if (maxValue != null) {
-                        if (whereBuilder.length() > 0) {
-                            whereBuilder.append(" AND ");
-                        }
-                        whereBuilder.append(String.format("%s %s %s",
+                        upperCondition = String.format("%s %s %s",
                                 column,
                                 upperBoundInclusive ? "<=" : "<",
-                                formatValue(maxValue)));
+                                formatValue(maxValue, columnType(column)));
+                    } else if (upperBoundInclusive) {
+                        // NULL 上界：<= NULL 按「NULL 排在最前」口径仅 NULL 行满足，
+                        // 直接丢弃谓词会把上界之外的行也纳入本段（与复合键分支同理）。
+                        upperCondition = String.format("%s IS NULL", column);
+                    } else {
+                        // NULL 上界：< NULL 恒假（NULL 是最小值），该段无行可选
+                        upperCondition = "1 = 0";
                     }
+                    if (whereBuilder.length() > 0) {
+                        whereBuilder.append(" AND ");
+                    }
+                    whereBuilder.append(upperCondition);
                 }
             } else {
-                // Composite key: use proper range logic
-                // Build lower bound: (key1 > min1 OR (key1 = min1 AND key2 >= min2 AND ...))
-                StringBuilder lowerBound = new StringBuilder("(");
-                for (int i = 0; i < keyColumns.size(); i++) {
-                    if (i > 0) {
-                        lowerBound.append(" OR (");
+                if (hasMinKey) {
+                    String lowerBound = buildCompositeLowerBound(minKey.get());
+                    if (whereBuilder.length() > 0) {
+                        whereBuilder.append(" AND ");
                     }
-                    
-                    // Add equality conditions for all previous keys
-                    for (int j = 0; j < i; j++) {
-                        lowerBound.append(String.format("%s = %s AND ", 
-                                keyColumns.get(j), formatValue(minValues.get(j))));
-                    }
-                    
-                    // Add comparison for current key
-                    if (i == keyColumns.size() - 1) {
-                        // Last key: use >=
-                        lowerBound.append(String.format("%s >= %s", 
-                                keyColumns.get(i), formatValue(minValues.get(i))));
-                    } else {
-                        // Not last key: use >
-                        lowerBound.append(String.format("%s > %s", 
-                                keyColumns.get(i), formatValue(minValues.get(i))));
-                    }
-                    
-                    if (i > 0) {
-                        lowerBound.append(")");
-                    }
+                    whereBuilder.append(lowerBound == null ? "1 = 0" : lowerBound);
                 }
-                lowerBound.append(")");
-                
-                whereBuilder.append(lowerBound);
-                
-                // Always add upper bound if maxKey exists (segment upper bound)
-                if (maxKey != null && maxKey.isPresent()) {
-                    List<Object> maxValues = maxKey.get();
-                    
-                    // Build upper bound: (key1 < max1 OR (key1 = max1 AND key2 < max2 AND ...))
-                    StringBuilder upperBound = new StringBuilder("(");
-                    for (int i = 0; i < keyColumns.size(); i++) {
-                        if (i > 0) {
-                            upperBound.append(" OR (");
-                        }
-                        
-                        // Add equality conditions for all previous keys
-                        for (int j = 0; j < i; j++) {
-                            upperBound.append(String.format("%s = %s AND ", 
-                                    keyColumns.get(j), formatValue(maxValues.get(j))));
-                        }
-                        
-                        // Add comparison for current key.
-                        upperBound.append(String.format("%s %s %s",
-                                keyColumns.get(i),
-                                (upperBoundInclusive && i == keyColumns.size() - 1) ? "<=" : "<",
-                                formatValue(maxValues.get(i))));
-                        
-                        if (i > 0) {
-                            upperBound.append(")");
-                        }
+                if (hasMaxKey) {
+                    String upperBound = buildCompositeUpperBound(maxKey.get());
+                    if (whereBuilder.length() > 0) {
+                        whereBuilder.append(" AND ");
                     }
-                    upperBound.append(")");
-                    
-                    whereBuilder.append(" AND ").append(upperBound);
+                    whereBuilder.append(upperBound == null ? "1 = 0" : upperBound);
                 }
             }
         }
@@ -610,30 +568,260 @@ public class TableSegment {
 
     /**
      * Format a value for SQL.
+     * Uses ANSI standard DATE/TIMESTAMP literals for temporal types to ensure
+     * cross-database compatibility (especially for Presto/Trino strict type checking),
+     * except for SQL Server which does not support ANSI date literals and requires
+     * plain quoted strings that it can implicitly convert.
      */
     private String formatValue(Object value) {
         if (value == null) {
             return "NULL";
-        } else if (value instanceof String) {
-            return "'" + escapeSQL((String) value) + "'";
-        } else if (value instanceof Boolean) {
-            return (Boolean) value ? "TRUE" : "FALSE";
-        } else if (value instanceof java.time.temporal.TemporalAccessor) {
-            return "'" + value.toString() + "'";
-        } else if (value instanceof java.util.Date) {
-            return "'" + new java.sql.Timestamp(((java.util.Date) value).getTime()) + "'";
         } else if (value instanceof Number) {
             return value.toString();
+        } else if (value instanceof Boolean) {
+            return (Boolean) value ? "TRUE" : "FALSE";
+        } else if (value instanceof java.time.LocalDate) {
+            return formatTemporalLiteral(value.toString());
+        } else if (value instanceof java.time.LocalDateTime) {
+            return formatTemporalLiteral(value.toString());
+        } else if (value instanceof java.time.temporal.TemporalAccessor) {
+            // Other temporal types (e.g., Instant, ZonedDateTime) - format as DATE if possible
+            return formatTemporalLiteral(value.toString());
+        } else if (value instanceof java.sql.Date) {
+            return formatTemporalLiteral(value.toString());
+        } else if (value instanceof java.sql.Timestamp) {
+            return formatTemporalLiteral(value.toString());
+        } else if (value instanceof java.util.Date) {
+            return formatTemporalLiteral(new java.sql.Timestamp(((java.util.Date) value).getTime()).toString());
+        } else if (value instanceof String) {
+            // Check if the string can be parsed as a number (for cross-database compatibility)
+            // Some JDBC drivers (Trino, Presto) return numeric columns as strings
+            String strVal = (String) value;
+            try {
+                // Try to parse as a number
+                if (strVal.contains(".")) {
+                    Double.parseDouble(strVal);
+                    return strVal; // Return without quotes
+                } else {
+                    Long.parseLong(strVal);
+                    return strVal; // Return without quotes
+                }
+            } catch (NumberFormatException e) {
+                // Not a number - check if it looks like a date/timestamp
+                // Presto/Trino JDBC drivers may return DATE columns as strings like "2026-05-01"
+                if (strVal.matches("\\d{4}-\\d{2}-\\d{2}")) {
+                    return formatTemporalLiteral(strVal);
+                } else if (strVal.matches("\\d{4}-\\d{2}-\\d{2}[ T]\\d{2}:\\d{2}.*")) {
+                    return formatTemporalLiteral(strVal);
+                }
+                // Regular string
+                return "'" + escapeSQL(strVal) + "'";
+            }
         } else {
             throw new IllegalArgumentException("Unsupported key value type: " + value.getClass().getName());
         }
+    }
+
+    /**
+     * 复合键下界：{@code (k1 > min1) OR (k1 = min1 AND k2 >= min2) ...}。
+     *
+     * <p>边界分量可能是 NULL（键列允许 NULL 时 MIN/MAX 会取到 NULL）。SQL 中
+     * {@code k > NULL} / {@code k = NULL} 恒为 UNKNOWN，整个谓词会退化为假，导致分段查询
+     * 取不到任何行。按「NULL 排在最前」的分段口径改写：{@code = NULL} → {@code IS NULL}，
+     * {@code > NULL} → {@code IS NOT NULL}。最后一维为 NULL 时它已经是该前缀下的最小值，
+     * 下界退化为前缀等值本身（不能再生成 {@code k IS NOT NULL}，否则会排除该维为 NULL 的行）。
+     */
+    private String buildCompositeLowerBound(List<Object> minValues) {
+        StringBuilder lowerBound = new StringBuilder("(");
+        boolean hasTerm = false;
+        for (int i = 0; i < keyColumns.size(); i++) {
+            boolean last = i == keyColumns.size() - 1;
+            String comparison;
+            if (last && minValues.get(i) == null) {
+                // NULL 是最后一维的最小值：前缀相等即满足 >=，不应再限制该维
+                comparison = null;
+            } else {
+                comparison = compositeKeyComparison(keyColumns.get(i), last ? ">=" : ">", minValues.get(i));
+                if (comparison == null) {
+                    continue;
+                }
+            }
+            if (comparison == null && i == 0) {
+                continue;
+            }
+            if (hasTerm) {
+                lowerBound.append(" OR (");
+            }
+            for (int j = 0; j < i; j++) {
+                if (j > 0) {
+                    lowerBound.append(" AND ");
+                }
+                lowerBound.append(compositeKeyComparison(keyColumns.get(j), "=", minValues.get(j)));
+            }
+            if (comparison != null) {
+                if (i > 0) {
+                    lowerBound.append(" AND ");
+                }
+                lowerBound.append(comparison);
+            }
+            if (hasTerm) {
+                lowerBound.append(")");
+            }
+            hasTerm = true;
+        }
+        if (!hasTerm) {
+            return null;
+        }
+        lowerBound.append(")");
+        return lowerBound.toString();
+    }
+
+    /**
+     * 复合键上界：{@code (k1 < max1) OR (k1 = max1 AND k2 <= max2) ...}。
+     * 最后一位是否为闭区间由 {@link #upperBoundInclusive} 决定。
+     */
+    private String buildCompositeUpperBound(List<Object> maxValues) {
+        StringBuilder upperBound = new StringBuilder("(");
+        boolean hasTerm = false;
+        for (int i = 0; i < keyColumns.size(); i++) {
+            String comparison = compositeKeyComparison(keyColumns.get(i),
+                    (upperBoundInclusive && i == keyColumns.size() - 1) ? "<=" : "<",
+                    maxValues.get(i));
+            if (comparison == null) {
+                continue;
+            }
+            if (hasTerm) {
+                upperBound.append(" OR (");
+            }
+            for (int j = 0; j < i; j++) {
+                String prefix = compositeKeyComparison(keyColumns.get(j), "=", maxValues.get(j));
+                upperBound.append(prefix).append(" AND ");
+            }
+            upperBound.append(comparison);
+            if (hasTerm) {
+                upperBound.append(")");
+            }
+            hasTerm = true;
+        }
+        if (!hasTerm) {
+            return null;
+        }
+        upperBound.append(")");
+        return upperBound.toString();
+    }
+
+    /**
+     * 复合键分量的 SQL 比较片段。
+     *
+     * <p>边界值为 NULL 时不能用 {@code =} / {@code >} / {@code <} 表达（SQL 中与 NULL 比较恒为
+     * UNKNOWN），需按「NULL 排在最前」的分段口径改写：{@code =} / {@code <= NULL} 改
+     * {@code IS NULL}，{@code >} / {@code >= NULL} 改 {@code IS NOT NULL}；当该备选项恒假
+     * （{@code < NULL}）时返回 {@code null} 交由调用方丢弃。
+     */
+    private String compositeKeyComparison(String column, String operator, Object boundValue) {
+        if (boundValue != null) {
+            return String.format("%s %s %s", column, operator,
+                    formatValue(boundValue, columnType(column)));
+        }
+        if ("=".equals(operator) || "<=".equals(operator)) {
+            return String.format("%s IS NULL", column);
+        }
+        if (">".equals(operator) || ">=".equals(operator)) {
+            return String.format("%s IS NOT NULL", column);
+        }
+        return null;
+    }
+
+    /**
+     * Format a value for SQL, quoting string literals unless the column type is numeric.
+     *
+     * <p>Without the type, "00123" or "1.5" strings would be emitted unquoted and a
+     * VARCHAR primary key would be compared through implicit conversion, which can
+     * shift segment boundaries or miss rows. When the schema is available the type
+     * decides; otherwise the legacy shape-based behavior is kept for drivers that
+     * return numeric columns as strings.
+     */
+    private String formatValue(Object value, DataType dataType) {
+        if (value instanceof String && dataType != null) {
+            if (isNumericType(dataType)) {
+                return value.toString();
+            }
+            if (isCharacterType(dataType)) {
+                return "'" + escapeSQL((String) value) + "'";
+            }
+        }
+        return formatValue(value);
+    }
+
+    private boolean isNumericType(DataType dataType) {
+        switch (dataType) {
+            case INTEGER:
+            case BIGINT:
+            case SMALLINT:
+            case TINYINT:
+            case DECIMAL:
+            case NUMERIC:
+            case FLOAT:
+            case DOUBLE:
+            case REAL:
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    private boolean isCharacterType(DataType dataType) {
+        switch (dataType) {
+            case VARCHAR:
+            case CHAR:
+            case TEXT:
+            case CLOB:
+            case LONGVARCHAR:
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    private DataType columnType(String columnName) {
+        if (schema == null || !schema.isPresent()) {
+            return null;
+        }
+        return schema.get().getColumnType(columnName);
+    }
+
+    /**
+     * Format a temporal value as a SQL literal. Dialects may opt out of ANSI
+     * temporal literals (SQL Server only accepts plain quoted strings); the
+     * decision belongs to the dialect, not to this segment.
+     */
+    private String formatTemporalLiteral(String value) {
+        DatabaseDialect dialect = database != null ? database.getDialect() : null;
+        if (dialect != null && !dialect.usesAnsiTemporalLiterals()) {
+            return "'" + escapeSQL(value) + "'";
+        }
+        if (value.matches("\\d{4}-\\d{2}-\\d{2}")) {
+            return "DATE '" + value + "'";
+        }
+        // Presto/Trino TIMESTAMP literals require a space separator, while
+        // LocalDateTime.toString() uses 'T'; normalize to the ANSI form.
+        return "TIMESTAMP '" + value.replace('T', ' ') + "'";
     }
 
     private String escapeSQL(String value) {
         if (value == null) {
             return null;
         }
-        return value.replace("'", "''").replace("\\", "\\\\");
+        String escaped = value.replace("'", "''");
+        // 反斜杠是否是字符串转义符由方言决定（MySQL 族为是，PostgreSQL/Trino/Oracle/
+        // SQL Server 等标准实现为否）。无条件加倍会让这些库上的键边界变成另一个值，
+        // 使边界行落不进任何分段谓词。
+        DatabaseDialect dialect = database != null ? database.getDialect() : null;
+        SqlQueryGenerator generator = dialect != null ? dialect.getSqlQueryGenerator() : null;
+        if (generator == null || generator.backslashEscapesStringLiterals()) {
+            escaped = escaped.replace("\\", "\\\\");
+        }
+        return escaped;
     }
 
     /**

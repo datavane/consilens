@@ -66,9 +66,7 @@ public class DefaultNormalizationSpecValidator implements NormalizationSpecValid
         if (type != null && !SUPPORTED_TYPES.contains(type)) {
             throw new ConnectorException("Unsupported normalization match.type '" + type + "' in " + scope);
         }
-        if (path != null && !path.trim().isEmpty()) {
-            throw new ConnectorException("Field-level normalization is reserved but not executable in current version: " + path);
-        }
+        boolean fieldLevel = path != null && !path.trim().isEmpty();
 
         String operation = rule.getOperation();
         if (operation == null || operation.trim().isEmpty()) {
@@ -77,6 +75,21 @@ public class DefaultNormalizationSpecValidator implements NormalizationSpecValid
 
         NormalizationOperationDefinition definition = operationRegistry.find(operation)
                 .orElseThrow(() -> new ConnectorException("Unsupported normalization operation '" + operation + "' in " + scope));
+
+        if (fieldLevel) {
+            // 列级规则目前只开放数值容差：精度/时区等需要方言 SQL 侧同步实现，
+            // 在未打穿 SQL 侧之前接受这些参数会造成"本地生效、校验和不生效"的口径分叉。
+            if (!"format_number".equals(operation)) {
+                throw new ConnectorException("Field-level normalization currently supports only format_number tolerance rules: " + path);
+            }
+            Map<String, Object> params = rule.getParams() == null ? java.util.Map.of() : rule.getParams();
+            for (String key : params.keySet()) {
+                if (!"tolerance".equals(key) && !"relativeTolerance".equals(key)) {
+                    throw new ConnectorException("Field-level normalization currently supports only tolerance/relativeTolerance; got '"
+                            + key + "' for " + path);
+                }
+            }
+        }
 
         if (type != null && !definition.getSupportedTypes().contains(type)) {
             throw new ConnectorException("Normalization operation '" + operation + "' does not support type '" + type + "' in " + scope);
@@ -102,8 +115,12 @@ public class DefaultNormalizationSpecValidator implements NormalizationSpecValid
         if ("format_number".equals(operation)) {
             validateInteger(params.get("precision"), "precision", scope, operation, true);
             validateBoolean(params.get("rounding"), "rounding", scope, operation);
+            validateNonNegativeNumber(params.get("tolerance"), "tolerance", scope, operation);
+            validateNonNegativeNumber(params.get("relativeTolerance"), "relativeTolerance", scope, operation);
         } else if ("format_datetime".equals(operation)) {
-            validateString(params.get("format"), "format", scope, operation, false);
+            // format 可缺省：这条 operation 同时是 sessionTimeZone / comparisonMode 的载体，
+            // 只声明会话时区时不应该被强制要求写一个没人读的 format
+            validateString(params.get("format"), "format", scope, operation, true);
             validateTimezone(params.get("timezone"), scope, operation);
             validateTemporalComparisonMode(params.get("comparisonMode"), scope, operation);
         } else if ("encode".equals(operation)) {
@@ -129,6 +146,31 @@ public class DefaultNormalizationSpecValidator implements NormalizationSpecValid
         }
         if (((Integer) value) < 0) {
             throw new ConnectorException("Parameter '" + key + "' for operation '" + operation + "' in " + scope + " must be >= 0");
+        }
+    }
+
+    /** 数值容差允许 Number 或数字字符串，必须非负。 */
+    private void validateNonNegativeNumber(Object value, String key, String scope, String operation) {
+        if (value == null) {
+            return;
+        }
+        double parsed;
+        if (value instanceof Number) {
+            parsed = ((Number) value).doubleValue();
+        } else if (value instanceof String && !((String) value).isBlank()) {
+            try {
+                parsed = Double.parseDouble(((String) value).trim());
+            } catch (NumberFormatException e) {
+                throw new ConnectorException("Parameter '" + key + "' for operation '" + operation + "' in " + scope
+                        + " must be a number");
+            }
+        } else {
+            throw new ConnectorException("Parameter '" + key + "' for operation '" + operation + "' in " + scope
+                    + " must be a number");
+        }
+        if (parsed < 0 || Double.isNaN(parsed) || Double.isInfinite(parsed)) {
+            throw new ConnectorException("Parameter '" + key + "' for operation '" + operation + "' in " + scope
+                    + " must be a finite number >= 0");
         }
     }
 

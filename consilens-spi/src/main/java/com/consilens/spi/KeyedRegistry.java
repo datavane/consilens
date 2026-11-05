@@ -3,8 +3,6 @@ package com.consilens.spi;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.Arrays;
-import java.util.Collection;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -24,19 +22,10 @@ public final class KeyedRegistry<K, P> {
         this.registryName = registryName;
     }
 
-    public static <K, P> KeyedRegistry<K, P> load(Class<P> providerType, Function<P, K> keyExtractor) {
-        return load(providerType, keyExtractor, providerType.getSimpleName());
-    }
-
     public static <K, P> KeyedRegistry<K, P> load(Class<P> providerType,
                                                   Function<P, K> keyExtractor,
                                                   String registryName) {
         return from(ServiceLoaderUtils.loadAll(providerType), keyExtractor, registryName);
-    }
-
-    @SafeVarargs
-    public static <K, P> KeyedRegistry<K, P> of(Function<P, K> keyExtractor, P... providers) {
-        return from(Arrays.asList(providers), keyExtractor, "test");
     }
 
     public static <K, P> KeyedRegistry<K, P> from(Iterable<P> providers,
@@ -80,17 +69,5 @@ public final class KeyedRegistry<K, P> {
 
     public Set<K> getSupportedKeys() {
         return keys();
-    }
-
-    public Collection<P> providers() {
-        return providers.values();
-    }
-
-    public Map<K, P> asMap() {
-        return providers;
-    }
-
-    public int size() {
-        return providers.size();
     }
 }

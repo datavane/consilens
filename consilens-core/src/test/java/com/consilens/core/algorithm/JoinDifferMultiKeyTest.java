@@ -38,8 +38,8 @@ class JoinDifferMultiKeyTest {
 
     @BeforeEach
     void setUp() {
-        config = new TableDiffer.DifferConfig(1000, 16384, false, ChecksumAlgorithm.CONCAT);
-        differ = new JoinDiffer(config, JoinDiffer.JoinDifferOptions.defaultOptions());
+        config = new TableDiffer.DifferConfig(1000, 16384, ChecksumAlgorithm.CONCAT);
+        differ = new JoinDiffer(config, new JoinDiffer.JoinDifferOptions(false));
         mockSqlQueryGenerator = mock(SqlQueryGenerator.class);
 
         ConnectionPool pool1 = mock(ConnectionPool.class);
@@ -57,13 +57,14 @@ class JoinDifferMultiKeyTest {
         lenient().when(cfg2.getJdbcUrl()).thenReturn("jdbc:mock:test");
 
         lenient().when(mockAdapter1.getSqlQueryGenerator()).thenReturn(mockSqlQueryGenerator);
+        // 比较列现在按方言归一化口径构造（带 columnTypes 的重载），打桩同步到新签名
         lenient().when(mockSqlQueryGenerator.getJoinDiffStatsSQL(
-                any(), any(), any(), anyList(), anyList(), any(),
-                any(), any(), any(), anyList(), anyList(), any()))
+                any(), any(), any(), anyList(), anyList(), any(), anyMap(),
+                any(), any(), any(), anyList(), anyList(), any(), anyMap()))
                 .thenReturn("SELECT COUNT(*) FROM table1");
         lenient().when(mockSqlQueryGenerator.getJoinDiffDetailSQL(
-                any(), any(), any(), anyList(), anyList(), anyList(), any(),
-                any(), any(), any(), anyList(), anyList(), anyList(), any()))
+                any(), any(), any(), anyList(), anyList(), anyList(), any(), anyMap(),
+                any(), any(), any(), anyList(), anyList(), anyList(), any(), anyMap()))
                 .thenReturn("SELECT * FROM table1 JOIN table2 ON table1.id = table2.id");
         lenient().when(mockAdapter1.count(any(TableSegment.class))).thenReturn(100L);
     }
@@ -85,11 +86,11 @@ class JoinDifferMultiKeyTest {
         // Then
         assertNotNull(result);
         verify(mockSqlQueryGenerator, atLeastOnce()).getJoinDiffDetailSQL(
-                any(), any(), any(), eq(keyColumns), anyList(), anyList(), any(),
-                any(), any(), any(), eq(keyColumns), anyList(), anyList(), any());
+                any(), any(), any(), eq(keyColumns), anyList(), anyList(), any(), anyMap(),
+                any(), any(), any(), eq(keyColumns), anyList(), anyList(), any(), anyMap());
         verify(mockSqlQueryGenerator, atLeastOnce()).getJoinDiffStatsSQL(
-                any(), any(), any(), eq(keyColumns), anyList(), any(),
-                any(), any(), any(), eq(keyColumns), anyList(), any());
+                any(), any(), any(), eq(keyColumns), anyList(), any(), anyMap(),
+                any(), any(), any(), eq(keyColumns), anyList(), any(), anyMap());
 
         // Verify JOIN queries are executed
         verify(mockAdapter1, atLeastOnce()).query(contains("JOIN"), eq(Object[].class));

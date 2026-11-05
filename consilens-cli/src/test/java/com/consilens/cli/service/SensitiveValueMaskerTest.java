@@ -15,6 +15,14 @@ class SensitiveValueMaskerTest {
     }
 
     @Test
+    void shouldMaskOracleInlineCredentials() {
+        assertEquals("jdbc:oracle:thin:***@dbhost:1521:ORCL",
+                SensitiveValueMasker.maskJdbcUrl("jdbc:oracle:thin:scott/tiger@dbhost:1521:ORCL"));
+        assertEquals("jdbc:oracle:oci:***@dbhost:1521:ORCL",
+                SensitiveValueMasker.maskJdbcUrl("jdbc:oracle:oci:scott/tiger@dbhost:1521:ORCL"));
+    }
+
+    @Test
     void shouldMaskSemicolonSeparatedJdbcProperties() {
         String masked = SensitiveValueMasker.maskJdbcUrl(
                 "jdbc:sqlserver://localhost:1433;databaseName=app;user=sa;password=secret;encrypt=true");

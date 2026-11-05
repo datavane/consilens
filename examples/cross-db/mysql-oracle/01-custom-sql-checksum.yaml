@@ -1,0 +1,36 @@
+source:
+  type: mysql
+  connection:
+    url: jdbc:mysql://127.0.0.1:13306/consilens_demo?useUnicode=true&characterEncoding=UTF-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+    username: ${env.MYSQL_USER}
+    password: ${env.MYSQL_PASSWORD}
+  resource:
+    type: sql
+    path: |
+      SELECT RECORD_ID, COL_TINYINT, COL_INT, COL_DECIMAL, AMOUNT, STATUS, UPDATED_AT
+      FROM CONSILENS_PERFORMANCE_DEMO_TABLE
+target:
+  type: oracle
+  connection:
+    url: jdbc:oracle:thin:@127.0.0.1:1521:ORCL
+    username: ${env.ORACLE_USER}
+    password: ${env.ORACLE_PASSWORD}
+  resource:
+    type: sql
+    path: |
+      SELECT RECORD_ID, COL_TINYINT, COL_INT, COL_DECIMAL, AMOUNT, STATUS, UPDATED_AT
+      FROM CONSILENS_PERFORMANCE_DEMO_TABLE
+comparison:
+  keys:
+    source: [RECORD_ID]
+    target: [RECORD_ID]
+strategy:
+  mode: checksum
+  algorithm: concat
+  bisectionFactor: 8
+  bisectionThreshold: 8000
+  batchSize: 1000
+result:
+  sinks:
+    - format: console
+      type: result

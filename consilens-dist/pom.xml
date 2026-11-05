@@ -6,7 +6,7 @@
     <parent>
         <groupId>com.consilens</groupId>
         <artifactId>consilens</artifactId>
-        <version>0.2.0</version>
+        <version>0.1-SNAPSHOT</version>
     </parent>
 
     <artifactId>consilens-dist</artifactId>
@@ -17,6 +17,8 @@
 
     <properties>
         <maven.build.timestamp.format>yyyy-MM-dd HH:mm:ss</maven.build.timestamp.format>
+        <!-- 发行包通过 GitHub Release 分发，不作为 Maven Central artifact -->
+        <maven.deploy.skip>${consilens.deploy.skip.apps}</maven.deploy.skip>
     </properties>
 
     <dependencies>
@@ -94,6 +96,7 @@
                     <plugin>
                         <groupId>org.apache.maven.plugins</groupId>
                         <artifactId>maven-assembly-plugin</artifactId>
+                        <version>3.7.1</version>
                         <configuration>
                             <descriptors>
                                 <descriptor>src/main/assembly/assembly.xml</descriptor>

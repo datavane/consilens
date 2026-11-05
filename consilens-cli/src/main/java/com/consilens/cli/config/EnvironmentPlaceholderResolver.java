@@ -67,7 +67,9 @@ public class EnvironmentPlaceholderResolver {
             String envValue = environment.get(variableName);
             if (envValue == null) {
                 if (defaultValue == null) {
-                    throw new ConfigurationException("Missing required environment variable: " + variableName);
+                    throw new ConfigurationException(
+                            "Missing required environment variable: " + variableName,
+                            ConfigurationException.CODE_MISSING_ENV_VAR);
                 }
                 envValue = defaultValue;
             }

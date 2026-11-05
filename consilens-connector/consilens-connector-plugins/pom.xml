@@ -6,7 +6,7 @@
     <parent>
         <groupId>com.consilens</groupId>
         <artifactId>consilens-connector</artifactId>
-        <version>0.2.0</version>
+        <version>0.1-SNAPSHOT</version>
     </parent>
 
     <artifactId>consilens-connector-plugins</artifactId>
@@ -31,6 +31,9 @@
         <module>consilens-connector-starrocks</module>
         <module>consilens-connector-clickhouse</module>
         <module>consilens-connector-tidb</module>
+        <module>consilens-connector-oceanbase</module>
+        <module>consilens-connector-file</module>
+        <module>consilens-connector-iceberg</module>
         <module>consilens-connector-all</module>
     </modules>
 

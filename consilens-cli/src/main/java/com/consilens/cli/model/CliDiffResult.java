@@ -43,6 +43,17 @@ public class CliDiffResult {
     private List<DiffRow> differences;
 
     /**
+     * 容差内（未计入 totalDifferences）的行样本；报告里单独列出。
+     */
+    @Builder.Default
+    private List<DiffRow> withinToleranceDifferences = new ArrayList<>();
+
+    /**
+     * 容差内行数（含未保留样本的部分）。
+     */
+    private long withinToleranceCount;
+
+    /**
      * Top-level metadata about the tables and columns compared.
      */
     @JsonProperty("metadata")

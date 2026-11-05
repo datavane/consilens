@@ -2,7 +2,6 @@ package com.consilens.sink.console;
 
 import com.consilens.core.diff.DiffRow;
 import com.consilens.core.lifecycle.DiffContext;
-import com.consilens.core.lifecycle.SegmentResult;
 import com.consilens.sink.api.Sink;
 import com.consilens.sink.api.model.SinkConfig;
 import lombok.extern.slf4j.Slf4j;
@@ -38,10 +37,5 @@ public class ConsoleDiffRecordSink implements Sink {
             ConsoleOutputSupport.printStdout(ConsoleOutputSupport.diffRecordPayload(row, context), sinkConfig);
             rowCount++;
         }
-    }
-
-    @Override
-    public void onSegmentComplete(SegmentResult segmentResult) {
-        ConsoleOutputSupport.printStdout(ConsoleOutputSupport.segmentPayload(segmentResult), sinkConfig);
     }
 }

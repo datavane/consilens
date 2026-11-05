@@ -1,0 +1,28 @@
+{
+  "verdict" : "PASS",
+  "exitCode" : 0,
+  "summary" : {
+    "sourceRowCount" : 2000,
+    "targetRowCount" : 2000,
+    "sourceMissingCount" : 0,
+    "targetMissingCount" : 0,
+    "mismatchCount" : 0,
+    "totalDifferences" : 0,
+    "processingTimeMs" : 44,
+    "unchangedCount" : 2000,
+    "differencePercentage" : 0.0
+  },
+  "delta" : {
+    "newDifferences" : 0,
+    "fixedDifferences" : 0,
+    "persistingDifferences" : 0
+  },
+  "checks" : [ {
+    "name" : "anyDifference",
+    "passed" : true,
+    "actual" : 0,
+    "limit" : 0,
+    "message" : null
+  } ],
+  "message" : null
+}

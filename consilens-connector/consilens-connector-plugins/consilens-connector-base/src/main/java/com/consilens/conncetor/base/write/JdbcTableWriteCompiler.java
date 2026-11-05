@@ -37,20 +37,45 @@ import java.util.UUID;
 
 public class JdbcTableWriteCompiler implements TableWriteCompiler {
 
+    /** 出现在类型定义之后、属于列约束的关键字（大小写不敏感、词边界匹配）。 */
+    private static final List<String> TYPE_CONSTRAINT_KEYWORDS = List.of(
+            "PRIMARY KEY", "NOT NULL", "NULL", "UNIQUE", "DEFAULT", "CHECK", "REFERENCES",
+            "AUTO_INCREMENT", "AUTOINCREMENT", "GENERATED", "COMMENT", "COLLATE", "CHARSET",
+            "CHARACTER SET", "ZEROFILL", "ON UPDATE");
+
+    /** 表名直接拼入 DDL/INSERT，必须是普通标识符（允许 schema.table 形式）。 */
+    private static final java.util.regex.Pattern SAFE_IDENTIFIER =
+            java.util.regex.Pattern.compile("[A-Za-z_][A-Za-z0-9_$#]*");
+
     private final DatabaseDialect dialect;
 
     public JdbcTableWriteCompiler(DatabaseDialect dialect) {
         this.dialect = dialect;
     }
 
+    private String validatedTableName(String tableName) {
+        String value = tableName == null ? "" : tableName.trim();
+        if (value.isEmpty()) {
+            throw new IllegalArgumentException("tableName is required");
+        }
+        for (String part : value.split("\\.", -1)) {
+            if (!SAFE_IDENTIFIER.matcher(part).matches()) {
+                throw new IllegalArgumentException(
+                        "tableName contains invalid characters: " + tableName);
+            }
+        }
+        return value;
+    }
+
     @Override
     public TableWritePlan compile(TableWriteCompileRequest request) {
         List<WriteColumnSpec> columns = new ArrayList<>();
+        String tableName = validatedTableName(request.getTableName());
         StringBuilder ddl = new StringBuilder("CREATE TABLE IF NOT EXISTS ")
-                .append(request.getTableName())
+                .append(tableName)
                 .append(" (");
         StringBuilder insert = new StringBuilder("INSERT INTO ")
-                .append(request.getTableName())
+                .append(tableName)
                 .append(" (");
         StringBuilder values = new StringBuilder(" VALUES (");
 
@@ -95,7 +120,7 @@ public class JdbcTableWriteCompiler implements TableWriteCompiler {
         values.append(")");
         return new TableWritePlan(
                 dialect.getConnectorType(),
-                "DROP TABLE IF EXISTS " + request.getTableName(),
+                "DROP TABLE IF EXISTS " + tableName,
                 ddl.toString(),
                 insert.append(values).toString(),
                 columns
@@ -127,6 +152,40 @@ public class JdbcTableWriteCompiler implements TableWriteCompiler {
         return new PreparedWriteValue(converted, jdbcType, this::bindValue);
     }
 
+    /**
+     * 收窄到 SMALLINT/INTEGER 时必须是**精确**转换。
+     *
+     * <p>{@code Number.shortValue()} 会把 70000 静默变成 4464、把 1.5 变成 1：行照样插入成功，
+     * 但落库的值已经错了（而且只有事后比对才会发现）。这里超出范围或带小数直接报错。
+     */
+    static long exactIntegral(Object value, long min, long max, String target) {
+        BigDecimal decimal;
+        if (value instanceof BigDecimal) {
+            decimal = (BigDecimal) value;
+        } else if (value instanceof Number) {
+            decimal = new BigDecimal(value.toString());
+        } else {
+            decimal = new BigDecimal(String.valueOf(value));
+        }
+        BigDecimal stripped = decimal.stripTrailingZeros();
+        if (stripped.scale() > 0) {
+            throw new IllegalArgumentException("value " + decimal + " has a fractional part and cannot be"
+                    + " written to a " + target + " column");
+        }
+        long narrowed;
+        try {
+            narrowed = stripped.longValueExact();
+        } catch (ArithmeticException exception) {
+            throw new IllegalArgumentException("value " + decimal + " does not fit into a "
+                    + target + " column", exception);
+        }
+        if (narrowed < min || narrowed > max) {
+            throw new IllegalArgumentException("value " + decimal + " is out of range for a "
+                    + target + " column");
+        }
+        return narrowed;
+    }
+
     private void bindValue(PreparedStatement preparedStatement, int index, Object value, Integer jdbcType) throws SQLException {
         int effectiveJdbcType = jdbcType != null ? jdbcType : java.sql.Types.VARCHAR;
         if (value == null) {
@@ -135,10 +194,12 @@ public class JdbcTableWriteCompiler implements TableWriteCompiler {
         }
         switch (effectiveJdbcType) {
             case java.sql.Types.SMALLINT:
-                preparedStatement.setShort(index, ((Number) value).shortValue());
+                preparedStatement.setShort(index, (short) exactIntegral(value, Short.MIN_VALUE,
+                        Short.MAX_VALUE, "SMALLINT"));
                 return;
             case java.sql.Types.INTEGER:
-                preparedStatement.setInt(index, ((Number) value).intValue());
+                preparedStatement.setInt(index, (int) exactIntegral(value, Integer.MIN_VALUE,
+                        Integer.MAX_VALUE, "INTEGER"));
                 return;
             case java.sql.Types.BIGINT:
                 preparedStatement.setLong(index, ((Number) value).longValue());
@@ -228,7 +289,7 @@ public class JdbcTableWriteCompiler implements TableWriteCompiler {
                 return typeDescriptor.isWithTimezone() ? java.sql.Types.TIMESTAMP_WITH_TIMEZONE : java.sql.Types.TIMESTAMP;
             case JSON_TYPE:
             case UUID_TYPE:
-                return "postgresql".equals(dialect.getConnectorType()) ? java.sql.Types.OTHER : java.sql.Types.VARCHAR;
+                return dialect.getStructuredColumnJdbcType();
             case BINARY_TYPE:
                 return java.sql.Types.BINARY;
             case STRING_TYPE:
@@ -277,12 +338,78 @@ public class JdbcTableWriteCompiler implements TableWriteCompiler {
             case STRUCT_TYPE:
             case GEOMETRY_TYPE:
             case INTERVAL_TYPE:
+                // 这些列在 JDBC 侧都是 VARCHAR/JSON：必须写字符串。把 String 先转成 byte[]
+                // 会以字节数组绑定参数，PostgreSQL 会报 "column is of type varchar but
+                // expression is of type bytea"，MySQL 则按二进制写入。
+                return convertText(rawValue);
             case BINARY_TYPE:
+                // byte[] 的 toString() 是 "[B@xxxx"，会把二进制写成无意义文本
+                return convertBinary(rawValue);
             case NULL_TYPE:
             case UNKNOWN_TYPE:
             default:
                 return rawValue.toString();
         }
+    }
+
+    /**
+     * 文本列：保留字符串，byte[]/ByteBuffer 严格按 UTF-8 解码，其余走 toString()。
+     *
+     * <p>用 {@code new String(bytes, UTF_8)} 会把非法字节静默换成 {@code U+FFFD}：
+     * {@code [0xC3,0x28]} 和 {@code [0xEF,0xBF,0xBD]} 都会解成同一个替换字符，
+     * 于是两条不同的值在目标库写成同一个字符串（静默串数据）。解码失败时退化成十六进制。
+     */
+    private Object convertText(Object rawValue) {
+        if (rawValue == null) {
+            return null;
+        }
+        if (rawValue instanceof byte[]) {
+            return decodeUtf8OrHex((byte[]) rawValue);
+        }
+        if (rawValue instanceof java.nio.ByteBuffer) {
+            java.nio.ByteBuffer buffer = ((java.nio.ByteBuffer) rawValue).duplicate();
+            byte[] bytes = new byte[buffer.remaining()];
+            buffer.get(bytes);
+            return decodeUtf8OrHex(bytes);
+        }
+        return rawValue.toString();
+    }
+
+    private static String decodeUtf8OrHex(byte[] bytes) {
+        try {
+            return java.nio.charset.StandardCharsets.UTF_8.newDecoder()
+                    .onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
+                    .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT)
+                    .decode(java.nio.ByteBuffer.wrap(bytes))
+                    .toString();
+        } catch (java.nio.charset.CharacterCodingException exception) {
+            return toHex(bytes);
+        }
+    }
+
+    private static String toHex(byte[] bytes) {
+        StringBuilder hex = new StringBuilder(bytes.length * 2);
+        for (byte value : bytes) {
+            hex.append(Character.forDigit((value >> 4) & 0xF, 16));
+            hex.append(Character.forDigit(value & 0xF, 16));
+        }
+        return hex.toString().toUpperCase(java.util.Locale.ROOT);
+    }
+
+    private Object convertBinary(Object rawValue) {
+        if (rawValue instanceof byte[]) {
+            return rawValue;
+        }
+        if (rawValue instanceof java.nio.ByteBuffer) {
+            java.nio.ByteBuffer buffer = ((java.nio.ByteBuffer) rawValue).duplicate();
+            byte[] bytes = new byte[buffer.remaining()];
+            buffer.get(bytes);
+            return bytes;
+        }
+        if (rawValue instanceof String) {
+            return ((String) rawValue).getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        }
+        return rawValue.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8);
     }
 
     private Object convertInteger(Object rawValue, TypeDescriptor targetType) {
@@ -414,16 +541,67 @@ public class JdbcTableWriteCompiler implements TableWriteCompiler {
         return rawValue instanceof UUID ? (UUID) rawValue : UUID.fromString(rawValue.toString().trim());
     }
 
-    private String extractTypeDefinition(String declaredColumnType) {
+    /**
+     * 从 {@code columnType} 声明里切出类型定义（去掉列约束）。
+     *
+     * <p>取**最靠左**的约束关键字，而不是按关键字列表顺序取第一个命中的：否则
+     * {@code INT DEFAULT 5 NOT NULL} 会先命中 {@code NOT NULL}，把 {@code DEFAULT 5} 当成
+     * 类型的一部分；{@code VARCHAR(20) DEFAULT NULL} 会先命中 {@code NULL}，切出
+     * {@code VARCHAR(20) DEFAULT}。括号内与引号内的文本不参与匹配，{@code ENUM('PRIMARY KEY')}
+     * 这类声明不会被截断。
+     */
+    String extractTypeDefinition(String declaredColumnType) {
         String normalized = declaredColumnType.trim();
-        String upper = normalized.toUpperCase(Locale.ROOT);
-        for (String keyword : List.of(" PRIMARY KEY", " NOT NULL", " NULL", " UNIQUE", " DEFAULT ", " CHECK ", " REFERENCES ")) {
-            int index = upper.indexOf(keyword);
-            if (index >= 0) {
-                return normalized.substring(0, index).trim();
+        int cut = firstConstraintIndex(normalized);
+        return cut < 0 ? normalized : normalized.substring(0, cut).trim();
+    }
+
+    /** 列约束关键字的合法起始位置（词边界、括号与引号外）；没有则返回 -1。 */
+    private static int firstConstraintIndex(String declaration) {
+        int depth = 0;
+        boolean quoted = false;
+        for (int index = 0; index < declaration.length(); index++) {
+            char current = declaration.charAt(index);
+            if (quoted) {
+                if (current == '\'') {
+                    quoted = false;
+                }
+                continue;
+            }
+            if (current == '\'') {
+                quoted = true;
+                continue;
+            }
+            if (current == '(') {
+                depth++;
+                continue;
+            }
+            if (current == ')') {
+                depth = Math.max(0, depth - 1);
+                continue;
+            }
+            if (depth > 0 || index == 0 || !Character.isWhitespace(current)) {
+                continue;
+            }
+            for (String keyword : TYPE_CONSTRAINT_KEYWORDS) {
+                if (matchesKeywordAt(declaration, index + 1, keyword)) {
+                    return index;
+                }
             }
         }
-        return normalized;
+        return -1;
+    }
+
+    private static boolean matchesKeywordAt(String declaration, int start, String keyword) {
+        int end = start + keyword.length();
+        if (end > declaration.length()) {
+            return false;
+        }
+        if (!declaration.regionMatches(true, start, keyword, 0, keyword.length())) {
+            return false;
+        }
+        return end == declaration.length() || Character.isWhitespace(declaration.charAt(end))
+                || declaration.charAt(end) == '(';
     }
 
     private String extractTypeConstraintSuffix(String declaredColumnType, String typeDefinition) {

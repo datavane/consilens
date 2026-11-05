@@ -36,7 +36,6 @@ strategy:
   bisectionFactor: 4
   bisectionThreshold: 20000
   batchSize: 2000
-  enableProfiling: false
   localCompare:
     mode: full
 ```
@@ -61,7 +60,6 @@ flowchart LR
 | `bisectionFactor` | 每次把差异段拆成几份 | 常用 `4` |
 | `bisectionThreshold` | 小到什么程度进入局部比较 | 可从 `20000` 起步 |
 | `batchSize` | 单批读取大小 | 可从 `1000` 或 `2000` 起步 |
-| `enableProfiling` | 是否打开剖析日志 | 排障时再开 |
 | `localCompare.mode` | 末段怎么做本地比较 | 默认 `full` 更稳 |
 
 如果不写 `bisectionThreshold`，系统会按 `batchSize * 10` 推导默认值。这个设计很好理解：批量越大，终局小段阈值也可以相应放大。
@@ -299,7 +297,6 @@ flowchart LR
     B -->|数据库压力高| E["先收敛 filters / batchSize / 读取口径"]
     B -->|网络等待明显| F["逐步调 concurrency.io"]
     B -->|CPU 计算吃紧| G["逐步调 concurrency.cpu"]
-    B -->|瓶颈不清楚| H["临时打开 enableProfiling"]
 ```
 
 1. 差异是不是误报？先看 `comparison` 和 `normalization`。
@@ -307,6 +304,5 @@ flowchart LR
 3. 数据库压力高？先别加并发，先看 filters、batchSize、读取口径。
 4. 网络等待明显？逐步调 `concurrency.io`。
 5. 哈希和比较计算吃紧？再看 `concurrency.cpu`。
-6. 不知道慢在哪里？临时打开 `enableProfiling`，看证据再调。
 
 生产调优最重要的不是参数表，而是顺序。先判断问题类型，再动对应旋钮。

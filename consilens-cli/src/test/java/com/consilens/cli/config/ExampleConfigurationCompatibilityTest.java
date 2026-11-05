@@ -126,7 +126,7 @@ class ExampleConfigurationCompatibilityTest {
     private static Stream<Path> exampleConfigurationPaths() throws IOException {
         Path examplesDirectory = Paths.get("..", "examples").toAbsolutePath().normalize();
         List<Path> paths;
-        try (Stream<Path> stream = Files.list(examplesDirectory)) {
+        try (Stream<Path> stream = Files.walk(examplesDirectory)) {
             paths = stream
                     .filter(Files::isRegularFile)
                     .filter(path -> {
@@ -135,6 +135,8 @@ class ExampleConfigurationCompatibilityTest {
                                 || fileName.endsWith(".yml")
                                 || fileName.endsWith(".json");
                     })
+                    .filter(path -> !path.getFileName().toString().equals("test-baselines.json"))
+                    .filter(path -> !path.toString().contains("_archive"))
                     .sorted()
                     .collect(Collectors.toList());
         }
@@ -142,7 +144,8 @@ class ExampleConfigurationCompatibilityTest {
     }
 
     private static Path sameDbExamplePath() {
-        return Paths.get("..", "examples", "same-db-mysql-comparison.yaml").toAbsolutePath().normalize();
+        return Paths.get("..", "examples", "same-db", "mysql", "03-normalization.yaml")
+                .toAbsolutePath().normalize();
     }
 
     private Map<String, String> testEnvironment() {
@@ -155,6 +158,20 @@ class ExampleConfigurationCompatibilityTest {
         env.put("STARROCKS_PASSWORD", "test_password");
         env.put("DORIS_USER", "test_user");
         env.put("DORIS_PASSWORD", "test_password");
+        env.put("CLICKHOUSE_USER", "test_user");
+        env.put("CLICKHOUSE_PASSWORD", "test_password");
+        env.put("TIDB_USER", "test_user");
+        env.put("TIDB_PASSWORD", "test_password");
+        env.put("ORACLE_USER", "test_user");
+        env.put("ORACLE_PASSWORD", "test_password");
+        env.put("SQLSERVER_USER", "test_user");
+        env.put("SQLSERVER_PASSWORD", "test_password");
+        env.put("TRINO_USER", "test_user");
+        env.put("TRINO_PASSWORD", "test_password");
+        env.put("PRESTO_USER", "test_user");
+        env.put("PRESTO_PASSWORD", "test_password");
+        env.put("OCEANBASE_USER", "test_user");
+        env.put("OCEANBASE_PASSWORD", "test_password");
         return env;
     }
 }

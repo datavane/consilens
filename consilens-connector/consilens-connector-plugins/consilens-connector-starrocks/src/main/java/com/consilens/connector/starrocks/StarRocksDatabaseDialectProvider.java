@@ -1,5 +1,6 @@
 package com.consilens.connector.starrocks;
 
+import com.consilens.connector.api.ConnectorTypes;
 import com.consilens.connector.api.DatabaseDialect;
 import com.consilens.connector.api.DatabaseDialectProvider;
 
@@ -9,7 +10,18 @@ public class StarRocksDatabaseDialectProvider implements DatabaseDialectProvider
 
     @Override
     public String getConnectorType() {
-        return "starrocks";
+        return ConnectorTypes.STARROCKS;
+    }
+
+    @Override
+    public boolean supportsJdbcUrl(String jdbcUrl) {
+        return jdbcUrl.contains("starrocks")
+                || (jdbcUrl.contains("mysql") && jdbcUrl.contains(":9030"));
+    }
+
+    @Override
+    public int getJdbcUrlMatchPriority() {
+        return 30;
     }
 
     @Override

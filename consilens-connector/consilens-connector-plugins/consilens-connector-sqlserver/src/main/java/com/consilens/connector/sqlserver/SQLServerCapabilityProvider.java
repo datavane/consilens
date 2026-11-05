@@ -42,18 +42,4 @@ public class SQLServerCapabilityProvider extends BaseCapabilityProvider {
         return EnumSet.copyOf(SQLSERVER_FEATURES);
     }
 
-    @Override
-    public String getDefaultSchema() {
-        return "dbo";
-    }
-
-    @Override
-    public char getWildcardEscapeChar() {
-        return '\\';
-    }
-
-    @Override
-    public String getPaginationHint(long offset, long limit) {
-        return "";
-    }
 }

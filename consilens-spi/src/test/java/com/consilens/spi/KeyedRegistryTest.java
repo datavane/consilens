@@ -2,6 +2,8 @@ package com.consilens.spi;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -11,7 +13,7 @@ class KeyedRegistryTest {
 
     @Test
     void shouldRegisterAndFindProviders() {
-        KeyedRegistry<String, FakeProvider> registry = KeyedRegistry.of(FakeProvider::key,
+        KeyedRegistry<String, FakeProvider> registry = registryOf(
                 new FakeProvider("mysql"),
                 new FakeProvider("postgresql"));
 
@@ -22,18 +24,21 @@ class KeyedRegistryTest {
 
     @Test
     void shouldRejectDuplicateKeys() {
-        assertThrows(DuplicateProviderException.class, () -> KeyedRegistry.of(FakeProvider::key,
+        assertThrows(DuplicateProviderException.class, () -> registryOf(
                 new FakeProvider("mysql"),
                 new FakeProvider("mysql")));
     }
 
     @Test
     void shouldThrowWhenProviderMissing() {
-        KeyedRegistry<String, FakeProvider> registry = KeyedRegistry.of(FakeProvider::key,
-                new FakeProvider("mysql"));
+        KeyedRegistry<String, FakeProvider> registry = registryOf(new FakeProvider("mysql"));
 
         assertFalse(registry.supports("oracle"));
         assertThrows(ProviderNotFoundException.class, () -> registry.get("oracle"));
+    }
+
+    private static KeyedRegistry<String, FakeProvider> registryOf(FakeProvider... providers) {
+        return KeyedRegistry.from(List.of(providers), FakeProvider::key, "test");
     }
 
     private static final class FakeProvider {

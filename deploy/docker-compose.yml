@@ -1,0 +1,76 @@
+#
+# docker-compose.yml for consilens-server
+#
+# Spins up a MySQL 8 database (with seeded test data) alongside
+# the consilens-server so you can run end-to-end diff tasks.
+#
+# Usage:
+#   cp .env.example .env   # set MYSQL_ROOT_PASSWORD
+#   docker compose up --build -d
+#   docker compose down -v   # teardown
+#
+
+services:
+  # ---------------------------------------------------------
+  # MySQL: holds source_db and target_db for diff comparison
+  # ---------------------------------------------------------
+  mysql:
+    image: mysql:8.0
+    container_name: consilens-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: "${MYSQL_ROOT_PASSWORD:?set MYSQL_ROOT_PASSWORD in deploy/.env}"
+      MYSQL_DATABASE: source_db
+    ports:
+      - "13306:3306"
+    volumes:
+      - ./mysql-init:/docker-entrypoint-initdb.d:ro
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "MYSQL_PWD=\"$$MYSQL_ROOT_PASSWORD\" mysqladmin ping -h localhost -uroot"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 30s
+    command: >
+      --default-authentication-plugin=mysql_native_password
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_unicode_ci
+    networks:
+      - consilens-net
+
+  # ---------------------------------------------------------
+  # consilens-server: runs the Spring Boot compare service
+  # ---------------------------------------------------------
+  consilens-server:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      args:
+        JAR_PATH: ${CONSILENS_SERVER_JAR:-consilens-server/target/consilens-server-0.1-SNAPSHOT.jar}
+    image: consilens-server:latest
+    container_name: consilens-server
+    depends_on:
+      mysql:
+        condition: service_healthy
+    ports:
+      - "16789:16789"
+    environment:
+      SPRING_PROFILES_ACTIVE: local
+    volumes:
+      - artifact_data:/opt/consilens/.consilens-server/artifacts
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:16789/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 60s
+    networks:
+      - consilens-net
+
+volumes:
+  mysql_data:
+  artifact_data:
+
+networks:
+  consilens-net:
+    driver: bridge

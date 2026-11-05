@@ -10,7 +10,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
 import com.fasterxml.jackson.databind.annotation.JsonSerialize;
 import com.fasterxml.jackson.databind.deser.std.StdDeserializer;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
 import lombok.Data;
+import lombok.NoArgsConstructor;
 
 import java.io.IOException;
 
@@ -21,6 +24,9 @@ import java.io.IOException;
  * Plugins parse it via ObjectMapper.readValue(properties, XxxSinkConfig.class).
  */
 @Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
 @JsonIgnoreProperties(ignoreUnknown = true)
 @JsonInclude(JsonInclude.Include.NON_DEFAULT)
 public class SinkConfig {
@@ -32,6 +38,7 @@ public class SinkConfig {
     private String type;
 
     /** Whether this sink is enabled. */
+    @Builder.Default
     private boolean enabled = true;
 
     /**

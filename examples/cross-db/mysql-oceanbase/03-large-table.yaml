@@ -1,0 +1,94 @@
+# MySQL vs OceanBase 大表高并发比对配置
+# 目标：测试 10000 行大表的分片比对，覆盖 concurrency 与 table diff-record sink。
+# 与 01 使用同一组逻辑列，便于统一回归基线。
+
+source:
+  type: mysql
+  name: source-mysql
+  connection:
+    url: jdbc:mysql://127.0.0.1:13306/consilens_demo?useUnicode=true&characterEncoding=UTF-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+    username: ${env.MYSQL_USER}
+    password: ${env.MYSQL_PASSWORD}
+  resource:
+    type: sql
+    path: |
+      SELECT record_id, col_tinyint, col_int, col_decimal, amount, status, updated_at
+      FROM consilens_performance_demo_table
+
+target:
+  type: oceanbase
+  name: target-oceanbase
+  connection:
+    url: jdbc:mysql://127.0.0.1:2881/consilens_demo?useUnicode=true&characterEncoding=UTF-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+    driverClassName: com.mysql.cj.jdbc.Driver
+    username: ${env.OCEANBASE_USER}
+    password: ${env.OCEANBASE_PASSWORD}
+  resource:
+    type: sql
+    path: |
+      SELECT record_id, col_tinyint, col_int, col_decimal, amount, status, updated_at
+      FROM consilens_performance_demo_table
+
+comparison:
+  keys:
+    source: [record_id]
+    target: [record_id]
+
+  fields:
+    source:
+      - col_tinyint
+      - col_int
+      - col_decimal
+      - amount
+      - status
+      - updated_at
+    target:
+      - col_tinyint
+      - col_int
+      - col_decimal
+      - amount
+      - status
+      - updated_at
+
+strategy:
+  mode: checksum
+  algorithm: xor
+  bisectionFactor: 8
+  bisectionThreshold: 8000
+  batchSize: 1000
+
+concurrency:
+  io:
+    core: 8
+    max: 32
+    queueSize: 10000
+    keepAliveSeconds: 60
+    threadNamePrefix: consilens-io-
+  cpu:
+    core: 4
+    max: 8
+    queueSize: 5000
+    keepAliveSeconds: 60
+    threadNamePrefix: consilens-cpu-
+
+result:
+  sinks:
+    - format: console
+      type: result
+    - format: table
+      type: diff-record
+      properties: |
+        {
+          "type": "mysql",
+          "url": "jdbc:mysql://127.0.0.1:13306/diff_results?useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true",
+          "username": "${env.MYSQL_USER}",
+          "password": "${env.MYSQL_PASSWORD}",
+          "driver": "com.mysql.cj.jdbc.Driver",
+          "maxPoolSize": 10,
+          "prefix": "diff_results_",
+          "suffixTimestamp": true,
+          "createTable": true,
+          "dropIfExists": false,
+          "defaultColumnLength": 500,
+          "batchSize": 100
+        }

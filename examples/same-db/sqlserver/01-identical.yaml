@@ -1,0 +1,49 @@
+# SQL Server 同库完全一致对照配置
+# 目标：source/target 指向同一张表（filters 圈定区间），断言 total=0。
+
+source:
+  type: sqlserver
+  name: source-SQL Server
+  connection:
+    url: jdbc:sqlserver://127.0.0.1:1433;databaseName=consilens_demo;sendStringParametersAsUnicode=true;encrypt=false
+    username: ${env.SQLSERVER_USER}
+    password: ${env.SQLSERVER_PASSWORD}
+  resource:
+    type: table
+    name: orders
+
+target:
+  type: sqlserver
+  name: target-SQL Server
+  connection:
+    url: jdbc:sqlserver://127.0.0.1:1433;databaseName=consilens_demo;sendStringParametersAsUnicode=true;encrypt=false
+    username: ${env.SQLSERVER_USER}
+    password: ${env.SQLSERVER_PASSWORD}
+  resource:
+    type: table
+    name: orders
+
+comparison:
+  keys:
+    source: [order_id]
+    target: [order_id]
+  fields:
+    source: [customer_id, amount, status, created_at]
+    target: [customer_id, amount, status, created_at]
+  filters:
+    source: "order_id >= 1 AND order_id <= 1000"
+    target: "order_id >= 1 AND order_id <= 1000"
+
+strategy:
+  mode: join
+  algorithm: concat
+  bisectionFactor: 4
+  bisectionThreshold: 5000
+  batchSize: 500
+  localCompare:
+    mode: full
+
+result:
+  sinks:
+    - format: console
+      type: result

@@ -52,18 +52,4 @@ public class TiDBCapabilityProvider extends BaseCapabilityProvider {
         return EnumSet.copyOf(TIDB_FEATURES);
     }
 
-    @Override
-    public String getDefaultSchema() {
-        return "test"; // TiDB default schema is often 'test'
-    }
-
-    @Override
-    public char getWildcardEscapeChar() {
-        return '\\';
-    }
-
-    @Override
-    public String getPaginationHint(long offset, long limit) {
-        return ""; // TiDB uses LIMIT offset, limit syntax, no hint needed
-    }
 }

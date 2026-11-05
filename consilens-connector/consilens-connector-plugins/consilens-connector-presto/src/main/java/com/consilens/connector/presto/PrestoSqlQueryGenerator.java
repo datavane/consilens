@@ -16,6 +16,12 @@ import java.util.Map;
  */
 public class PrestoSqlQueryGenerator extends BaseSqlQueryGenerator {
 
+    /** 归并比较把 NULL 当空串排在最前；这些方言升序默认 NULLS LAST，必须显式对齐。 */
+    @Override
+    protected String orderByExpression(String column) {
+        return super.orderByExpression(column) + " NULLS FIRST";
+    }
+
     private final CapabilityProvider capabilityProvider;
     private final DataTypeHandler dataTypeHandler;
 
@@ -24,6 +30,17 @@ public class PrestoSqlQueryGenerator extends BaseSqlQueryGenerator {
         super(capabilityProvider);
         this.capabilityProvider = capabilityProvider;
         this.dataTypeHandler = dataTypeHandler;
+    }
+
+
+    /**
+     * Presto 的 MySQL catalog 会把 INT UNSIGNED 映射成 32 位有符号整数，
+     * 本数据集的 c_uint=2147483650 直接让查询失败（outside of valid range for
+     * type java.lang.Integer）。扫描统一按文本取列，Java 侧仍按 schema 类型归一化。
+     */
+    @Override
+    protected com.consilens.connector.api.DataTypeHandler dataTypeHandler() {
+        return this.dataTypeHandler;
     }
 
     @Override
@@ -47,30 +64,38 @@ public class PrestoSqlQueryGenerator extends BaseSqlQueryGenerator {
             sql.append("'' as checksum ");
         } else {
             // Two-step approach matching MySQL: per-row MD5 + aggregate MD5
-            sql.append("COALESCE(lower(to_hex(md5(to_utf8(array_join(array_agg(row_checksum ORDER BY pk_key), '|'))))), '') as checksum ");
+            sql.append("COALESCE(lower(to_hex(md5(to_utf8(array_join(array_agg(row_checksum ORDER BY pk_key, row_checksum), '|'))))), '') as checksum ");
             sql.append("FROM (SELECT ");
 
             // Build primary key for stable ordering
-            sql.append("CONCAT(");
-            for (int i = 0; i < keyColumns.size(); i++) {
-                if (i > 0)
-                    sql.append(", '|', ");
-                String col = keyColumns.get(i);
+            // Presto CONCAT requires at least 2 arguments, so handle single key specially
+            if (keyColumns.size() == 1) {
+                String col = keyColumns.get(0);
                 DataType dataType = columnDataTypes.get(col);
-                sql.append(dataTypeHandler.normalizeColumn(col, dataType));
+                sql.append(escapeHashValue(dataTypeHandler.normalizeColumn(col, dataType))).append(" as pk_key, ");
+            } else {
+                // Presto CONCAT 仅两参，多列拼接用 ARRAY_JOIN
+                sql.append("ARRAY_JOIN(ARRAY[");
+                for (int i = 0; i < keyColumns.size(); i++) {
+                    if (i > 0)
+                        sql.append(", ");
+                    String col = keyColumns.get(i);
+                    DataType dataType = columnDataTypes.get(col);
+                    sql.append(escapeHashValue(dataTypeHandler.normalizeColumn(col, dataType)));
+                }
+                sql.append("], '|') as pk_key, ");
             }
-            sql.append(") as pk_key, ");
 
-            // Build per-row checksum using MD5
-            sql.append("lower(to_hex(md5(to_utf8(CONCAT(");
+            // Build per-row checksum using MD5 (Presto CONCAT 仅两参 → ARRAY_JOIN)
+            sql.append("lower(to_hex(md5(to_utf8(ARRAY_JOIN(ARRAY[");
             for (int i = 0; i < columns.size(); i++) {
                 if (i > 0)
-                    sql.append(", '|', ");
+                    sql.append(", ");
                 String col = columns.get(i);
                 DataType dataType = columnDataTypes.get(col);
-                sql.append(dataTypeHandler.normalizeColumn(col, dataType));
+                sql.append(escapeHashValue(dataTypeHandler.normalizeColumn(col, dataType)));
             }
-            sql.append("))))) as row_checksum");
+            sql.append("], '|'))))) as row_checksum");
         }
 
         sql.append(" FROM ");
@@ -103,18 +128,18 @@ public class PrestoSqlQueryGenerator extends BaseSqlQueryGenerator {
             sql.append(capabilityProvider.quote(primaryKeys.get(i)));
         }
 
-        sql.append(", lower(to_hex(md5(to_utf8(CONCAT(");
+        sql.append(", lower(to_hex(md5(to_utf8(ARRAY_JOIN(ARRAY[");
 
         for (int i = 0; i < columns.size(); i++) {
             if (i > 0) {
-                sql.append(", '|', ");
+                sql.append(", ");
             }
             String col = columns.get(i);
             DataType dataType = columnDataTypes.get(col);
-            sql.append(dataTypeHandler.normalizeColumn(col, dataType));
+            sql.append(escapeHashValue(dataTypeHandler.normalizeColumn(col, dataType)));
         }
 
-        sql.append("))))) AS row_hash");
+        sql.append("], '|'))))) AS row_hash");
 
         sql.append(" FROM ");
         sql.append(buildRelationRef(schemaName, tableName));
@@ -125,24 +150,6 @@ public class PrestoSqlQueryGenerator extends BaseSqlQueryGenerator {
 
         return sql.toString();
     }
-
-    @Override
-    public String getFullOuterJoinSQL(String table1, String table2,
-            List<String> joinColumns,
-            String whereClause) {
-        StringBuilder sql = new StringBuilder();
-
-        sql.append("SELECT * FROM ").append(table1)
-                .append(" FULL OUTER JOIN ").append(table2)
-                .append(" ON ").append(buildJoinCondition(table1, table2, joinColumns));
-
-        if (whereClause != null && !whereClause.trim().isEmpty()) {
-            sql.append(" WHERE ").append(whereClause);
-        }
-
-        return sql.toString();
-    }
-
     @Override
     public String getBatchInsertSQL(String tableName, List<String> columns, int batchSize) {
         if (batchSize < 1) {
@@ -171,17 +178,11 @@ public class PrestoSqlQueryGenerator extends BaseSqlQueryGenerator {
         return sql.toString();
     }
 
-    private String buildJoinCondition(String table1, String table2, List<String> joinColumns) {
-        StringBuilder condition = new StringBuilder();
-        for (int i = 0; i < joinColumns.size(); i++) {
-            if (i > 0)
-                condition.append(" AND ");
-            condition.append(capabilityProvider.quote(table1)).append(".")
-                    .append(capabilityProvider.quote(joinColumns.get(i)))
-                    .append(" = ")
-                    .append(capabilityProvider.quote(table2)).append(".")
-                    .append(capabilityProvider.quote(joinColumns.get(i)));
-        }
-        return condition.toString();
+    /**
+     * Presto does not have CONCAT_WS. Use ARRAY_JOIN(ARRAY[...], sep) instead.
+     */
+    @Override
+    protected String stringJoin(String separator, List<String> args) {
+        return "ARRAY_JOIN(ARRAY[" + String.join(", ", args) + "], " + separator + ")";
     }
 }

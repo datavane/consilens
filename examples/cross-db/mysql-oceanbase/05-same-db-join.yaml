@@ -1,0 +1,75 @@
+source:
+  type: oceanbase
+  connection:
+    url: jdbc:mysql://127.0.0.1:2881/consilens_demo?useUnicode=true&characterEncoding=UTF-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+    driverClassName: com.mysql.cj.jdbc.Driver
+    username: ${env.OCEANBASE_USER}
+    password: ${env.OCEANBASE_PASSWORD}
+  resource:
+    type: table
+    name: mydb.orders
+  readOptions:
+    consistency: snapshot
+    batchSize: 500
+    fetchSize: 1000
+target:
+  type: oceanbase
+  connection:
+    url: jdbc:mysql://127.0.0.1:2881/consilens_demo?useUnicode=true&characterEncoding=UTF-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+    driverClassName: com.mysql.cj.jdbc.Driver
+    username: ${env.OCEANBASE_USER}
+    password: ${env.OCEANBASE_PASSWORD}
+  resource:
+    type: table
+    name: mydb.orders_backup
+  readOptions:
+    consistency: snapshot
+    batchSize: 500
+    fetchSize: 1000
+comparison:
+  keys:
+    source: [order_id]
+    target: [order_id]
+  fields:
+    source: [customer_id, amount, status, created_at]
+    target: [customer_id, amount, status, created_at]
+strategy:
+  mode: join
+  localCompare:
+    mode: row-hash
+  maxDifferences: 10000
+normalization:
+  global:
+    decimal:
+      precision: 4
+      rounding: true
+    float:
+      precision: 6
+      rounding: true
+    date:
+      format: yyyy-MM-dd
+    time:
+      format: HH:mm:ss
+    datetime:
+      format: yyyy-MM-dd HH:mm:ss
+      timezone: Asia/Shanghai
+    timestamp:
+      format: yyyy-MM-dd HH:mm:ss
+      timezone: Asia/Shanghai
+    binary:
+      encoding: hex
+    boolean:
+      trueValue: "1"
+      falseValue: "0"
+    varchar:
+      nullValue: "NULL"
+result:
+  sinks:
+    - format: console
+      type: result
+    - format: csv
+      type: diff-record
+      properties: |
+        {
+          "path": "./output/oceanbase-orders-diff.csv"
+        }

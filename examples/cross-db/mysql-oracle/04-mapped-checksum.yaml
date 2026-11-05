@@ -1,0 +1,92 @@
+# MySQL vs Oracle 字段映射比对配置
+# 目标：覆盖 comparison.mappings，并演示 column / expression / literal 三种映射方式。
+#
+# 前置条件：
+#   1. MySQL 中已加载 load-mysql.sql
+#   2. Oracle 中已加载 load-oracle.sql（含 users 表）
+
+source:
+  type: mysql
+  name: source-mysql-mapped
+  connection:
+    url: jdbc:mysql://127.0.0.1:13306/mydb?useUnicode=true&characterEncoding=UTF-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+    username: ${env.MYSQL_USER}
+    password: ${env.MYSQL_PASSWORD}
+  resource:
+    type: table
+    name: users
+
+target:
+  type: oracle
+  name: target-oracle-mapped
+  connection:
+    url: jdbc:oracle:thin:@127.0.0.1:1521:ORCL
+    username: ${env.ORACLE_USER}
+    password: ${env.ORACLE_PASSWORD}
+  resource:
+    type: table
+    name: users
+
+comparison:
+  keys:
+    source:
+      - id
+    target:
+      - id
+
+  mappings:
+    - name: user_id
+      source:
+        column: id
+      target:
+        column: id
+      key: true
+
+    - name: normalized_name
+      source:
+        expression: "UPPER(name)"
+      target:
+        expression: "UPPER(name)"
+
+    - name: email
+      source:
+        column: email
+      target:
+        column: email
+
+    - name: normalized_phone
+      source:
+        expression: "REPLACE(phone, '+86', '')"
+      target:
+        expression: "REPLACE(phone, '+86', '')"
+
+    - name: source_system
+      source:
+        literal: "seed-users"
+      target:
+        literal: "seed-users"
+
+    - name: debug_tag
+      source:
+        literal: "users-v1"
+      target:
+        literal: "users-v1"
+      compare: false
+
+  filters:
+    source: "created_at >= '2026-01-01 00:00:00'"
+    target: "created_at >= TO_DATE('2026-01-01', 'YYYY-MM-DD')"
+
+strategy:
+  mode: checksum
+  algorithm: xor
+  bisectionFactor: 4
+  bisectionThreshold: 5000
+  batchSize: 1000
+  localCompare:
+    mode: row-hash
+
+result:
+  sinks:
+    - format: console
+      type: result

@@ -2,6 +2,7 @@ package com.consilens.spi;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -15,11 +16,7 @@ class PluginManagerTest {
 
     @Test
     void shouldCacheSingletonInstances() {
-        PluginManager<String, FakeProvider, FakeService> manager = PluginManager.of(
-                FakeProvider::key,
-                FakeProvider::create,
-                FakeProvider::create,
-                new FakeProvider("mysql"));
+        PluginManager<String, FakeProvider, FakeService> manager = newManager(new FakeProvider("mysql"));
 
         FakeService first = manager.get("mysql");
         FakeService second = manager.get("mysql");
@@ -31,11 +28,7 @@ class PluginManagerTest {
 
     @Test
     void shouldCreateNewConfiguredInstances() {
-        PluginManager<String, FakeProvider, FakeService> manager = PluginManager.of(
-                FakeProvider::key,
-                FakeProvider::create,
-                FakeProvider::create,
-                new FakeProvider("mysql"));
+        PluginManager<String, FakeProvider, FakeService> manager = newManager(new FakeProvider("mysql"));
 
         FakeService first = manager.create("mysql", Map.of("precision", 6));
         FakeService second = manager.create("mysql", Map.of("precision", 6));
@@ -47,14 +40,16 @@ class PluginManagerTest {
 
     @Test
     void shouldNotLoadInstanceWhenUsingGetIfLoaded() {
-        PluginManager<String, FakeProvider, FakeService> manager = PluginManager.of(
-                FakeProvider::key,
-                FakeProvider::create,
-                FakeProvider::create,
-                new FakeProvider("mysql"));
+        PluginManager<String, FakeProvider, FakeService> manager = newManager(new FakeProvider("mysql"));
 
         assertNull(manager.getIfLoaded("mysql"));
         assertTrue(manager.getLoadedInstances().isEmpty());
+    }
+
+    private static PluginManager<String, FakeProvider, FakeService> newManager(FakeProvider... providers) {
+        KeyedRegistry<String, FakeProvider> registry =
+                KeyedRegistry.from(List.of(providers), FakeProvider::key, "test");
+        return PluginManager.from(registry, FakeProvider::create, FakeProvider::create);
     }
 
     private static final class FakeProvider {

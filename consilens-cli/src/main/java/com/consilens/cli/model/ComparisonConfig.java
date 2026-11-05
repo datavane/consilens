@@ -12,7 +12,6 @@ import lombok.NoArgsConstructor;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
-import java.util.Objects;
 import java.util.Set;
 
 /**
@@ -45,7 +44,7 @@ public class ComparisonConfig {
 
     public void validate() throws ValidationException {
         ValidationFramework.forContext("comparison")
-                .validate(keys, "comparison.keys", Objects::nonNull, "comparison.keys 配置不能为空")
+                .required(keys, "comparison.keys", "comparison.keys 配置不能为空")
                 .throwIfInvalid();
 
         keys.validate("comparison.keys");

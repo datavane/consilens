@@ -7,7 +7,7 @@ import lombok.Getter;
  *
  * <ul>
  *   <li>CONCAT: Concatenate all column values and compute MD5, suitable for small datasets.</li>
- *   <li>XOR: XOR-based aggregation, better performance but may have collisions.</li>
+ *   <li>XOR: XOR aggregation of row-level hashes, better performance but order-insensitive.</li>
  * </ul>
  */
 @Getter
@@ -18,7 +18,7 @@ public enum ChecksumAlgorithm {
     CONCAT("concat", "Concat MD5"),
     
     /**
-     * XOR-based row aggregation, good performance.
+     * XOR aggregation of row-level hashes, good performance but order-insensitive.
      */
     XOR("xor", "XOR aggregation");
 

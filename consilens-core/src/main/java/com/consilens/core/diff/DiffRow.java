@@ -8,7 +8,6 @@ import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.ToString;
 
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -20,7 +19,7 @@ import java.util.Optional;
 @Getter
 @EqualsAndHashCode
 @ToString
-@Builder
+@Builder(toBuilder = true)
 @AllArgsConstructor(access = AccessLevel.PRIVATE)
 public class DiffRow {
 
@@ -151,6 +150,77 @@ public class DiffRow {
     }
 
     /**
+     * 附加额外元数据（重复键场景的 occurrence / keyMultiplicity）。
+     */
+    public static DiffRow withExtraMetadata(DiffRow row, java.util.Map<String, Object> extra) {
+        if (row == null || extra == null || extra.isEmpty()) {
+            return row;
+        }
+        java.util.Map<String, Object> merged = new java.util.HashMap<>(
+                row.getMetadata() != null ? row.getMetadata() : java.util.Map.of());
+        merged.putAll(extra);
+        return row.toBuilder().metadata(merged).build();
+    }
+
+    /**
+     * 容差内行的 metadata 标记：{@code true} 表示"精确比较不等、但按容差判等"。
+     * 默认口径下这类行不计入差异，只作为报告样本保留。
+     */
+    public static final String METADATA_WITHIN_TOLERANCE = "withinTolerance";
+
+    /** 触发容差判等的列名（报告里单列时说明"为什么不算差异"）。 */
+    public static final String METADATA_TOLERANCE_COLUMNS = "toleranceColumns";
+
+    /** 各列的实际差值（列名 → 绝对差），供报告展示"差多少但在容差内"。 */
+    public static final String METADATA_TOLERANCE_DELTAS = "toleranceDeltas";
+
+    /**
+     * 构造一行"容差内"记录：操作仍是 MISMATCH，但带 {@link #METADATA_WITHIN_TOLERANCE} 标记，
+     * 由调用方按 {@code withinTolerance} 口径决定计数还是只列出。
+     */
+    public static DiffRow withinTolerance(List<Object> primaryKey, List<Object> sourceValues,
+                                          List<Object> targetValues, List<String> columnNames1,
+                                          List<String> columnNames2, List<String> toleranceColumns1,
+                                          List<String> toleranceColumns2,
+                                          java.util.Map<String, Double> toleranceDeltas) {
+        java.util.Map<String, Object> metadata = new java.util.HashMap<>();
+        metadata.put(METADATA_WITHIN_TOLERANCE, Boolean.TRUE);
+        metadata.put(METADATA_TOLERANCE_COLUMNS, toleranceColumns1);
+        // REPORT 口径下这行会被当普通差异输出，changedColumns 必须齐全，否则报告只说"变了"不说是哪列；
+        // 两侧列名可能不同（comparison.mappings 改名），必须各写各的
+        metadata.put("changedColumns1", toleranceColumns1);
+        metadata.put("changedColumns2", toleranceColumns2);
+        if (toleranceDeltas != null && !toleranceDeltas.isEmpty()) {
+            metadata.put(METADATA_TOLERANCE_DELTAS, toleranceDeltas);
+        }
+        return builder()
+                .operation(DiffOperation.MISMATCH)
+                .primaryKey(primaryKey)
+                .sourceValues(Optional.of(sourceValues))
+                .targetValues(Optional.of(targetValues))
+                .columnNames1(columnNames1)
+                .columnNames2(columnNames2)
+                .metadata(metadata)
+                .build();
+    }
+
+    /** 是否为"容差内"记录（metadata 标记；空 metadata 视为否）。 */
+    @JsonIgnore
+    public boolean isWithinTolerance() {
+        return metadata != null && Boolean.TRUE.equals(metadata.get(METADATA_WITHIN_TOLERANCE));
+    }
+
+    /** 两侧值数组同序（键列 + 比对列）时适用的列名：一侧缺失的行只在另一侧带列名，
+     * 因此空集合表示"这一侧没有列名"，不能等同于 null。
+     */
+    public List<String> resolvedColumnNames() {
+        if (columnNames1 != null && !columnNames1.isEmpty()) {
+            return columnNames1;
+        }
+        return columnNames2 != null ? columnNames2 : List.of();
+    }
+
+    /**
      * Get all values from the source table.
      */
     public List<Object> getAllSourceValues() {
@@ -189,15 +259,6 @@ public class DiffRow {
     }
 
     /**
-     * Check if a specific column changed.
-     */
-    public boolean isColumnChanged(String columnName) {
-        Object sourceVal = getSourceValue(columnName);
-        Object targetVal = getTargetValue(columnName);
-        return !java.util.Objects.equals(sourceVal, targetVal);
-    }
-
-    /**
      * Get list of changed column names for table1.
      */
     @JsonIgnore
@@ -223,50 +284,10 @@ public class DiffRow {
     }
 
     /**
-     * Check if this diff row represents a structural change.
-     */
-    public boolean isStructuralChange() {
-        return operation == DiffOperation.SOURCE_MISSING || operation == DiffOperation.TARGET_MISSING;
-    }
-
-    /**
      * Check if this diff row represents a data change.
      */
     public boolean isDataChange() {
         return operation == DiffOperation.MISMATCH;
-    }
-
-    /**
-     * Add metadata to this diff row.
-     */
-    public DiffRow withMetadata(String key, Object value) {
-        Map<String, Object> newMetadata = new java.util.HashMap<>(metadata);
-        newMetadata.put(key, value);
-
-        return builder()
-                .operation(operation)
-                .primaryKey(primaryKey)
-                .sourceValues(sourceValues)
-                .targetValues(targetValues)
-                .columnNames1(columnNames1)
-                .columnNames2(columnNames2)
-                .metadata(newMetadata)
-                .build();
-    }
-
-    /**
-     * Create a copy with different operation.
-     */
-    public DiffRow withOperation(DiffOperation newOperation) {
-        return builder()
-                .operation(newOperation)
-                .primaryKey(primaryKey)
-                .sourceValues(sourceValues)
-                .targetValues(targetValues)
-                .columnNames1(columnNames1)
-                .columnNames2(columnNames2)
-                .metadata(metadata)
-                .build();
     }
 
     /**
@@ -304,59 +325,5 @@ public class DiffRow {
                      operation == DiffOperation.TARGET_MISSING ? getAllSourceValues().toArray() :
                              Collections.singletonList(getPrimaryKeyString());
         return result;
-    }
-
-    /**
-     * Create a diff row from array format for backward compatibility.
-     */
-    public static DiffRow fromArray(Object[] array) {
-        if (array == null || array.length < 2) {
-            throw new IllegalArgumentException("Array must have at least 2 elements");
-        }
-
-        String operationCode = (String) array[0];
-        DiffOperation operation = DiffOperation.fromCode(operationCode);
-        Object[] rowData = (Object[]) array[1];
-
-        switch (operation) {
-            case SOURCE_MISSING:
-                // For added rows, assume the row data is the primary key + values
-                if (rowData.length > 0) {
-                    List<Object> primaryKey = Collections.singletonList(rowData[0]);
-                    List<Object> values = Arrays.asList(Arrays.copyOfRange(rowData, 0, rowData.length));
-                    List<String> columnNames2 = java.util.stream.IntStream.range(0, values.size())
-                            .mapToObj(i -> "column_" + i)
-                            .collect(java.util.stream.Collectors.toList());
-                    return added(primaryKey, values, columnNames2);
-                }
-                break;
-
-            case TARGET_MISSING:
-                // Similar logic for removed rows
-                if (rowData.length > 0) {
-                    List<Object> primaryKey = Collections.singletonList(rowData[0]);
-                    List<Object> values = Arrays.asList(Arrays.copyOfRange(rowData, 0, rowData.length));
-                    List<String> columnNames1 = java.util.stream.IntStream.range(0, values.size())
-                            .mapToObj(i -> "column_" + i)
-                            .collect(java.util.stream.Collectors.toList());
-                    return removed(primaryKey, values, columnNames1);
-                }
-                break;
-
-            case MISMATCH:
-                // For modified rows, need both source and target
-                // This is simplified - in practice, you'd need both sets of values
-                if (rowData.length > 0) {
-                    List<Object> primaryKey = Collections.singletonList(rowData[0]);
-                    List<Object> values = Arrays.asList(Arrays.copyOfRange(rowData, 0, rowData.length));
-                    List<String> columnNames1 = java.util.stream.IntStream.range(0, values.size())
-                            .mapToObj(i -> "column_" + i)
-                            .collect(java.util.stream.Collectors.toList());
-                    return modified(primaryKey, values, values, columnNames1, columnNames1);
-                }
-                break;
-        }
-
-        throw new IllegalArgumentException("Invalid diff row format for operation: " + operation);
     }
 }

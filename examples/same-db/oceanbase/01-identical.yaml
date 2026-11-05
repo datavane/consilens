@@ -1,0 +1,48 @@
+source:
+  type: oceanbase
+  name: source-oceanbase
+  connection:
+    url: jdbc:mysql://127.0.0.1:2881/mydb?useUnicode=true&characterEncoding=UTF-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+    driverClassName: com.mysql.cj.jdbc.Driver
+    username: ${env.OCEANBASE_USER}
+    password: ${env.OCEANBASE_PASSWORD}
+  resource:
+    type: table
+    name: orders
+
+target:
+  type: oceanbase
+  name: target-oceanbase
+  connection:
+    url: jdbc:mysql://127.0.0.1:2881/mydb?useUnicode=true&characterEncoding=UTF-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+    driverClassName: com.mysql.cj.jdbc.Driver
+    username: ${env.OCEANBASE_USER}
+    password: ${env.OCEANBASE_PASSWORD}
+  resource:
+    type: table
+    name: orders
+
+comparison:
+  keys:
+    source: [order_id]
+    target: [order_id]
+  fields:
+    source: [customer_id, amount, status, created_at]
+    target: [customer_id, amount, status, created_at]
+  filters:
+    source: "order_id >= 1 AND order_id <= 1000"
+    target: "order_id >= 1 AND order_id <= 1000"
+
+strategy:
+  mode: join
+  algorithm: concat
+  bisectionFactor: 4
+  bisectionThreshold: 5000
+  batchSize: 500
+  localCompare:
+    mode: full
+
+result:
+  sinks:
+    - format: console
+      type: result

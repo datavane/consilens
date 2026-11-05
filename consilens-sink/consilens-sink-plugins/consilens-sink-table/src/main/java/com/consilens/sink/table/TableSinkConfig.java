@@ -151,6 +151,14 @@ public class TableSinkConfig {
      * Resolves the actual table name from configuration.
      */
     public String resolveTableName() {
+        return resolveTableName(null, null);
+    }
+
+    /**
+     * @param kind  sink 类型后缀（diff/result），避免同一秒内配置多个 sink 时撞名
+     * @param runId 本次比对 id 的短后缀，避免并发任务在同一秒生成同名表
+     */
+    public String resolveTableName(String kind, String runId) {
         if (tableName != null && !tableName.isBlank()) {
             return tableName;
         }
@@ -158,25 +166,50 @@ public class TableSinkConfig {
         if (suffixTimestamp) {
             name += java.time.LocalDateTime.now()
                     .format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"));
+            // 只有动态表名才追加类型/运行后缀；显式关闭时间戳时应保持用户预期的固定表名
+            if (kind != null && !kind.isBlank()) {
+                name += "_" + kind;
+            }
+            if (runId != null && !runId.isBlank()) {
+                String suffix = runId.replaceAll("[^A-Za-z0-9]", "");
+                if (!suffix.isEmpty()) {
+                    name += "_" + suffix.substring(0, Math.min(8, suffix.length()));
+                }
+            }
         }
         return name;
     }
 
     /**
-     * Resolves the JDBC driver class from explicit configuration.
+     * 解析 JDBC 驱动类名；返回 {@code null} 表示"交给驱动自己按 URL 推断"。
+     *
+     * <p>之前只认 mysql/postgresql，其它方言（CLI 侧按 SPI 注册表校验是允许的）会在运行时
+     * 抛 "only supports mysql and postgresql"，而 {@code consilens validate} 却是通过的。
+     * 现在按方言给出已知驱动，未知方言直接返回 null——Hikari 会走 {@code DriverManager}，
+     * 只要驱动 jar 在 classpath 上就能连。
      */
     public String resolveDriver() {
         if (driver != null && !driver.isBlank()) {
-            return driver;
+            return driver.trim();
         }
-        String databaseType = resolveDatabaseType();
-        if ("mysql".equals(databaseType)) {
-            return "com.mysql.cj.jdbc.Driver";
+        switch (resolveDatabaseType()) {
+            case "mysql":
+            case "tidb":
+            case "doris":
+            case "starrocks":
+                return "com.mysql.cj.jdbc.Driver";
+            case "postgresql":
+                return "org.postgresql.Driver";
+            case "oracle":
+                return "oracle.jdbc.OracleDriver";
+            case "sqlserver":
+                return "com.microsoft.sqlserver.jdbc.SQLServerDriver";
+            case "clickhouse":
+                return "com.clickhouse.jdbc.ClickHouseDriver";
+            default:
+                // 未知方言不再硬失败：让 DriverManager 按 URL 找驱动
+                return null;
         }
-        if ("postgresql".equals(databaseType)) {
-            return "org.postgresql.Driver";
-        }
-        throw new IllegalStateException("table sink only supports mysql and postgresql targets");
     }
 
     public String resolveDatabaseType() {

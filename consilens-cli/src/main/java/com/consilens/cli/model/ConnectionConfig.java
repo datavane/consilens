@@ -16,6 +16,7 @@ import lombok.NoArgsConstructor;
 import java.util.Map;
 import java.util.LinkedHashMap;
 import java.util.Locale;
+import java.util.Set;
 
 /**
  * Source or target connection configuration.
@@ -26,6 +27,12 @@ import java.util.Locale;
 @AllArgsConstructor
 @JsonInclude(JsonInclude.Include.NON_DEFAULT)
 public class ConnectionConfig {
+
+    private static final String OPTIONS_KEY = "options";
+
+    /** Connector types whose resources are addressed by path rather than JDBC connection. */
+    private static final Set<String> CONNECTION_OPTIONAL_TYPES =
+            Set.of("file", "iceberg");
 
     @JsonProperty("type")
     private String type;
@@ -69,10 +76,15 @@ public class ConnectionConfig {
     public void validate(String fieldName) throws ValidationException {
         ValidationFramework.forContext(fieldName)
                 .notEmpty(type, fieldName + ".type")
-                .validate(resource, fieldName + ".resource", java.util.Objects::nonNull, fieldName + ".resource 配置不能为空")
+                .required(resource, fieldName + ".resource", fieldName + ".resource 配置不能为空")
                 .throwIfInvalid();
 
-        resource.validate(fieldName + ".resource");
+        resource.validate(fieldName + ".resource", type);
+
+        if (isConnectionOptionalType()) {
+            // 文件/Iceberg 数据源不需要 connection 块；位置在 resource.name/path 中
+            return;
+        }
 
         if (requiresJdbcValidation()) {
             ValidationFramework.forContext(fieldName)
@@ -91,6 +103,18 @@ public class ConnectionConfig {
     private boolean requiresJdbcValidation() {
         String effectiveUrl = getUrl();
         return effectiveUrl != null && effectiveUrl.startsWith("jdbc:");
+    }
+
+    /**
+     * Connectors that read from a location instead of a JDBC connection, so a
+     * {@code connection} block is not required in the CLI configuration.
+     */
+    private boolean isConnectionOptionalType() {
+        if (type == null) {
+            return false;
+        }
+        String normalized = type.trim().toLowerCase(Locale.ROOT);
+        return CONNECTION_OPTIONAL_TYPES.contains(normalized);
     }
 
     @Data
@@ -160,9 +184,32 @@ public class ConnectionConfig {
         @Builder.Default
         private Map<String, Object> options = new LinkedHashMap<>();
 
+        /**
+         * Resource options are accepted both flat and nested under an {@code options:}
+         * block. The nested form is used by the S3 (docs/13) and Iceberg (docs/15)
+         * documentation; without flattening those keys were silently dropped, so
+         * {@code snapshotId}/{@code s3Endpoint}/... fell back to defaults and the
+         * comparison used the wrong snapshot or the AWS default credential chain.
+         */
         @JsonAnySetter
         public void addOption(String key, Object value) {
+            if (OPTIONS_KEY.equals(key) && value instanceof Map) {
+                flattenOptions((Map<?, ?>) value);
+                return;
+            }
             options.put(key, value);
+        }
+
+        private void flattenOptions(Map<?, ?> nested) {
+            for (Map.Entry<?, ?> entry : nested.entrySet()) {
+                String nestedKey = String.valueOf(entry.getKey());
+                Object nestedValue = entry.getValue();
+                if (OPTIONS_KEY.equals(nestedKey) && nestedValue instanceof Map) {
+                    flattenOptions((Map<?, ?>) nestedValue);
+                    continue;
+                }
+                options.put(nestedKey, nestedValue);
+            }
         }
 
         @JsonAnyGetter
@@ -171,6 +218,15 @@ public class ConnectionConfig {
         }
 
         public void validate(String fieldName) throws ValidationException {
+            validate(fieldName, null);
+        }
+
+        /**
+         * @param connectorType connector id of the owning {@code source}/{@code target}
+         *                      block; a resource may use the same type (for example
+         *                      {@code iceberg}) instead of table/sql/file.
+         */
+        public void validate(String fieldName, String connectorType) throws ValidationException {
             ValidationFramework.forContext(fieldName)
                     .notEmpty(type, fieldName + ".type")
                     .throwIfInvalid();
@@ -194,9 +250,25 @@ public class ConnectionConfig {
                     }
                     validateTrustedSql(fieldName + ".path", path);
                     break;
+                case "file":
+                    if (isBlank(name) && isBlank(path)) {
+                        throw ValidationException.simple("CONFIGURATION_VALIDATION",
+                                fieldName + " type=file 时必须配置 name 或 path（文件路径）");
+                    }
+                    break;
                 default:
+                    if (connectorType != null
+                            && normalizedType.equals(connectorType.trim().toLowerCase(Locale.ROOT))) {
+                        if (isBlank(name) && isBlank(path)) {
+                            throw ValidationException.simple("CONFIGURATION_VALIDATION",
+                                    fieldName + " type=" + normalizedType
+                                            + " 时必须配置 name 或 path（资源位置）");
+                        }
+                        break;
+                    }
                     throw ValidationException.simple("CONFIGURATION_VALIDATION",
-                            fieldName + ".type 仅支持 table 或 sql");
+                            fieldName + ".type 仅支持 table、sql 或 file，"
+                                    + "或与连接器类型同名（如 iceberg）；当前为 " + type);
             }
         }
 

@@ -69,6 +69,33 @@ class RelationalCompareSegmentAdapterTest {
     }
 
     @Test
+    void shouldMatchConfiguredColumnsCaseInsensitively() {
+        ResourceLocator resource = ResourceLocator.builder()
+                .type("sql")
+                .name("orders_sql")
+                .path("SELECT id, name, amount FROM orders")
+                .build();
+        StubRelationalDataset dataset = new StubRelationalDataset(resource, List.of(
+                FieldDescriptor.builder().name("ID").canonicalType("bigint").build(),
+                FieldDescriptor.builder().name("NAME").canonicalType("VARCHAR").build(),
+                FieldDescriptor.builder().name("AMOUNT").canonicalType("DECIMAL").build()));
+        CompareSegment segment = CompareSegment.builder()
+                .dataset(dataset)
+                .resource(resource)
+                .keySpec(KeySpec.builder().fields(List.of("id")).build())
+                .comparisons(ComparisonSpec.builder().exclude(List.of("name")).build())
+                .schema(dataset.getSchema())
+                .build();
+
+        RelationalCompareSegmentAdapter.PreparedTableSegment prepared =
+                RelationalCompareSegmentAdapter.toTableSegment(segment, CompareExecutionSettings.fromRequest(null));
+
+        // 配置写小写、元数据是大写：键列要解析成实际拼写，exclude 也要生效，键列不能变成额外列
+        assertEquals(List.of("ID"), prepared.getTableSegment().getKeyColumns());
+        assertEquals(List.of("AMOUNT"), prepared.getTableSegment().getExtraColumns());
+    }
+
+    @Test
     void shouldExcludeColumnsFromAutomaticMatching() {
         ResourceLocator resource = ResourceLocator.builder()
                 .type("sql")
@@ -222,14 +249,19 @@ class RelationalCompareSegmentAdapterTest {
         private final SchemaDescriptor schema;
 
         private StubRelationalDataset(ResourceLocator resource) {
+            this(resource, List.of(
+                    FieldDescriptor.builder().name("id").canonicalType("bigint").build(),
+                    FieldDescriptor.builder().name("name").canonicalType("VARCHAR").build()));
+        }
+
+        private StubRelationalDataset(ResourceLocator resource, List<FieldDescriptor> declaredFields) {
             this.resource = resource;
-            FieldDescriptor id = FieldDescriptor.builder().name("id").canonicalType("bigint").build();
-            FieldDescriptor name = FieldDescriptor.builder().name("name").canonicalType("VARCHAR").build();
             Map<String, FieldDescriptor> fields = new LinkedHashMap<>();
-            fields.put("id", id);
-            fields.put("name", name);
+            for (FieldDescriptor field : declaredFields) {
+                fields.put(field.getName(), field);
+            }
             this.schema = SchemaDescriptor.builder()
-                    .fields(List.of(id, name))
+                    .fields(declaredFields)
                     .fieldMap(fields)
                     .build();
         }

@@ -1,0 +1,49 @@
+# ClickHouse 同库 join 差异比对配置
+# 目标：orders vs orders_backup，覆盖 TARGET_MISSING + MISMATCH。基线：total=2。
+
+source:
+  type: clickhouse
+  name: source-ClickHouse
+  connection:
+    url: jdbc:clickhouse://127.0.0.1:8123/mydb
+    username: ${env.CLICKHOUSE_USER}
+    password: ${env.CLICKHOUSE_PASSWORD}
+  resource:
+    type: table
+    name: orders
+
+target:
+  type: clickhouse
+  name: target-ClickHouse
+  connection:
+    url: jdbc:clickhouse://127.0.0.1:8123/mydb
+    username: ${env.CLICKHOUSE_USER}
+    password: ${env.CLICKHOUSE_PASSWORD}
+  resource:
+    type: table
+    name: orders_backup
+
+comparison:
+  keys:
+    source: [order_id]
+    target: [order_id]
+  fields:
+    source: [customer_id, amount, status, created_at]
+    target: [customer_id, amount, status, created_at]
+
+strategy:
+  mode: join
+  algorithm: concat
+  bisectionFactor: 4
+  bisectionThreshold: 5000
+  batchSize: 500
+  localCompare:
+    mode: row-hash
+  # 开放档（默认）：重复键中值相等的行互相抵消，其余按序配对；
+  # 改为 true 时比对前先做唯一键探针，命中重复键直接失败（严格档）
+  validateUniqueKeys: false
+
+result:
+  sinks:
+    - format: console
+      type: result

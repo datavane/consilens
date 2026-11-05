@@ -1,0 +1,49 @@
+# PRESTO 同库完全一致对照配置
+# 目标：source/target 指向同一张表（filters 圈定区间），断言 total=0。
+
+source:
+  type: presto
+  name: source-PRESTO
+  connection:
+    url: jdbc:presto://127.0.0.1:8085/mysql/mydb_target
+    username: ${env.PRESTO_USER}
+    password: ${env.PRESTO_PASSWORD}
+  resource:
+    type: table
+    name: orders
+
+target:
+  type: presto
+  name: target-PRESTO
+  connection:
+    url: jdbc:presto://127.0.0.1:8085/mysql/mydb_target
+    username: ${env.PRESTO_USER}
+    password: ${env.PRESTO_PASSWORD}
+  resource:
+    type: table
+    name: orders
+
+comparison:
+  keys:
+    source: [order_id]
+    target: [order_id]
+  fields:
+    source: [customer_id, amount, status, created_at]
+    target: [customer_id, amount, status, created_at]
+  filters:
+    source: "order_id >= 1 AND order_id <= 1000"
+    target: "order_id >= 1 AND order_id <= 1000"
+
+strategy:
+  mode: join
+  algorithm: concat
+  bisectionFactor: 4
+  bisectionThreshold: 5000
+  batchSize: 500
+  localCompare:
+    mode: full
+
+result:
+  sinks:
+    - format: console
+      type: result

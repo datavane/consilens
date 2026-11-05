@@ -1,0 +1,73 @@
+# MySQL vs SQL Server 明细表 vs 聚合表比对配置
+# 目标：用 source 自定义 SQL 将明细表聚合后，与 target 聚合结果表做 checksum 比对。
+#
+# 前置条件：
+#   1. MySQL 中已加载 load-mysql.sql
+#   2. SQL Server 中已加载 load-sqlserver.sql（含 daily_order_summary 聚合表）
+
+source:
+  type: mysql
+  name: source-mysql-detail-aggregate
+  connection:
+    url: jdbc:mysql://127.0.0.1:13306/consilens_demo?useUnicode=true&characterEncoding=UTF-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+    username: ${env.MYSQL_USER}
+    password: ${env.MYSQL_PASSWORD}
+  resource:
+    type: sql
+    path: |
+      SELECT DATE(created_at) AS biz_date,
+        status,
+        COUNT(*) AS order_count,
+        SUM(amount) AS total_amount,
+        MAX(updated_at) AS updated_at
+      FROM consilens_performance_demo_table
+      WHERE deleted = 0
+      GROUP BY DATE(created_at), status
+
+target:
+  type: sqlserver
+  name: target-sqlserver-aggregate
+  connection:
+    url: jdbc:sqlserver://127.0.0.1:1433;databaseName=consilens_demo;sendStringParametersAsUnicode=true;encrypt=false
+    username: ${env.SQLSERVER_USER}
+    password: ${env.SQLSERVER_PASSWORD}
+  resource:
+    type: table
+    name: daily_order_summary
+
+comparison:
+  keys:
+    source:
+      - biz_date
+      - status
+    target:
+      - biz_date
+      - status
+
+  fields:
+    source:
+      - order_count
+      - total_amount
+      - updated_at
+    target:
+      - order_count
+      - total_amount
+      - updated_at
+
+  filters:
+    source: "biz_date >= '2026-05-01' AND biz_date < '2026-05-02'"
+    target: "biz_date >= '2026-05-01' AND biz_date < '2026-05-02'"
+
+strategy:
+  mode: checksum
+  algorithm: xor
+  bisectionFactor: 4
+  bisectionThreshold: 5000
+  batchSize: 1000
+
+result:
+  sinks:
+    - format: console
+      type: result
+    - format: console
+      type: diff-record

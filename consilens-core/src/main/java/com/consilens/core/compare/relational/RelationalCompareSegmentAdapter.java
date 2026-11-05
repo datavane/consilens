@@ -28,6 +28,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -53,7 +54,7 @@ public final class RelationalCompareSegmentAdapter {
         boolean sqlResource = isSqlResource(resource);
         TablePath tablePath = sqlResource ? sqlResourceTablePath(resource) : support.getTablePath();
         SchemaDescriptor schema = segment.getSchema() != null ? segment.getSchema() : segment.getDataset().getSchema();
-        List<String> keyColumns = requireKeyColumns(segment.getKeySpec(), tablePath);
+        List<String> keyColumns = resolveColumnNames(requireKeyColumns(segment.getKeySpec(), tablePath), schema);
         List<String> extraColumns = resolveComparisonColumns(segment.getComparisons(), schema, keyColumns);
         DatabaseAdapter databaseAdapter = createDatabaseAdapter(
                 support,
@@ -67,11 +68,11 @@ public final class RelationalCompareSegmentAdapter {
                 .keyColumns(keyColumns)
                 .extraColumns(extraColumns)
                 .whereClause(resolveWhereClause(segment.getFilter()))
-                .caseSensitive(false)
                 .schema(Optional.ofNullable(RelationalSchemaAdapter.toLegacySchema(schema, tablePath)));
 
-        applySplit(builder, segment.getSplit());
-        return new PreparedTableSegment(builder.build());
+        TableSegment tableSegment = builder.build();
+        applySplit(tableSegment, segment.getSplit());
+        return new PreparedTableSegment(tableSegment);
     }
 
     private static DatabaseAdapter createDatabaseAdapter(RelationalDatasetSupport support,
@@ -85,19 +86,19 @@ public final class RelationalCompareSegmentAdapter {
                 executionSettings.getChecksumAlgorithm());
     }
 
-    private static void applySplit(TableSegment.TableSegmentBuilder builder, SegmentSplit split) {
+    private static void applySplit(TableSegment tableSegment, SegmentSplit split) {
         if (split == null) {
             return;
         }
         if (split instanceof KeyRangeSplit) {
             KeyRangeSplit keyRangeSplit = (KeyRangeSplit) split;
-            builder.minKey(Optional.ofNullable(keyRangeSplit.getStartKey()));
-            builder.maxKey(Optional.ofNullable(keyRangeSplit.getEndKey()));
+            tableSegment.setMinKey(Optional.ofNullable(keyRangeSplit.getStartKey()));
+            tableSegment.setMaxKey(Optional.ofNullable(keyRangeSplit.getEndKey()));
             return;
         }
         if (split instanceof OffsetLimitSplit) {
             OffsetLimitSplit offsetLimitSplit = (OffsetLimitSplit) split;
-            builder.limitOffset(Optional.of(new TableSegment.LimitOffset(
+            tableSegment.setLimitOffset(Optional.of(new TableSegment.LimitOffset(
                     offsetLimitSplit.getLimit(),
                     offsetLimitSplit.getOffset())));
             return;
@@ -158,12 +159,18 @@ public final class RelationalCompareSegmentAdapter {
     private static List<String> resolveComparisonColumns(ComparisonSpec comparisons,
                                                          SchemaDescriptor schema,
                                                          List<String> keyColumns) {
-        Set<String> excluded = excludedColumns(comparisons);
+        // 列名比较统一按大小写不敏感：配置里的列名往往沿用文档的小写写法，而元数据里的
+        // 实际拼写可能不同（MySQL 标识符大小写不敏感、SQL Server 依赖排序规则）。
+        // 用精确比较会漏掉 exclude、也认不出键列，导致同一列在 SELECT 里出现两份、
+        // 取回的行比 keyColumns+extraColumns 短，列标签整体错位。
+        Set<String> excluded = fold(excludedColumns(comparisons));
+        Set<String> keySet = fold(keyColumns);
         if (comparisons != null && comparisons.getFields() != null && !comparisons.getFields().isEmpty()) {
-            Set<String> result = new LinkedHashSet<>(comparisons.getFields());
-            result.removeAll(excluded);
-            Set<String> overlap = new LinkedHashSet<>(result);
-            overlap.retainAll(keyColumns);
+            Set<String> result = new LinkedHashSet<>(resolveColumnNames(comparisons.getFields(), schema));
+            result.removeIf(name -> name != null && excluded.contains(fold(name)));
+            Set<String> overlap = result.stream()
+                    .filter(name -> name != null && keySet.contains(fold(name)))
+                    .collect(Collectors.toCollection(LinkedHashSet::new));
             if (!overlap.isEmpty()) {
                 throw new ConnectorException("Comparison columns must not include key columns: " + overlap);
             }
@@ -172,14 +179,66 @@ public final class RelationalCompareSegmentAdapter {
         if (schema == null || schema.getFields() == null) {
             return List.of();
         }
-        Set<String> keySet = new LinkedHashSet<>(keyColumns);
         return schema.getFields().stream()
                 .map(FieldDescriptor::getName)
                 .filter(name -> name != null
-                        && !keySet.contains(name)
-                        && !excluded.contains(name)
+                        && !keySet.contains(fold(name))
+                        && !excluded.contains(fold(name))
                         && !DerivedCompareColumns.isDerived(name))
                 .collect(Collectors.toCollection(ArrayList::new));
+    }
+
+    /**
+     * 把配置里的列名解析成 schema 中的实际拼写：精确匹配优先，其次唯一的大小写不敏感匹配；
+     * 解析不到时保留原值（交给下游 SQL 报错），出现歧义（大小写不同的同名列）时不改写。
+     */
+    private static List<String> resolveColumnNames(List<String> configured, SchemaDescriptor schema) {
+        if (configured == null || configured.isEmpty() || schema == null || schema.getFields() == null) {
+            return configured;
+        }
+        Set<String> exact = new LinkedHashSet<>();
+        Map<String, String> folded = new LinkedHashMap<>();
+        Set<String> ambiguous = new LinkedHashSet<>();
+        for (FieldDescriptor field : schema.getFields()) {
+            String name = field == null ? null : field.getName();
+            if (name == null) {
+                continue;
+            }
+            exact.add(name);
+            String lower = fold(name);
+            String previous = folded.putIfAbsent(lower, name);
+            if (previous != null && !previous.equals(name)) {
+                ambiguous.add(lower);
+            }
+        }
+        List<String> resolved = new ArrayList<>(configured.size());
+        for (String name : configured) {
+            String lower = name == null ? null : fold(name);
+            if (name == null || exact.contains(name) || (lower != null && ambiguous.contains(lower))) {
+                resolved.add(name);
+                continue;
+            }
+            String candidate = lower == null ? null : folded.get(lower);
+            resolved.add(candidate != null ? candidate : name);
+        }
+        return resolved;
+    }
+
+    private static Set<String> fold(java.util.Collection<String> names) {
+        if (names == null || names.isEmpty()) {
+            return Set.of();
+        }
+        Set<String> result = new LinkedHashSet<>();
+        for (String name : names) {
+            if (name != null) {
+                result.add(fold(name));
+            }
+        }
+        return result;
+    }
+
+    private static String fold(String name) {
+        return name == null ? null : name.trim().toLowerCase(Locale.ROOT);
     }
 
     private static Set<String> excludedColumns(ComparisonSpec comparisons) {

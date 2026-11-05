@@ -24,13 +24,25 @@ class ClickHouseDataTypeHandlerTest {
     @Test
     void testNormalizeColumn_Int() {
         String result = handler.normalizeColumn("amount", DataType.INTEGER);
-        assertEquals("COALESCE(trim(CAST(`amount` AS String)), '0')", result);
+        // 与本地路径同口径：字符串化 + TRIM + NULL → ''（不再返回原始列，
+        // 否则本地比对时 NULL 原样带出，与其它方言不一致）
+        assertEquals("COALESCE(trim(toString(`amount`)), '')", result);
     }
 
     @Test
     void testNormalizeColumn_Timestamp() {
         String result = handler.normalizeColumn("created_at", DataType.TIMESTAMP);
-        assertEquals("COALESCE(formatDateTime(toTimeZone(`created_at`, 'UTC'), '%Y-%m-%d %H:%M:%S'), '')", result);
+        assertEquals("COALESCE(formatDateTime(toTimeZone(`created_at`, 'UTC'), '%Y-%m-%d %H:%i:%S'), '')", result);
+    }
+
+    @Test
+    void testNormalizeColumn_DecimalKeepsTrailingZeros() {
+        String result = handler.normalizeColumn("amount", DataType.DECIMAL);
+        // 符号 + 整数部分 + 定长小数部分（lpad 补零）
+        assertTrue(result.contains("abs(trunc("), result);
+        assertTrue(result.contains("lpad("), result);
+        // NULL 哨兵为空串（不再是 '0.0000'）
+        assertTrue(result.contains("'')"), result);
     }
 
     @Test
@@ -85,5 +97,11 @@ class ClickHouseDataTypeHandlerTest {
                                 .unsigned(true)
                                 .build())
                         .build()));
+    }
+
+    @Test
+    void shouldResolveWrappedTypesForRuntimeNormalization() {
+        assertEquals(DataType.VARCHAR, handler.convertToDataType("Nullable(String)"));
+        assertEquals(DataType.VARCHAR, handler.convertToDataType("LowCardinality(String)"));
     }
 }

@@ -1,5 +1,7 @@
 package com.consilens.core.validation;
 
+import com.consilens.common.enums.ChecksumAlgorithm;
+import com.consilens.connector.api.planner.ComparePlanTypes;
 import com.consilens.core.util.LogUtils;
 import lombok.extern.slf4j.Slf4j;
 
@@ -144,6 +146,22 @@ public class ValidationFramework {
      */
     public ValidationFramework validate(Object value, String fieldName, Predicate<Object> predicate, String errorMessage) {
         if (value != null && !predicate.test(value)) {
+            addError(fieldName, errorMessage);
+        }
+        return this;
+    }
+
+    /**
+     * Require a non-null value. Unlike {@link #validate(Object, String, Predicate, String)},
+     * this also fails when the value is null, so callers can report a field-specific
+     * message instead of dereferencing null afterwards.
+     * @param value value to validate
+     * @param fieldName field name
+     * @param errorMessage error message if the value is null
+     * @return this instance for chaining
+     */
+    public ValidationFramework required(Object value, String fieldName, String errorMessage) {
+        if (value == null) {
             addError(fieldName, errorMessage);
         }
         return this;
@@ -367,13 +385,41 @@ public class ValidationFramework {
         /**
          * Validate algorithm configuration.
          */
-        public static ValidationFramework validateAlgorithmConfig(String algorithm, Map<String, Object> parameters) {
+        public static ValidationFramework validateAlgorithmConfig(String planType, Map<String, Object> parameters) {
             return ValidationFramework.forContext("算法配置")
-                    .notEmpty(algorithm, "algorithm")
-                    .validate(algorithm, "algorithm",
-                        value -> "HASH_DIFF".equals(value) || "JOIN_DIFF".equals(value),
-                        "必须是有效的算法类型: HASH_DIFF, JOIN_DIFF")
-                    .notNull(parameters, "parameters");
+                    .notEmpty(planType, "algorithm")
+                    .validate(planType, "algorithm",
+                        value -> isSupportedPlanType((String) value),
+                        "必须是有效的执行计划类型: " + ComparePlanTypes.SERVER_JOIN + ", "
+                                + ComparePlanTypes.PUSHDOWN_CHECKSUM + ", "
+                                + ComparePlanTypes.STREAMING_MERGE)
+                    .notNull(parameters, "parameters")
+                    .validate(parameters, "parameters",
+                        value -> hasValidChecksumAlgorithm((Map<String, Object>) value),
+                        "parameters.checksumAlgorithm 必须是 " + ChecksumAlgorithm.CONCAT.getCode()
+                                + " 或 " + ChecksumAlgorithm.XOR.getCode());
+        }
+
+        private static boolean isSupportedPlanType(String planType) {
+            return ComparePlanTypes.SERVER_JOIN.equals(planType)
+                    || ComparePlanTypes.PUSHDOWN_CHECKSUM.equals(planType)
+                    || ComparePlanTypes.STREAMING_MERGE.equals(planType);
+        }
+
+        private static boolean hasValidChecksumAlgorithm(Map<String, Object> parameters) {
+            Object value = parameters.get("checksumAlgorithm");
+            if (value == null) {
+                return true;
+            }
+            if (!(value instanceof String) || ((String) value).trim().isEmpty()) {
+                return false;
+            }
+            try {
+                ChecksumAlgorithm.fromString((String) value);
+                return true;
+            } catch (IllegalArgumentException e) {
+                return false;
+            }
         }
     }
 }

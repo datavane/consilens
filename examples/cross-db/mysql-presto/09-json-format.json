@@ -1,0 +1,71 @@
+{
+  "source": {
+    "type": "mysql",
+    "name": "source-mysql",
+    "connection": {
+      "url": "jdbc:mysql://127.0.0.1:13306/consilens_demo?useUnicode=true&characterEncoding=UTF-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true",
+      "username": "${env.MYSQL_USER}",
+      "password": "${env.MYSQL_PASSWORD}"
+    },
+    "resource": {
+      "type": "table",
+      "name": "consilens_performance_demo_table"
+    }
+  },
+  "target": {
+    "type": "presto",
+    "name": "target-presto",
+    "connection": {
+      "url": "jdbc:presto://127.0.0.1:8085/mysql/consilens_demo_target",
+      "username": "${env.PRESTO_USER}",
+      "password": "${env.PRESTO_PASSWORD}"
+    },
+    "resource": {
+      "type": "table",
+      "name": "consilens_performance_demo_table"
+    }
+  },
+  "comparison": {
+    "keys": {
+      "source": [
+        "record_id"
+      ],
+      "target": [
+        "record_id"
+      ]
+    },
+    "fields": {
+      "source": [
+        "col_tinyint",
+        "col_int",
+        "col_decimal",
+        "amount",
+        "status",
+        "updated_at"
+      ],
+      "target": [
+        "col_tinyint",
+        "col_int",
+        "col_decimal",
+        "amount",
+        "status",
+        "updated_at"
+      ]
+    }
+  },
+  "strategy": {
+    "mode": "checksum",
+    "algorithm": "xor",
+    "bisectionFactor": 8,
+    "bisectionThreshold": 8000,
+    "batchSize": 1000
+  },
+  "result": {
+    "sinks": [
+      {
+        "format": "console",
+        "type": "result"
+      }
+    ]
+  }
+}

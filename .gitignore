@@ -25,6 +25,7 @@ replay_pid*
 
 # Maven
 target/
+.release-checks/
 pom.xml.tag
 pom.xml.releaseBackup
 pom.xml.versionsBackup
@@ -121,8 +122,10 @@ grafana/
 *.swp
 *.swo
 
+# Draft backups in cross-database examples
+examples/mysql-doris/*.bak
+
 # Application specific
-data/
 results/
 reports/
 uploads/
@@ -131,5 +134,38 @@ temp/
 .claude/
 
 AGENTS.md
-scripts/
+scripts/*
+# keep the repository's own check scripts used by CI and docs
+!scripts/check-doc-links.py
+!scripts/s3-smoke.sh
+!scripts/release/
+!scripts/release/release-check.sh
 design/
+.zcode
+output
+.orchelon/*
+.consilens-server/artifacts
+.reasonix
+
+# front-end build output copied by maven-resources-plugin
+consilens-server/src/main/resources/static/
+consilens-ui/dist/
+consilens-ui/node
+consilens-ui/node_modules
+consilens-ui/.vite
+.consilens-server
+.chrome-cdp
+.chrome-headless
+.orchelon
+.consilens-test
+.consilens-regression
+.vite
+test-results
+consilens-ui/e2e
+devlop
+__pycache__/
+*.pyc
+
+# local-only workspace and tool state
+/develop/
+/.awr/
