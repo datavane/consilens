@@ -49,7 +49,10 @@ public class MySQLConnectionPoolOptimizer implements ConnectionPoolOptimizer {
         props.setProperty("maintainTimeStats", "false");
 
         // Character encoding
-        props.setProperty("serverTimezone", "UTC");
+        // NOTE: no serverTimezone override here — forcing UTC shifts DATETIME
+        // wall-clock values by the JVM offset and breaks cross-dialect consistency
+        // (doris/tidb/starrocks read the same column verbatim). Datetimes must be
+        // compared as literal wall-clock on every mysql-protocol dialect.
         props.setProperty("useUnicode", "true");
         props.setProperty("characterEncoding", "UTF-8");
 

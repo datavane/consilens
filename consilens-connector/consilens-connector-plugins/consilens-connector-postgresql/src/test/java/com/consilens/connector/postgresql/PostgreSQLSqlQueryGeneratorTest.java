@@ -65,16 +65,6 @@ class PostgreSQLSqlQueryGeneratorTest {
         assertTrue(sql.contains("MD5"));
         assertTrue(sql.contains("STRING_AGG"));
     }
-
-    @Test
-    void testGetFullOuterJoinSQL() {
-        List<String> joinColumns = Arrays.asList("id");
-        String sql = generator.getFullOuterJoinSQL("table1", "table2", joinColumns, null);
-
-        assertTrue(sql.contains("FULL OUTER JOIN"));
-        assertFalse(sql.contains("UNION")); // PostgreSQL uses native FULL OUTER JOIN
-    }
-
     @Test
     void testGetBatchInsertSQL() {
         List<String> columns = Arrays.asList("id", "name", "email");
@@ -114,6 +104,10 @@ class PostgreSQLSqlQueryGeneratorTest {
 
         // Verify MD5 and CONCAT_WS with canonical separator
         assertTrue(sql.contains("MD5(CONCAT_WS('|', "), "Should use MD5(CONCAT_WS('|', ...))");
+
+        // P1-2: 分隔符转义必须与 MySQL 族同一规则（值内 '|' 双写）
+        assertTrue(sql.contains("REPLACE("), "Should escape separator inside values");
+        assertTrue(sql.contains(", '|', '||')"), "Separator must be doubled, not dropped");
 
         // Verify row_hash alias
         assertTrue(sql.contains("AS row_hash"), "Should alias MD5 result as row_hash");

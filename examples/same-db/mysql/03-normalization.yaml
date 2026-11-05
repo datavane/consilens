@@ -1,0 +1,166 @@
+# MySQL 同库 join + normalization 全参数比对配置
+# 目标：覆盖 readOptions / extraColumns / normalization（所有规则参数）/
+# result.failOnSinkError / sink.enabled 等显式配置项，基线 total=2。
+
+source:
+  type: mysql
+  name: source-mysql
+  connection:
+    url: jdbc:mysql://127.0.0.1:13306/mydb?useUnicode=true&characterEncoding=UTF-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+    username: ${env.MYSQL_USER}
+    password: ${env.MYSQL_PASSWORD}
+  resource:
+    type: table
+    name: orders
+  readOptions:
+    consistency: snapshot
+    batchSize: 500
+    fetchSize: 1000
+    useCursorFetch: true
+
+target:
+  type: mysql
+  name: target-mysql
+  connection:
+    url: jdbc:mysql://127.0.0.1:13306/mydb?useUnicode=true&characterEncoding=UTF-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+    username: ${env.MYSQL_USER}
+    password: ${env.MYSQL_PASSWORD}
+  resource:
+    type: table
+    name: orders_backup
+  readOptions:
+    consistency: snapshot
+    batchSize: 500
+    fetchSize: 1000
+    useCursorFetch: true
+
+comparison:
+  keys:
+    source: [order_id]
+    target: [order_id]
+  fields:
+    source: [customer_id, amount, status]
+    target: [customer_id, amount, status]
+  extraColumns:
+    - created_at
+
+strategy:
+  mode: join
+  algorithm: concat
+  bisectionFactor: 4
+  bisectionThreshold: 10000
+  batchSize: 500
+  maxDifferences: 5000
+  # 可空键开关：默认 false（键列可空即拒绝）；true 时允许 NULL 键参与比较。
+  allowNullableKeys: true
+
+normalization:
+  global:
+    decimal:
+      precision: 2
+      rounding: true
+    float:
+      precision: 4
+      rounding: false
+      # 数值容差：absolute 与 relative 任一满足即判等（终局本地比较生效）
+      tolerance: 0.01
+      relativeTolerance: 0.001
+    date:
+      format: yyyy-MM-dd
+      comparisonMode: DATE_ONLY
+    time:
+      format: HH:mm:ss
+    datetime:
+      format: yyyy-MM-dd HH:mm:ss
+      timezone: Asia/Shanghai
+      comparisonMode: "TRUNCATE_TO_SECOND"
+    timestamp:
+      format: yyyy-MM-dd HH:mm:ss
+      timezone: Asia/Shanghai
+      comparisonMode: "TRUNCATE_TO_SECOND"
+      sessionTimeZone: "+08:00"
+    binary:
+      encoding: hex
+      uppercase: true
+    boolean:
+      trueValue: "Y"
+      falseValue: "N"
+      nullValue: "<BOOL_NULL>"
+  source:
+    decimal:
+      precision: 2
+      rounding: true
+      tolerance: 0.001
+      relativeTolerance: 0.0001
+    timestamp:
+      format: yyyy-MM-dd HH:mm:ss
+      # 会话时区：连接级信息只能挂在某条规则上，core 侧会读它来统一两侧归一化时区
+      sessionTimeZone: "+08:00"
+    date:
+      format: yyyy-MM-dd
+      comparisonMode: DATE_ONLY
+    datetime:
+      format: yyyy-MM-dd HH:mm:ss
+      timezone: Asia/Shanghai
+      sessionTimeZone: "+08:00"
+    binary:
+      encoding: hex
+      uppercase: true
+    boolean:
+      trueValue: "Y"
+      falseValue: "N"
+    varchar:
+      nullValue: "<SRC_NULL>"
+  target:
+    decimal:
+      precision: 2
+      rounding: true
+      tolerance: 0.002
+      relativeTolerance: 0.0002
+    date:
+      format: yyyy-MM-dd
+      comparisonMode: DATE_ONLY
+    datetime:
+      format: yyyy-MM-dd HH:mm:ss
+      timezone: Asia/Shanghai
+      sessionTimeZone: "+08:00"
+    binary:
+      encoding: hex
+      uppercase: true
+    boolean:
+      trueValue: "Y"
+      falseValue: "N"
+    varchar:
+      nullValue: "<TGT_NULL>"
+
+  # 列级规则：当前只开放数值容差；优先级高于类型级规则，两侧同名列生效
+  columns:
+    price:
+      tolerance: 0.5
+      relativeTolerance: 0.0001
+
+  # 容差内差异的记账口径：ignore（默认）= 判等、不计入 totalDifferences、报告里单独列出；
+  # report = 仍然算差异（审计档，用于核对容差是否过宽）。
+  tolerance:
+    withinTolerance: ignore
+    reportSamples: 100
+
+result:
+  failOnSinkError: false
+  sinks:
+    - format: console
+      type: result
+    - format: csv
+      type: diff-record
+      enabled: true
+      properties:
+        path: ./output/orders-diff.csv
+        delimiter: ","
+        includeHeader: true
+        mergeDefaults: true
+        columns:
+          - name: env
+            value: staging
+    - format: console
+      type: result
+      enabled: false

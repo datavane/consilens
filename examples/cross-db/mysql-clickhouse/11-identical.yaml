@@ -1,0 +1,60 @@
+# 完全一致对照配置 - MySQL vs clickhouse
+# 目标：两端种子在 filters 圈定范围内完全一致，断言 total=0。
+# 基线：total=0（精确），与差异用例互为反向钳制。
+
+source:
+  type: mysql
+  name: source-mysql
+  connection:
+    url: jdbc:mysql://127.0.0.1:13306/consilens_demo?useUnicode=true&characterEncoding=UTF-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+    username: ${env.MYSQL_USER}
+    password: ${env.MYSQL_PASSWORD}
+  resource:
+    type: table
+    name: consilens_performance_demo_table
+
+target:
+  type: clickhouse
+  name: target-clickhouse
+  connection:
+    url: jdbc:clickhouse://127.0.0.1:8123/consilens_demo
+    username: ${env.CLICKHOUSE_USER}
+    password: ${env.CLICKHOUSE_PASSWORD}
+  resource:
+    type: table
+    name: consilens_performance_demo_table
+
+comparison:
+  keys:
+    source: [record_id]
+    target: [record_id]
+  fields:
+    source:
+      - col_tinyint
+      - col_int
+      - col_decimal
+      - amount
+      - status
+      - updated_at
+    target:
+      - col_tinyint
+      - col_int
+      - col_decimal
+      - amount
+      - status
+      - updated_at
+  filters:
+    source: "record_id >= 'REC0000000006' AND record_id <= 'REC0000000999'"
+    target: "record_id >= 'REC0000000006' AND record_id <= 'REC0000000999'"
+
+strategy:
+  mode: checksum
+  algorithm: xor
+  bisectionFactor: 8
+  bisectionThreshold: 8000
+  batchSize: 1000
+
+result:
+  sinks:
+    - format: console
+      type: result

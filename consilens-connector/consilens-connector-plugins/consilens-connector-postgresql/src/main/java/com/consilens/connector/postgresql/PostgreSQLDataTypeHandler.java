@@ -36,6 +36,19 @@ public class PostgreSQLDataTypeHandler extends BaseDataTypeHandler {
         super(capabilityProvider, normalizationConfig);
     }
 
+    /**
+     * 科学计数渲染：PostgreSQL {@code to_char(v, '9.999999EEEE')}。
+     *
+     * <p>注意不能加 {@code FM}（PG 报 “EEEE is incompatible with other formats”）；
+     * 实测输出与 Java {@code %.6e} 逐字一致：{@code 1.000000e+300}、{@code -2.500000e-300}、
+     * 进位 {@code 9.9999995e10 → 1.000000e+11}。
+     */
+    @Override
+    protected String scientificFloatExpression(String quotedCol) {
+        return "TO_CHAR(" + quotedCol + ", '9.999999EEEE')";
+    }
+
+
     @Override
     public TypeDescriptor convertToTypeDescriptor(String originType) {
         if (originType == null || originType.isBlank()) {
@@ -126,7 +139,22 @@ public class PostgreSQLDataTypeHandler extends BaseDataTypeHandler {
                         .originType(originType)
                         .blobType(true)
                         .build();
-            case "BIT":
+            case "BIT": {
+                // BIT(1) 语义是布尔：按 BINARY 归一化会渲染 HEX（NULL → ''），与其它方言的
+                // 布尔/整数归一化（NULL → '0'）不一致，跨源比对全 NULL 行会误报。
+                // BIT(n>1) 仍是位串，保持 BINARY。
+                Integer bitLength = extractLength(upperType);
+                int bits = bitLength != null ? bitLength : 1;
+                if (bits <= 1) {
+                    return TypeDescriptor.builder(com.consilens.common.enums.DataType.BOOLEAN_TYPE)
+                            .originType(originType)
+                            .build();
+                }
+                return TypeDescriptor.builder(com.consilens.common.enums.DataType.BINARY_TYPE)
+                        .originType(originType)
+                        .length(bits)
+                        .build();
+            }
             case "VARBIT":
                 return TypeDescriptor.builder(com.consilens.common.enums.DataType.BINARY_TYPE)
                         .originType(originType)
@@ -337,7 +365,7 @@ public class PostgreSQLDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeInteger(String quotedCol) {
-        return "COALESCE(TRIM(CAST(" + quotedCol + " AS VARCHAR)), '0')";
+        return "COALESCE(TRIM(CAST(" + quotedCol + " AS VARCHAR)), '')";
     }
     /**
      * PostgreSQL-specific string normalization.
@@ -346,41 +374,52 @@ public class PostgreSQLDataTypeHandler extends BaseDataTypeHandler {
     @Override
     protected String normalizeString(String quotedCol) {
         // CAST CHAR to VARCHAR to remove trailing spaces, then TRIM
-        return "COALESCE(TRIM(CAST(" + quotedCol + " AS VARCHAR)), '')";
+        return "COALESCE(TRIM(CAST(" + quotedCol + " AS VARCHAR)), " + stringNullReplacement() + ")";
     }
-    
+
+    @Override
+    protected String normalizeJson(String quotedCol) {
+        // 规范 JSON 形 = 紧凑渲染（键排序 + 去掉 ": " / ", " 分隔空格），与 MySQL 的
+        // normalizeJson 完全一致；`json` 类型保留原文（键序、空格），必须经 jsonb 规范化，
+        // 否则 `{"a":1,"b":2}` 与 `{"b":2,"a":1}` 会被判为不同（设计 §2.5：JSON 键序应被抹平）。
+        //
+        // 已知限制：去空格是文本级变换——字符串值内恰含 ": " / ", " 的内容会被一并改写。
+        return "COALESCE(REPLACE(REPLACE(CAST(CAST(" + quotedCol + " AS JSONB) AS VARCHAR), ': ', ':'), ', ', ','), '')";
+    }
     /**
-     * PostgreSQL-specific decimal normalization.
-     * Use TO_CHAR to ensure decimal places with trailing zeros.
-     * This ensures consistent decimal representation across databases.
-     * Precision is configurable via normalization config.
+     * DECIMAL/DOUBLE 渲染对齐 mysql 端 REPLACE(FORMAT(...,4))：按配置精度固定小数位、
+     * 去千分位，并归一化负零。pg 的 DOUBLE 直接 CAST VARCHAR 会得到可变精度
+     * （1954.25 vs 1954.2500）导致全行误报。
+     *
+     * <p>TO_CHAR 直接作用于数值列（numeric/double precision 均有重载），不经
+     * {@code CAST(... AS DOUBLE PRECISION)}，避免 numeric 列的精度损失。
      */
+    /** 从 {@code 0000} 形态的小数位模式里数出位数。 */
+    private static int decimalDigits(String pattern) {
+        return pattern == null ? 0 : pattern.replaceAll("[^0]", "").length();
+    }
+
     @Override
     protected String normalizeDecimal(String quotedCol) {
         // Get precision from config, default to 4
         int precision = getPrecision("decimal", 4);
         // Get rounding from config, default to true (round half up)
         boolean rounding = getRounding("decimal", true);
-        
+
+        String rendered;
         if (precision == 0) {
             // Return integer format without decimal point
-            if (rounding) {
-                return "COALESCE(TRIM(CAST(ROUND(" + quotedCol + ", 0) AS VARCHAR)), '0')";
-            } else {
-                return "COALESCE(TRIM(CAST(TRUNC(" + quotedCol + ", 0) AS VARCHAR)), '0')";
-            }
-        }
-        
-        String decimalPattern = "0".repeat(precision);
-        String formatPattern = "FM999999999999990." + decimalPattern;
-        String defaultValue = "0." + decimalPattern;
-        
-        if (rounding) {
-            return "COALESCE(TO_CHAR(" + quotedCol + ", '" + formatPattern + "'), '" + defaultValue + "')";
+            String roundFunction = rounding ? "ROUND" : "TRUNC";
+            rendered = "TRIM(CAST(" + roundFunction + "(" + quotedCol + ", 0) AS VARCHAR))";
         } else {
-            // PostgreSQL TRUNC + TO_CHAR: truncate then format
-            return "COALESCE(TO_CHAR(TRUNC(" + quotedCol + ", " + precision + "), '" + formatPattern + "'), '" + defaultValue + "')";
+            String formatPattern = decimalFormatMask(precision);
+            rendered = rounding
+                    ? "TO_CHAR(" + quotedCol + ", '" + formatPattern + "')"
+                    : "TO_CHAR(TRUNC(" + quotedCol + ", " + precision + "), '" + formatPattern + "')";
         }
+        // TO_CHAR 在极小负数舍入到 0 时保留符号（'-0.0000'），而 mysql FORMAT()
+        // 丢弃符号（'0.0000'）；归一化掉负零，保证两侧渲染一致。
+        return "COALESCE(REGEXP_REPLACE(REPLACE(" + rendered + ", ',', ''), '^-(0[.]0+)$', '\\1'), '')";
     }
 
     /**
@@ -399,21 +438,20 @@ public class PostgreSQLDataTypeHandler extends BaseDataTypeHandler {
         if (precision == 0) {
             // Return integer format without decimal point
             if (rounding) {
-                return "COALESCE(TRIM(CAST(ROUND(CAST(" + quotedCol + " AS DOUBLE PRECISION), 0) AS VARCHAR)), '0')";
+                return "COALESCE(TRIM(CAST(ROUND(CAST(" + quotedCol + " AS DOUBLE PRECISION), 0) AS VARCHAR)), '')";
             } else {
-                return "COALESCE(TRIM(CAST(TRUNC(CAST(" + quotedCol + " AS DOUBLE PRECISION), 0) AS VARCHAR)), '0')";
+                return "COALESCE(TRIM(CAST(TRUNC(CAST(" + quotedCol + " AS DOUBLE PRECISION), 0) AS VARCHAR)), '')";
             }
         }
         
         String decimalPattern = "0".repeat(precision);
-        String formatPattern = "FM999999999999990." + decimalPattern;
-        String defaultValue = "0." + decimalPattern;
+        String formatPattern = decimalFormatMask(decimalDigits(decimalPattern));
         
         if (rounding) {
-            return "COALESCE(TO_CHAR(CAST(" + quotedCol + " AS DOUBLE PRECISION), '" + formatPattern + "'), '" + defaultValue + "')";
+            return "COALESCE(TO_CHAR(CAST(" + quotedCol + " AS DOUBLE PRECISION), '" + formatPattern + "'), '')";
         } else {
             // PostgreSQL TRUNC + TO_CHAR: truncate then format
-            return "COALESCE(TO_CHAR(TRUNC(CAST(" + quotedCol + " AS DOUBLE PRECISION), " + precision + "), '" + formatPattern + "'), '" + defaultValue + "')";
+            return "COALESCE(TO_CHAR(TRUNC(CAST(" + quotedCol + " AS DOUBLE PRECISION), " + precision + "), '" + formatPattern + "'), '')";
         }
     }
 
@@ -525,7 +563,12 @@ public class PostgreSQLDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeBoolean(String quotedCol) {
-        return "CASE WHEN " + quotedCol + " = TRUE THEN '1' ELSE '0' END";
+        // 用文本形态判定，同时兼容 boolean（文本 'true'/'false'）与 bit(1)（文本 '1'/'0'）：
+        // `col = TRUE` 对 bit 列会报 “operator does not exist: bit = boolean”。
+        // 对 boolean 列，输出与旧实现完全一致（true→'1'、false→'0'、NULL→'0'）。
+        return "CASE WHEN " + quotedCol + " IS NULL THEN '' "
+                + "WHEN CAST(" + quotedCol + " AS VARCHAR) IN ('1', 't', 'true', 'TRUE') "
+                + "THEN '1' ELSE '0' END";
     }
 
     private String resolvePostgreSqlTemporalFormat(String dataTypeName, String defaultFormat, String dateOnlyDefaultFormat) {

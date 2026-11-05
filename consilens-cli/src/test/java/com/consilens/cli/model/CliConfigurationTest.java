@@ -17,7 +17,6 @@ class CliConfigurationTest {
         CliConfiguration config = baseConfig();
 
         assertDoesNotThrow(config::validate);
-        assertDoesNotThrow(config::validateDatabaseConnections);
     }
 
     @Test
@@ -49,7 +48,7 @@ class CliConfigurationTest {
     void shouldRejectTableSinkWithUnsupportedDatabaseType() {
         CliConfiguration config = baseConfig();
         SinkConfig tableSink = config.getResult().getSinks().get(0);
-        tableSink.setProperties("{\"type\":\"oracle\",\"url\":\"jdbc:oracle:thin:@localhost:1521/xe\"}");
+        tableSink.setProperties("{\"type\":\"db2\",\"url\":\"jdbc:db2://localhost:50000/sample\"}");
 
         assertThrows(ValidationException.class, config::validate);
     }

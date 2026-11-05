@@ -30,9 +30,7 @@ public abstract class AbstractDatabaseDialect
         implements DatabaseDialect {
 
     @Override
-    public String getConnectorType() {
-        return "unknown";
-    }
+    public abstract String getConnectorType();
 
 
     @Override

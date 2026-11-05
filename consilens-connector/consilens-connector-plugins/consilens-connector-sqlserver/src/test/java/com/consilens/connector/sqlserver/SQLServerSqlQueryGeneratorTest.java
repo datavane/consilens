@@ -30,7 +30,8 @@ class SQLServerSqlQueryGeneratorTest {
     @Test
     void testGetLimitClauseWithoutOffset() {
         String result = generator.getLimitClause(0, 10);
-        assertEquals("", result); // SQL Server uses TOP in SELECT
+        assertEquals("OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY", result);
+        assertEquals(result, generator.getLimitClause(10));
     }
 
     @Test
@@ -64,15 +65,6 @@ class SQLServerSqlQueryGeneratorTest {
         String sql = generator.getChecksumSQL("dbo", "users", columns, Arrays.asList("id"), types, null);
         assertTrue(sql.contains("HASHBYTES"));
     }
-
-    @Test
-    void testGetFullOuterJoinSQL() {
-        List<String> joinColumns = Arrays.asList("id");
-        String sql = generator.getFullOuterJoinSQL("table1", "table2", joinColumns, null);
-
-        assertTrue(sql.contains("FULL OUTER JOIN"));
-    }
-
     @Test
     void testGetBatchInsertSQL() {
         List<String> columns = Arrays.asList("id", "name", "email");

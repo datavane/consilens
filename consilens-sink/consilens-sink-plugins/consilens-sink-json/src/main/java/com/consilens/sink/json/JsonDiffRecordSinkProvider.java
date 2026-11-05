@@ -2,6 +2,7 @@ package com.consilens.sink.json;
 
 import com.consilens.sink.api.Sink;
 import com.consilens.sink.api.SinkProvider;
+import com.consilens.sink.api.SinkTypes;
 
 public class JsonDiffRecordSinkProvider implements SinkProvider {
 
@@ -12,7 +13,7 @@ public class JsonDiffRecordSinkProvider implements SinkProvider {
 
     @Override
     public String getType() {
-        return "diff-record";
+        return SinkTypes.DIFF_RECORD;
     }
 
     @Override

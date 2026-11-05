@@ -27,6 +27,13 @@ public class SQLServerDataTypeHandler extends BaseDataTypeHandler {
         super(capabilityProvider, normalizationConfig);
     }
 
+    /** 科学计数渲染：SQL Server FORMAT 自定义格式 '0.000000E+00'（.NET 指数至少两位）。 */
+    @Override
+    protected String scientificFloatExpression(String quotedCol) {
+        return "LOWER(FORMAT(" + quotedCol + ", '0.000000E+00'))";
+    }
+
+
     @Override
     public TypeDescriptor convertToTypeDescriptor(String originType) {
         if (originType == null || originType.isBlank()) {
@@ -97,7 +104,8 @@ public class SQLServerDataTypeHandler extends BaseDataTypeHandler {
             case "DATETIME2":
                 return TypeDescriptor.builder(com.consilens.common.enums.DataType.TIMESTAMP_TYPE).originType(originType).timePrecision(extractLength(upperType)).build();
             case "DATETIMEOFFSET":
-                return TypeDescriptor.builder(com.consilens.common.enums.DataType.TIMESTAMP_TYPE).originType(originType).timePrecision(extractLength(upperType)).withTimezone(true).build();
+                return TypeDescriptor.builder(com.consilens.common.enums.DataType.TIMESTAMP_TYPE)
+                        .originType(originType).timePrecision(extractLength(upperType)).withTimezone(true).build();
             case "UNIQUEIDENTIFIER":
                 return TypeDescriptor.builder(com.consilens.common.enums.DataType.UUID_TYPE).originType(originType).build();
             case "XML":
@@ -182,7 +190,7 @@ public class SQLServerDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeString(String quotedCol) {
-        return "COALESCE(LTRIM(RTRIM(" + quotedCol + ")), '')";
+        return "COALESCE(LTRIM(RTRIM(" + quotedCol + ")), " + stringNullReplacement() + ")";
     }
 
     /**
@@ -191,7 +199,7 @@ public class SQLServerDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeInteger(String quotedCol) {
-        return "COALESCE(LTRIM(RTRIM(CAST(" + quotedCol + " AS VARCHAR(MAX)))), '0')";
+        return "COALESCE(LTRIM(RTRIM(CAST(" + quotedCol + " AS VARCHAR(MAX)))), '')";
     }
 
     /**
@@ -209,17 +217,16 @@ public class SQLServerDataTypeHandler extends BaseDataTypeHandler {
         // If precision is 0, return integer format without decimal point
         if (precision == 0) {
             String roundFunction = rounding ? "ROUND" : "FLOOR";  // SQL Server has no TRUNCATE; use FLOOR instead
-            return "COALESCE(LTRIM(RTRIM(CAST(" + roundFunction + "(" + quotedCol + ", 0) AS VARCHAR(MAX)))), '0')";
+            return "COALESCE(LTRIM(RTRIM(CAST(" + roundFunction + "(" + quotedCol + ", 0) AS VARCHAR(MAX)))), '')";
         }
 
-        String defaultValue = "0." + "0".repeat(precision);
 
         if (rounding) {
             // Round half up: apply ROUND then format
-            return "COALESCE(LTRIM(STR(ROUND(" + quotedCol + ", " + precision + "), 38, " + precision + ")), '" + defaultValue + "')";
+            return "COALESCE(LTRIM(STR(ROUND(" + quotedCol + ", " + precision + "), 38, " + precision + ")), '')";
         } else {
             // Truncate: apply FLOOR then format (SQL Server has no TRUNCATE)
-            return "COALESCE(LTRIM(STR(FLOOR(" + quotedCol + " * POWER(10, " + precision + ")) / POWER(10, " + precision + "), 38, " + precision + ")), '" + defaultValue + "')";
+            return "COALESCE(LTRIM(STR(FLOOR(" + quotedCol + " * POWER(10, " + precision + ")) / POWER(10, " + precision + "), 38, " + precision + ")), '')";
         }
     }
 
@@ -230,25 +237,24 @@ public class SQLServerDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeFloat(String quotedCol) {
-        // Get precision from config, default to 4
-        int precision = getPrecision("float", 4);
+        // Get precision from config, default to 6
+        int precision = getPrecision("float", 6);
         // Get rounding config, default to true (round half up)
         boolean rounding = getRounding("float", true);
 
         // If precision is 0, return integer format without decimal point
         if (precision == 0) {
             String roundFunction = rounding ? "ROUND" : "FLOOR";  // SQL Server has no TRUNCATE; use FLOOR instead
-            return "COALESCE(LTRIM(RTRIM(CAST(" + roundFunction + "(CAST(" + quotedCol + " AS FLOAT), 0) AS VARCHAR(MAX)))), '0')";
+            return "COALESCE(LTRIM(RTRIM(CAST(" + roundFunction + "(CAST(" + quotedCol + " AS FLOAT), 0) AS VARCHAR(MAX)))), '')";
         }
 
-        String defaultValue = "0." + "0".repeat(precision);
 
         if (rounding) {
             // Round half up: apply ROUND then format
-            return "COALESCE(LTRIM(STR(ROUND(CAST(" + quotedCol + " AS FLOAT), " + precision + "), 38, " + precision + ")), '" + defaultValue + "')";
+            return "COALESCE(LTRIM(STR(ROUND(CAST(" + quotedCol + " AS FLOAT), " + precision + "), 38, " + precision + ")), '')";
         } else {
             // Truncate: apply FLOOR then format (SQL Server has no TRUNCATE)
-            return "COALESCE(LTRIM(STR(FLOOR(CAST(" + quotedCol + " AS FLOAT) * POWER(10, " + precision + ")) / POWER(10, " + precision + "), 38, " + precision + ")), '" + defaultValue + "')";
+            return "COALESCE(LTRIM(STR(FLOOR(CAST(" + quotedCol + " AS FLOAT) * POWER(10, " + precision + ")) / POWER(10, " + precision + "), 38, " + precision + ")), '')";
         }
     }
 
@@ -266,28 +272,36 @@ public class SQLServerDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeTime(String quotedCol) {
-        return "COALESCE(FORMAT(" + quotedCol + ", '" + resolveSqlServerTemporalFormat("time",
-                "HH:mm:ss", "HH:mm:ss") + "'), '')";
+        // FORMAT(time, 'HH:mm:ss') returns NULL on SQL Server (the .NET pattern
+        // does not apply to the time type); CONVERT style 114 yields hh:mi:ss.
+        // 因此 `normalization.*.time.format` 配置对 SQL Server 不生效：能可靠渲染
+        // time 类型的只有 CONVERT 的样式码，.NET 格式串在此类型上会返回 NULL。
+        return "COALESCE(CONVERT(varchar(8), " + quotedCol + ", 114), '')";
     }
 
     @Override
     protected String normalizeTimeWithTimezone(String quotedCol) {
-        return "COALESCE(FORMAT(" + quotedCol + ", '" + resolveSqlServerTemporalFormat("time_with_timezone",
-                "HH:mm:ss", "HH:mm:ss") + "'), '')";
+        return "COALESCE(CONVERT(varchar(8), " + quotedCol + ", 114), '')";
     }
 
     /**
      * SQL Server-specific datetime normalization: YYYY-MM-DD HH:MM:SS format.
      * For DATETIME type (no timezone information):
      * - No timezone conversion needed, just format directly
+     *
+     * <p>注意：`normalization.*.datetime.timezone` 对 SQL Server 不参与换算——朴素
+     * datetime 的解释时区由会话时区决定（与其它方言一致）。此前按“是否配置时区”
+     * 切换表达式的写法会让配置与未配置得到两套结果，故移除。
      */
     @Override
     protected String normalizeDateTime(String quotedCol) {
-        String expression = quotedCol;
-        String targetTimezone = getTimezone("datetime", null);
-        if (targetTimezone != null && !targetTimezone.isBlank()) {
-            expression = "SWITCHOFFSET(" + quotedCol + ", '" + resolveSqlServerTimezone("datetime", "+00:00") + "')";
-        }
+        // Interpret the naive datetime in the server session zone and convert to
+        // the canonical UTC wall clock, matching the mysql-family
+        // CONVERT_TZ(session -> UTC) and PostgreSQL AT TIME ZONE conventions.
+        // Skipping the conversion desynchronizes SQL Server from every other
+        // dialect whose session zone is not UTC.
+        String expression = "SWITCHOFFSET(TODATETIMEOFFSET(" + quotedCol
+                + ", DATEPART(tz, SYSDATETIMEOFFSET())), '+00:00')";
         return "COALESCE(FORMAT(" + expression + ", '" + resolveSqlServerTemporalFormat("datetime",
                 "yyyy-MM-dd HH:mm:ss", "yyyy-MM-dd") + "'), '')";
     }
@@ -302,8 +316,12 @@ public class SQLServerDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeTimestamp(String quotedCol) {
-        return "COALESCE(FORMAT(SWITCHOFFSET(" + quotedCol + ", '" + resolveSqlServerTimezone("timestamp", "+00:00")
-                + "'), '" + resolveSqlServerTemporalFormat("timestamp",
+        // datetime/datetime2 map here: SWITCHOFFSET on a NAIVE datetime tags it
+        // as UTC without shifting, so interpret it in the server session zone
+        // first (same as normalizeDateTime) to reach the canonical UTC wall clock.
+        return "COALESCE(FORMAT(SWITCHOFFSET(TODATETIMEOFFSET(" + quotedCol
+                + ", DATEPART(tz, SYSDATETIMEOFFSET())), '+00:00'), '"
+                + resolveSqlServerTemporalFormat("timestamp",
                 "yyyy-MM-dd HH:mm:ss", "yyyy-MM-dd") + "'), '')";
     }
 
@@ -357,15 +375,39 @@ public class SQLServerDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeBoolean(String quotedCol) {
-        return "CASE WHEN " + quotedCol + " = 1 THEN '1' ELSE '0' END";
+        return "CASE WHEN " + quotedCol + " IS NULL THEN '' WHEN " + quotedCol + " = 1 THEN '1' ELSE '0' END";
     }
 
     /**
-     * SQL Server-specific JSON normalization: convert to NVARCHAR(MAX).
+     * SQL Server-specific UUID normalization: 统一小写。
+     *
+     * <p>{@code CAST(uniqueidentifier AS VARCHAR)} 会渲染成大写，而 MySQL/PG/CH 的文本形态是小写，
+     * 不统一会让跨源比对把每一行都判为不同（实测 mysql↔sqlserver 全表 c_uuid 误报）。
+     * CAST 必须显式给长度：{@code VARCHAR} 默认 30 会截断 36 字符的 UUID。
+     */
+    @Override
+    protected String normalizeUuid(String quotedCol) {
+        return "COALESCE(LOWER(LTRIM(RTRIM(CAST(" + quotedCol + " AS VARCHAR(36))))), '')";
+    }
+
+    /**
+     * SQL Server-specific JSON normalization: 解析后按键排序 + 紧凑序列化。
+     *
+     * <p>SQL Server 用 NVARCHAR(MAX) 存 JSON 原文，不像 MySQL/PG 的 JSON/JSONB 会在存储时
+     * 规范化键序——直接返回原文会把"仅键序不同"判成差异（设计 §2.5 要求键序被抹平，
+     * 实测 EQ_015 pk=15 误报）。这里用 OPENJSON 重建：键按名称排序、紧凑无空格，
+     * 与 MySQL 侧 {@code REPLACE(REPLACE(CAST(col AS CHAR), ': ', ':'), ', ', ',')} 同形。
+     * 仅覆盖扁平对象（数据集的 JSON 列均为对象）；数组等其它形态退化为去空白原文。
      */
     @Override
     protected String normalizeJson(String quotedCol) {
-        return "COALESCE(CAST(" + quotedCol + " AS NVARCHAR(MAX)), '')";
+        String canonical = "(SELECT '{' + STRING_AGG('\"' + [key] + '\":'"
+                + " + CASE WHEN [type] = 1 THEN '\"' + STRING_ESCAPE([value], 'json') + '\"'"
+                + " ELSE [value] END, ',') WITHIN GROUP (ORDER BY [key]) + '}'"
+                + " FROM OPENJSON(" + quotedCol + "))";
+        return "CASE WHEN " + quotedCol + " IS NULL THEN '' "
+                + "WHEN LTRIM(" + quotedCol + ") LIKE '[%' THEN COALESCE(" + canonical + ", '') "
+                + "ELSE COALESCE(LTRIM(RTRIM(" + quotedCol + ")), '') END";
     }
 
     /**
@@ -373,7 +415,7 @@ public class SQLServerDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeDefault(String quotedCol) {
-        return "COALESCE(LTRIM(RTRIM(CAST(" + quotedCol + " AS VARCHAR(MAX)))), '0')";
+        return "COALESCE(LTRIM(RTRIM(CAST(" + quotedCol + " AS VARCHAR(MAX)))), '')";
     }
 
     @Override
@@ -420,6 +462,11 @@ public class SQLServerDataTypeHandler extends BaseDataTypeHandler {
             case "smalldatetime":
             case "timestamp":
                 return DataType.TIMESTAMP;
+            case "datetimeoffset":
+                // DATETIMEOFFSET 自带偏移：归一化必须走 TIMESTAMP_WITH_TIMEZONE 分支
+                // （SWITCHOFFSET(col,'+00:00') 保持时刻）；按 TIMESTAMP 处理会被当成裸墙钟
+                // 再按会话时区解释，整体偏移 8 小时（实测 mysql↔sqlserver 的 c_timestamptz 全表误报）。
+                return DataType.TIMESTAMP_WITH_TIMEZONE;
             case "bit":
             case "boolean":
             case "bool":

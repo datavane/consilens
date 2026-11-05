@@ -30,6 +30,29 @@ public class PrestoDataTypeHandler extends BaseDataTypeHandler {
         super(capabilityProvider, normalizationConfig);
     }
 
+    /**
+     * 科学计数渲染：Presto 0.284 没有 {@code format()}/{@code printf()}（Function format not
+     * registered），改用幂运算手工构造与 Java {@code %.6e} 同形的结果（与 MySQL 族同思路）：
+     * 尾数 = |v| / 10^floor(log10|v|)，指数为负改用乘法避免下溢，进位时指数进一。
+     */
+    @Override
+    protected String scientificFloatExpression(String quotedCol) {
+        String value = "CAST(" + quotedCol + " AS DOUBLE)";
+        String e0 = "FLOOR(LOG10(ABS(" + value + ")))";
+        String mantissa = scaleByPower("ABS(" + value + ")", e0, "POWER");
+        String carry = "CASE WHEN ROUND(" + mantissa + ", 6) >= 10 THEN 1 ELSE 0 END";
+        String packed = "CASE WHEN " + carry + " = 1 THEN "
+                + scaleByPower("ABS(" + value + ")", e0 + " + 1", "POWER") + " ELSE " + mantissa + " END";
+        String exponent = e0 + " + " + carry;
+        return "CONCAT("
+                + "CASE WHEN " + value + " < 0 THEN '-' ELSE '' END, "
+                + "CAST(CAST(" + packed + " AS DECIMAL(20,6)) AS VARCHAR), 'e', "
+                + "CASE WHEN (" + exponent + ") < 0 THEN '-' ELSE '+' END, "
+                + "CASE WHEN ABS(" + exponent + ") < 10 THEN CONCAT('0', CAST(ABS(" + exponent + ") AS VARCHAR)) "
+                + "ELSE CAST(ABS(" + exponent + ") AS VARCHAR) END)";
+    }
+
+
     @Override
     public TypeDescriptor convertToTypeDescriptor(String originType) {
         if (originType == null || originType.isBlank()) {
@@ -186,7 +209,9 @@ public class PrestoDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeString(String quotedCol) {
-        return "COALESCE(TRIM(" + quotedCol + "), '')";
+        // CHAR(n) 列经 TRIM 后仍是 char 类型，presto 的 concat/ARRAY_JOIN
+        // 不接受 char；统一 CAST 成 varchar。
+        return "COALESCE(TRIM(CAST(" + quotedCol + " AS VARCHAR)), " + stringNullReplacement() + ")";
     }
 
     /**
@@ -195,13 +220,15 @@ public class PrestoDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeInteger(String quotedCol) {
-        return "COALESCE(TRIM(CAST(" + quotedCol + " AS VARCHAR)), '0')";
+        return "COALESCE(TRIM(CAST(" + quotedCol + " AS VARCHAR)), '')";
     }
 
     /**
      * Presto-specific decimal normalization with configurable decimal places.
-     * Use FORMAT to ensure specified decimal places with trailing zeros.
-     * This ensures consistent decimal representation across databases.
+     * Uses format() with a fixed number of decimal places so trailing zeros are
+     * preserved, matching MySQL's FORMAT(ROUND(col, N), N) output. CAST(ROUND(x, p)
+     * AS VARCHAR) would drop trailing zeros (e.g. 1.5 instead of 1.5000) and break
+     * cross-database checksums for DOUBLE/FLOAT columns.
      */
     @Override
     protected String normalizeDecimal(String quotedCol) {
@@ -213,17 +240,14 @@ public class PrestoDataTypeHandler extends BaseDataTypeHandler {
         // If precision is 0, return integer format without decimal point
         if (precision == 0) {
             String roundFunction = rounding ? "ROUND" : "TRUNCATE";
-            return "COALESCE(TRIM(CAST(" + roundFunction + "(" + quotedCol + ", 0) AS VARCHAR)), '0')";
+            return "COALESCE(TRIM(CAST(" + roundFunction + "(" + quotedCol + ", 0) AS VARCHAR)), '')";
         }
 
-        String defaultValue = "0." + "0".repeat(precision);
 
         if (rounding) {
-            // Round: apply ROUND then format
-            return "COALESCE(FORMAT('%." + precision + "f', ROUND(" + quotedCol + ", " + precision + ")), '" + defaultValue + "')";
+            return fixedDecimalCast("ROUND(" + quotedCol + ", " + precision + ")", precision);
         } else {
-            // Truncate: apply TRUNCATE then format
-            return "COALESCE(FORMAT('%." + precision + "f', TRUNCATE(" + quotedCol + ", " + precision + ")), '" + defaultValue + "')";
+            return fixedDecimalCast("TRUNCATE(" + quotedCol + ", " + precision + ")", precision);
         }
     }
 
@@ -231,29 +255,34 @@ public class PrestoDataTypeHandler extends BaseDataTypeHandler {
      * Presto-specific float normalization with configurable decimal places.
      * CRITICAL: FLOAT/REAL is single-precision and may have precision issues.
      * Cast to DOUBLE first to ensure consistent formatting.
+     * Uses format() with a fixed number of decimal places so trailing zeros are
+     * preserved, matching MySQL's FORMAT output.
      */
     @Override
     protected String normalizeFloat(String quotedCol) {
-        // Get precision from config, default to 4
-        int precision = getPrecision("float", 4);
+        // Get precision from config, default to 6
+        int precision = getPrecision("float", 6);
         // Get rounding config, default to true (round half up)
         boolean rounding = getRounding("float", true);
 
         // If precision is 0, return integer format without decimal point
         if (precision == 0) {
             String roundFunction = rounding ? "ROUND" : "TRUNCATE";
-            return "COALESCE(TRIM(CAST(" + roundFunction + "(CAST(" + quotedCol + " AS DOUBLE), 0) AS VARCHAR)), '0')";
+            return "COALESCE(TRIM(CAST(" + roundFunction + "(CAST(" + quotedCol + " AS DOUBLE), 0) AS VARCHAR)), '')";
         }
 
-        String defaultValue = "0." + "0".repeat(precision);
 
         if (rounding) {
-            // Round: apply ROUND then format
-            return "COALESCE(FORMAT('%." + precision + "f', ROUND(CAST(" + quotedCol + " AS DOUBLE), " + precision + ")), '" + defaultValue + "')";
+            return fixedDecimalCast("ROUND(CAST(" + quotedCol + " AS DOUBLE), " + precision + ")",
+                    precision);
         } else {
-            // Truncate: apply TRUNCATE then format
-            return "COALESCE(FORMAT('%." + precision + "f', TRUNCATE(CAST(" + quotedCol + " AS DOUBLE), " + precision + ")), '" + defaultValue + "')";
+            return fixedDecimalCast("TRUNCATE(CAST(" + quotedCol + " AS DOUBLE), " + precision + ")",
+                    precision);
         }
+    }
+
+    private String fixedDecimalCast(String expression, int precision) {
+        return "COALESCE(CAST(CAST(" + expression + " AS DECIMAL(38, " + precision + ")) AS VARCHAR), '')";
     }
 
     /**
@@ -289,7 +318,10 @@ public class PrestoDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeDateTime(String quotedCol) {
-        return "COALESCE(FORMAT_DATETIME(" + quotedCol + ", '" + resolvePrestoTemporalFormat("datetime",
+        // AT_TIMEZONE canonicalizes to UTC wall clock (session zone = JVM zone),
+        // matching the mysql-family CONVERT_TZ(session -> UTC) convention
+        return "COALESCE(FORMAT_DATETIME(AT_TIMEZONE(" + quotedCol + ", '"
+                + resolvePrestoTimezone("datetime", "UTC") + "'), '" + resolvePrestoTemporalFormat("datetime",
                 "yyyy-MM-dd HH:mm:ss", "yyyy-MM-dd") + "'), '')";
     }
 
@@ -346,7 +378,7 @@ public class PrestoDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeBoolean(String quotedCol) {
-        return "CASE WHEN " + quotedCol + " = TRUE THEN '1' ELSE '0' END";
+        return "CASE WHEN " + quotedCol + " IS NULL THEN '' WHEN " + quotedCol + " = TRUE THEN '1' ELSE '0' END";
     }
 
     /**
@@ -362,7 +394,7 @@ public class PrestoDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeJson(String quotedCol) {
-        return "COALESCE(CAST(" + quotedCol + " AS VARCHAR), '')";
+        return "COALESCE(json_format(" + quotedCol + "), '')";
     }
 
     /**
@@ -370,7 +402,7 @@ public class PrestoDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeDefault(String quotedCol) {
-        return "COALESCE(TRIM(CAST(" + quotedCol + " AS VARCHAR)), '0')";
+        return "COALESCE(TRIM(CAST(" + quotedCol + " AS VARCHAR)), '')";
     }
 
     @Override

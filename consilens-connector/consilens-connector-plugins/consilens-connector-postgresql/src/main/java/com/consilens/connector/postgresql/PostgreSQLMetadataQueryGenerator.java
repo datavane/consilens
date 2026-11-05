@@ -45,7 +45,12 @@ public class PostgreSQLMetadataQueryGenerator extends BaseMetadataQueryGenerator
         return "SELECT kcu.column_name, kcu.ordinal_position " +
                 "FROM information_schema.key_column_usage kcu " +
                 "JOIN information_schema.table_constraints tc " +
+                // 约束名只在 schema 内唯一：只按名字 join，跨 schema 的同名主键会把两边的列混在一起
+                // （结果里出现重复列，键顺序与唯一性判断随之失真）
                 "ON kcu.constraint_name = tc.constraint_name " +
+                "AND kcu.constraint_schema = tc.constraint_schema " +
+                "AND kcu.table_schema = tc.table_schema " +
+                "AND kcu.table_name = tc.table_name " +
                 "WHERE tc.constraint_type = 'PRIMARY KEY' " +
                 "AND kcu.table_schema = '" + escapeString(schemaName) + "' " +
                 "AND kcu.table_name = '" + escapeString(tableName) + "' " +
@@ -67,6 +72,14 @@ public class PostgreSQLMetadataQueryGenerator extends BaseMetadataQueryGenerator
         return "SELECT schema_name FROM information_schema.schemata " +
                 "WHERE schema_name NOT IN ('information_schema', 'pg_catalog') " +
                 "ORDER BY schema_name";
+    }
+
+    @Override
+    public String getDatabaseListSQL() {
+        return "SELECT datname FROM pg_database " +
+                "WHERE datistemplate = false " +
+                "AND has_database_privilege(datname, 'CONNECT') " +
+                "ORDER BY datname";
     }
 
     @Override
@@ -134,12 +147,13 @@ public class PostgreSQLMetadataQueryGenerator extends BaseMetadataQueryGenerator
     }
 
     /**
-     * Escape string values to prevent SQL injection.
+     * PostgreSQL 默认 standard_conforming_strings=on：反斜杠不是转义符，
+     * 只把单引号翻倍即可；再翻倍反斜杠会改变实际匹配的名称。
      */
     private String escapeString(String value) {
         if (value == null) {
             return "";
         }
-        return value.replace("\\", "\\\\").replace("'", "''");
+        return value.replace("'", "''");
     }
 }

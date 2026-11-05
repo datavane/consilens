@@ -21,7 +21,7 @@ public final class CachingFactory<K, T> {
         return cache.computeIfAbsent(key, creator);
     }
 
-    public T create(K key) {
+    T create(K key) {
         return creator.apply(key);
     }
 
@@ -37,19 +37,7 @@ public final class CachingFactory<K, T> {
         return cache.get(key);
     }
 
-    public boolean isLoaded(K key) {
-        return cache.containsKey(key);
-    }
-
     public void clear() {
         cache.clear();
-    }
-
-    public void evict(K key) {
-        cache.remove(key);
-    }
-
-    public int cacheSize() {
-        return cache.size();
     }
 }

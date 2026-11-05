@@ -1,0 +1,126 @@
+# PostgreSQL 同库 join 比对配置
+# 适用于同一 JDBC URL 下的迁移验证，也覆盖 readOptions / extraColumns /
+# normalization（所有规则参数）/ result.failOnSinkError / sink.enabled 等显式配置项
+#
+# 前置条件：
+#   1. PostgreSQL 中已加载 load-postgresql.sql（含 orders 和 orders_backup 表）
+
+source:
+  type: postgresql
+  name: source-postgresql
+  connection:
+    url: jdbc:postgresql://127.0.0.1:5432/consilens_demo?currentSchema=public
+    username: ${env.PG_USER}
+    password: ${env.PG_PASSWORD}
+  resource:
+    type: table
+    name: orders
+  readOptions:
+    consistency: snapshot
+    batchSize: 500
+    fetchSize: 1000
+    useCursorFetch: true
+
+target:
+  type: postgresql
+  name: target-postgresql
+  connection:
+    url: jdbc:postgresql://127.0.0.1:5432/consilens_demo?currentSchema=public
+    username: ${env.PG_USER}
+    password: ${env.PG_PASSWORD}
+  resource:
+    type: table
+    name: orders_backup
+  readOptions:
+    consistency: snapshot
+    batchSize: 500
+    fetchSize: 1000
+    useCursorFetch: true
+
+comparison:
+  keys:
+    source:
+      - order_id
+    target:
+      - order_id
+
+  fields:
+    source:
+      - customer_id
+      - amount
+      - status
+    target:
+      - customer_id
+      - amount
+      - status
+
+  extraColumns:
+    - created_at
+
+  filters:
+    source: "created_at >= '2025-01-01'"
+    target: "created_at >= '2025-01-01'"
+
+strategy:
+  # join 要求 source / target 指向同一个 JDBC URL
+  mode: join
+  algorithm: concat
+  bisectionFactor: 4
+  bisectionThreshold: 10000
+  batchSize: 500
+  maxDifferences: 5000
+
+normalization:
+  global:
+    decimal:
+      precision: 2
+      rounding: true
+    float:
+      precision: 4
+      rounding: false
+    date:
+      format: yyyy-MM-dd
+      comparisonMode: DATE_ONLY
+    time:
+      format: HH:mm:ss
+    datetime:
+      format: yyyy-MM-dd HH:mm:ss
+      timezone: Asia/Shanghai
+      comparisonMode: "TRUNCATE_TO_SECOND"
+    timestamp:
+      format: yyyy-MM-dd HH:mm:ss
+      timezone: Asia/Shanghai
+      comparisonMode: "TRUNCATE_TO_SECOND"
+    binary:
+      encoding: hex
+      uppercase: true
+    boolean:
+      trueValue: "Y"
+      falseValue: "N"
+      nullValue: "<BOOL_NULL>"
+  source:
+    varchar:
+      nullValue: "<SRC_NULL>"
+  target:
+    varchar:
+      nullValue: "<TGT_NULL>"
+
+result:
+  failOnSinkError: false
+  sinks:
+    - format: console
+      type: result
+    - format: csv
+      type: diff-record
+      enabled: true
+      properties:
+        path: ./output/pg-orders-diff.csv
+        delimiter: ","
+        includeHeader: true
+        mergeDefaults: true
+        columns:
+          - name: env
+            value: staging
+    - format: console
+      type: result
+      enabled: false

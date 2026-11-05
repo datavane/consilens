@@ -28,13 +28,16 @@ class SQLServerDataTypeHandlerTest {
     @Test
     void testNormalizeColumn_Int() {
         String result = handler.normalizeColumn("amount", DataType.INTEGER);
-        assertEquals("COALESCE(LTRIM(RTRIM(CAST([amount] AS VARCHAR(MAX)))), '0')", result);
+        // NULL 哨兵统一为空串（与其它方言一致）
+        assertEquals("COALESCE(LTRIM(RTRIM(CAST([amount] AS VARCHAR(MAX)))), '')", result);
     }
 
     @Test
     void testNormalizeColumn_Timestamp() {
         String result = handler.normalizeColumn("created_at", DataType.DATETIME);
-        assertEquals("COALESCE(FORMAT([created_at], 'yyyy-MM-dd HH:mm:ss'), '')", result);
+        // 朴素 datetime 按会话时区解释并换算到 UTC 墙钟（与 mysql/pg 口径一致）
+        assertEquals("COALESCE(FORMAT(SWITCHOFFSET(TODATETIMEOFFSET([created_at], "
+                + "DATEPART(tz, SYSDATETIMEOFFSET())), '+00:00'), 'yyyy-MM-dd HH:mm:ss'), '')", result);
     }
 
     @Test
@@ -46,8 +49,9 @@ class SQLServerDataTypeHandlerTest {
 
         String result = handler.normalizeColumn("created_at", DataType.DATETIME);
 
-        assertEquals("COALESCE(FORMAT(SWITCHOFFSET([created_at], '+08:00'), 'yyyy/MM/dd HH:mm:ss'), '')",
-                result);
+        // 配置的格式串生效；时区仍由会话时区决定（配置时不改变换算口径）
+        assertEquals("COALESCE(FORMAT(SWITCHOFFSET(TODATETIMEOFFSET([created_at], "
+                + "DATEPART(tz, SYSDATETIMEOFFSET())), '+00:00'), 'yyyy/MM/dd HH:mm:ss'), '')", result);
     }
 
     @Test

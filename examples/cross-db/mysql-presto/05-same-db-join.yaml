@@ -1,0 +1,74 @@
+# Presto 同库 JOIN 比对配置
+# 目标：测试同一数据库内两张表的 JOIN 比对
+
+source:
+  type: presto
+  connection:
+    url: jdbc:presto://127.0.0.1:8085/mysql/mydb_target
+    username: ${env.PRESTO_USER}
+    password: ${env.PRESTO_PASSWORD}
+  resource:
+    type: table
+    name: orders
+  readOptions:
+    consistency: snapshot
+    batchSize: 500
+    fetchSize: 1000
+
+target:
+  type: presto
+  connection:
+    url: jdbc:presto://127.0.0.1:8085/mysql/mydb_target
+    username: ${env.PRESTO_USER}
+    password: ${env.PRESTO_PASSWORD}
+  resource:
+    type: table
+    name: orders_backup
+  readOptions:
+    consistency: snapshot
+    batchSize: 500
+    fetchSize: 1000
+
+comparison:
+  keys:
+    source: [order_id]
+    target: [order_id]
+  fields:
+    source: [customer_id, amount, status, created_at]
+    target: [customer_id, amount, status, created_at]
+
+strategy:
+  mode: join
+  localCompare:
+    mode: row-hash
+  maxDifferences: 10000
+
+normalization:
+  global:
+    decimal:
+      precision: 4
+      rounding: true
+    float:
+      precision: 6
+      rounding: true
+    date:
+      format: yyyy-MM-dd
+    time:
+      format: HH:mm:ss
+    datetime:
+      format: yyyy-MM-dd HH:mm:ss
+      timezone: Asia/Shanghai
+    timestamp:
+      format: yyyy-MM-dd HH:mm:ss
+      timezone: Asia/Shanghai
+
+result:
+  sinks:
+    - format: console
+      type: result
+    - format: csv
+      type: diff-record
+      properties: |
+        {
+          "path": "./output/presto-orders-diff.csv"
+        }

@@ -1,5 +1,6 @@
 package com.consilens.connector.trino;
 
+import com.consilens.connector.api.ConnectorTypes;
 import com.consilens.connector.api.*;
 import com.consilens.conncetor.base.AbstractDatabaseDialect;
 
@@ -33,7 +34,30 @@ public class TrinoDatabaseDialect extends AbstractDatabaseDialect {
 
     @Override
     public String getConnectorType() {
-        return "trino";
+        return ConnectorTypes.TRINO;
+    }
+
+    @Override
+    public String getJdbcDriverClassName() {
+        return "io.trino.jdbc.TrinoDriver";
+    }
+
+    @Override
+    public int getDefaultPort() {
+        return 8080;
+    }
+
+    @Override
+    public String buildJdbcUrl(Map<String, Object> params) {
+        String host = String.valueOf(params.get("host"));
+        int port = params.get("port") != null ? ((Number) params.get("port")).intValue() : getDefaultPort();
+        String database = params.get("database") != null ? String.valueOf(params.get("database")) : "";
+        return "jdbc:trino://" + host + ":" + port + "/" + database;
+    }
+
+    @Override
+    public DataSourceConfigBuilder getDataSourceConfigBuilder() {
+        return new TrinoDataSourceConfigBuilder();
     }
 
     @Override

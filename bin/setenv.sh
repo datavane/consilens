@@ -22,9 +22,10 @@ if [ -z "$JAVA_OPTS" ]; then
     # Server mode for better performance
     JAVA_OPTS="-server"
     
-    # Heap memory settings (8GB)
-    # Adjust these values based on your available memory and workload
-    JAVA_OPTS="$JAVA_OPTS -Xmx8g -Xms8g"
+    # Heap memory settings (4GB max, small initial heap for short CLI runs).
+    # Raise -Xmx for very large comparisons; a fixed large -Xms can prevent the
+    # JVM from starting in CI containers with tight memory limits.
+    JAVA_OPTS="$JAVA_OPTS -Xmx4g -Xms256m"
     
     # Garbage Collection settings
     # Using G1GC for better performance with large heaps
@@ -47,7 +48,6 @@ if [ -z "$JAVA_OPTS" ]; then
     
     # Performance tuning
     JAVA_OPTS="$JAVA_OPTS -XX:+UseStringDeduplication"
-    JAVA_OPTS="$JAVA_OPTS -XX:+OptimizeStringConcat"
 fi
 
 #
@@ -99,6 +99,11 @@ JAVA_OPTS="$JAVA_OPTS -Djava.net.useSystemProxies=false"
 # The launcher script adds conf directory to classpath, so log4j2.xml
 # will be automatically discovered. You can override it here if needed.
 # JAVA_OPTS="$JAVA_OPTS -Dlog4j.configurationFile=${APP_HOME}/conf/log4j2.xml"
+
+# Examples directory
+# By default the launcher uses $APP_HOME/examples (sibling of bin/).
+# Override here to load templates from a custom location.
+# export CONSILENS_EXAMPLES_DIR="/path/to/your/examples"
 
 # Export JAVA_OPTS so it's available to the launcher script
 export JAVA_OPTS

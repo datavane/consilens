@@ -38,12 +38,46 @@ public interface DataTypeHandler extends TypeConverter {
     String normalizeColumn(String columnName, DataType dataType);
 
     /**
+     * 用**已成形的列表达式**（可带表别名/引号）构造归一化表达式，不做任何额外引用包装。
+     *
+     * <p>{@link #normalizeColumn} 会把入参当裸列名自行加引号，join 等带别名场景必须用本方法，
+     * 否则会出现 `t1.`col`` 这类被重复引用的非法 SQL。
+     *
+     * <p>默认实现抛出 {@link UnsupportedOperationException}（fail-fast）：仅实现旧接口
+     * {@link #normalizeColumn} 的第三方 handler 若静默回退为原表达式，会产出未归一化的
+     * join 谓词（比较口径与 checksum 不一致）。实现类必须覆盖本方法，或改为继承
+     * {@code BaseDataTypeHandler}（其默认实现委托给 {@link #normalizeColumn}）。
+     */
+    default String normalizeExpression(String columnExpression, DataType dataType) {
+        throw new UnsupportedOperationException(
+                getClass().getSimpleName() + " does not implement normalizeExpression; "
+                        + "override it (or extend BaseDataTypeHandler) to normalize join predicates");
+    }
+
+    /**
      * Convert source data type to internal DataType enum.
      *
      * @param sourceType the source data type string
      * @return the corresponding DataType enum
      */
     DataType convertToDataType(String sourceType);
+
+    /**
+     * Normalize a value into the representation used for in-memory comparison.
+     *
+     * <p>Most dialects return the JDBC value unchanged. Dialects whose driver
+     * renders a logical type differently from its peers override this to map it
+     * onto the common representation (e.g. MySQL YEAR arrives as
+     * {@link java.sql.Date} while PostgreSQL exposes it as an integer).
+     *
+     * @param value    value read from the database
+     * @param dataType logical column type, or {@link DataType#UNKNOWN} when unavailable
+     * @return value in comparison form
+     */
+    default Object normalizeValueForComparison(Object value, DataType dataType) {
+        return value;
+    }
+
 
     @Override
     TypeDescriptor convertToTypeDescriptor(String originType);

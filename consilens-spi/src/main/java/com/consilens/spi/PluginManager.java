@@ -1,7 +1,5 @@
 package com.consilens.spi;
 
-import java.util.Arrays;
-import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -38,15 +36,6 @@ public final class PluginManager<K, P, T> {
         return new PluginManager<>(registry, factory, configuredCreator);
     }
 
-    @SafeVarargs
-    public static <K, P, T> PluginManager<K, P, T> of(Function<P, K> keyExtractor,
-                                                      Function<P, T> singletonCreator,
-                                                      BiFunction<P, Map<String, ?>, T> configuredCreator,
-                                                      P... providers) {
-        KeyedRegistry<K, P> registry = KeyedRegistry.from(Arrays.asList(providers), keyExtractor, "test");
-        return from(registry, singletonCreator, configuredCreator);
-    }
-
     public T get(K key) {
         return factory.get(key);
     }
@@ -55,11 +44,22 @@ public final class PluginManager<K, P, T> {
         return factory.create(key);
     }
 
+    /**
+     * Creates an uncached instance for the supplied configuration. Callers own the
+     * returned instance and must close it when the implementation is closeable.
+     */
     public T create(K key, Map<String, ?> config) {
         if (config == null || config.isEmpty()) {
             return get(key);
         }
-        return configuredCreator.apply(registry.get(key), config);
+        // 先取出 provider：未知 key 应保持 ProviderNotFoundException（与 get() 一致），
+        // 不能被下面的配置创建异常包装成 IllegalStateException。
+        P provider = registry.get(key);
+        try {
+            return configuredCreator.apply(provider, config);
+        } catch (RuntimeException e) {
+            throw new IllegalStateException("Failed to create configured plugin for key " + key, e);
+        }
     }
 
     public T getIfLoaded(K key) {
@@ -70,20 +70,8 @@ public final class PluginManager<K, P, T> {
         return registry.supports(key);
     }
 
-    public P getProvider(K key) {
-        return registry.get(key);
-    }
-
-    public P findProvider(K key) {
-        return registry.find(key);
-    }
-
     public Set<K> getSupportedKeys() {
         return registry.getSupportedKeys();
-    }
-
-    public Collection<P> getSupportedProviders() {
-        return registry.providers();
     }
 
     public Set<K> getLoadedKeys() {
@@ -96,9 +84,5 @@ public final class PluginManager<K, P, T> {
 
     public void clearCache() {
         factory.clear();
-    }
-
-    public void evict(K key) {
-        factory.evict(key);
     }
 }

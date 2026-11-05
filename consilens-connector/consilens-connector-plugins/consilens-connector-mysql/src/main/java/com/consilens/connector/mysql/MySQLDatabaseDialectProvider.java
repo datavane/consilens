@@ -1,5 +1,6 @@
 package com.consilens.connector.mysql;
 
+import com.consilens.connector.api.ConnectorTypes;
 import com.consilens.connector.api.DatabaseDialect;
 import com.consilens.connector.api.DatabaseDialectProvider;
 
@@ -9,7 +10,17 @@ public class MySQLDatabaseDialectProvider implements DatabaseDialectProvider {
 
     @Override
     public String getConnectorType() {
-        return "mysql";
+        return ConnectorTypes.MYSQL;
+    }
+
+    @Override
+    public boolean supportsJdbcUrl(String jdbcUrl) {
+        return jdbcUrl.contains("mysql");
+    }
+
+    @Override
+    public int getJdbcUrlMatchPriority() {
+        return 40;
     }
 
     @Override

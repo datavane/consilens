@@ -1,0 +1,2 @@
+com.consilens.sink.jsonl.JsonlDiffRecordSinkProvider
+com.consilens.sink.jsonl.JsonlResultSinkProvider

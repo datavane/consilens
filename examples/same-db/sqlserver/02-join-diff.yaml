@@ -1,0 +1,46 @@
+# SQL Server 同库 join 差异比对配置
+# 目标：orders vs orders_backup，覆盖 TARGET_MISSING + MISMATCH。基线：total=2。
+
+source:
+  type: sqlserver
+  name: source-SQL Server
+  connection:
+    url: jdbc:sqlserver://127.0.0.1:1433;databaseName=consilens_demo;sendStringParametersAsUnicode=true;encrypt=false
+    username: ${env.SQLSERVER_USER}
+    password: ${env.SQLSERVER_PASSWORD}
+  resource:
+    type: table
+    name: orders
+
+target:
+  type: sqlserver
+  name: target-SQL Server
+  connection:
+    url: jdbc:sqlserver://127.0.0.1:1433;databaseName=consilens_demo;sendStringParametersAsUnicode=true;encrypt=false
+    username: ${env.SQLSERVER_USER}
+    password: ${env.SQLSERVER_PASSWORD}
+  resource:
+    type: table
+    name: orders_backup
+
+comparison:
+  keys:
+    source: [order_id]
+    target: [order_id]
+  fields:
+    source: [customer_id, amount, status, created_at]
+    target: [customer_id, amount, status, created_at]
+
+strategy:
+  mode: join
+  algorithm: concat
+  bisectionFactor: 4
+  bisectionThreshold: 5000
+  batchSize: 500
+  localCompare:
+    mode: row-hash
+
+result:
+  sinks:
+    - format: console
+      type: result

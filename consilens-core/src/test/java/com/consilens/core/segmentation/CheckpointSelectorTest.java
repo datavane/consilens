@@ -14,7 +14,7 @@ class CheckpointSelectorTest {
         CheckpointSelector selector = new CheckpointSelector(4, 100);
         KeyVector value = new KeyVector(10);
 
-        List<KeyVector> checkpoints = selector.chooseCheckpoints(value, value, 4);
+        List<KeyVector> checkpoints = selector.chooseCheckpoints(value, value, 4, false);
 
         assertEquals(List.of(value, value), checkpoints);
     }
@@ -24,6 +24,6 @@ class CheckpointSelectorTest {
         CheckpointSelector selector = new CheckpointSelector(4, 100);
 
         assertThrows(IllegalArgumentException.class,
-                () -> selector.chooseCheckpoints(new KeyVector(10), new KeyVector(1), 4));
+                () -> selector.chooseCheckpoints(new KeyVector(10), new KeyVector(1), 4, false));
     }
 }

@@ -1,8 +1,12 @@
 package com.consilens.cli;
 
-import com.consilens.cli.command.AiCommand;
 import com.consilens.cli.command.ConfigCommand;
+import com.consilens.cli.command.ConnectorCommand;
+import com.consilens.cli.command.ContractCommand;
 import com.consilens.cli.command.DiffCommand;
+import com.consilens.cli.command.MetricsCommand;
+import com.consilens.cli.command.SubmitCommand;
+import com.consilens.cli.command.VerifyCommand;
 
 import lombok.extern.slf4j.Slf4j;
 import picocli.CommandLine;
@@ -16,7 +20,11 @@ import picocli.CommandLine.Command;
  * <ul>
  *   <li>{@code diff} - Perform data comparison between databases</li>
  *   <li>{@code config} - Configuration management (generate, validate)</li>
- *   <li>{@code ai} - AI-assisted configuration and explanation</li>
+ *   <li>{@code verify} - Run a comparison and evaluate a CI gate policy</li>
+ *   <li>{@code contract} - Compare ODCS/dbt data contracts</li>
+ *   <li>{@code metrics} - Compare aggregate metrics from a config</li>
+ *   <li>{@code connector} - Validate connector implementations</li>
+ *   <li>{@code submit} - Submit a comparison to an execution backend</li>
  * </ul>
  */
 @Slf4j
@@ -28,7 +36,11 @@ import picocli.CommandLine.Command;
 	    subcommands = {
 	        DiffCommand.class,
 	        ConfigCommand.class,
-	        AiCommand.class
+	        VerifyCommand.class,
+	        ContractCommand.class,
+	        MetricsCommand.class,
+	        ConnectorCommand.class,
+	        SubmitCommand.class
 	    }
 	)
 public class ConsilensCliApplication implements Runnable {

@@ -37,4 +37,6 @@ public class CompareRequest {
     private CompareStrategyPreference strategyPreference;
 
     private CompareExecutionOptions executionOptions;
+
+    private ClusterExecutionSpec clusterExecutionSpec;
 }

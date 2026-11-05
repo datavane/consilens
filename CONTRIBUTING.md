@@ -12,14 +12,15 @@
 
 ```bash
 # 克隆仓库
-git clone https://github.com/NoeticLens/consilens.git
+git clone https://github.com/datavane/consilens.git
 cd consilens
 
 # 构建项目
-mvn clean package -DskipTests
+./mvnw -B clean package
 
-# 运行测试
-mvn test
+# 版本与文档链接检查
+python3 scripts/release/check-pom-versions.py
+python3 scripts/check-doc-links.py
 ```
 
 ## 项目结构

@@ -1,0 +1,117 @@
+spring:
+  main:
+    banner-mode: off
+  application:
+    name: consilens-server
+  profiles:
+    # 默认使用本机 mysql（localhost:3306，见下方 mysql profile），而非内嵌 H2
+    default: mysql
+  lifecycle:
+    timeout-per-shutdown-phase: 30s
+
+mybatis-plus:
+  type-enums-package: com.consilens.server.domain.enums
+
+server:
+  port: 16789
+  shutdown: graceful
+
+management:
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      group:
+        readiness:
+          # 数据库不可用时 readiness 应为 DOWN，避免继续接收新请求；liveness 保持 UP，
+          # 以免因数据库短暂抖动触发容器重启。
+          include: readinessState,db
+  health:
+    livenessstate:
+      enabled: true
+    readinessstate:
+      enabled: true
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+consilens:
+  server:
+    datasource:
+      # Base64 编码的 32 字节 AES 密钥。默认的"开发密钥"只允许在 local/dev/test profile 下使用
+      # （启动时会打印 WARN）；其它 profile 下若仍是开发密钥，服务会拒绝启动。
+      # 生产必须通过 CONSILENS_ENCRYPTION_KEY 覆盖并轮换（更换后已保存的数据源密码将无法解密，
+      # 需要在页面上重新保存各数据源密码）。
+      encryption-key: ${CONSILENS_ENCRYPTION_KEY:qL7vN2pX8sKd4Rm9TcW1yHb6Fj3Ge5UaZx0Oi8VbAwM=}
+    node:
+      node-key:
+      heartbeat-interval-seconds: 2
+      expire-seconds: 30
+    scheduler:
+      enabled: true
+      command-poll-interval-ms: 1000
+      claim-lease-seconds: 15
+      execute-threads: 2
+      execute-queue-capacity: 1024
+      recovery-batch-size: 64
+      max-retry-count: 3
+    artifact:
+      storage-type: local-file
+      local-base-dir: ./.consilens-server/artifacts
+      max-content-bytes: 52428800
+      diff-sample-rows: 1000
+    run-log:
+      # 每个运行实例一个 <instanceKey>.log，供实例详情页“运行日志”Tab 读取
+      enabled: true
+      dir: ./.consilens-server/logs
+    database:
+      allow-embedded: false
+      time-zone:
+    api:
+      max-request-body-bytes: 10485760
+
+---
+spring:
+  config:
+    activate:
+      on-profile: local
+  datasource:
+    url: jdbc:h2:mem:consilens_server;MODE=MySQL;DB_CLOSE_DELAY=-1;DATABASE_TO_UPPER=false
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+  sql:
+    init:
+      mode: always
+
+consilens:
+  server:
+    database:
+      allow-embedded: true
+    security:
+      enabled: false
+
+---
+---
+spring:
+  config:
+    activate:
+      on-profile: mysql
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://localhost:3306/consilens?useUnicode=true&characterEncoding=UTF-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+    username: ${CONSILENS_DB_USERNAME:root}
+    # 口令通过环境变量注入；仓库中不保存真实凭据
+    password: ${CONSILENS_DB_PASSWORD:}
+  quartz:
+    properties:
+      org.quartz.jobStore.driverDelegateClass: org.quartz.impl.jdbcjobstore.StdJDBCDelegate
+
+consilens:
+  server:
+    database:
+      allow-embedded: false
+    security:
+      enabled: false
+      api-key:

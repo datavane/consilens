@@ -1,0 +1,42 @@
+# 本地 CSV 文件 vs CSV 文件
+# 文件数据源复用 streaming 有序合并计划：两侧按 key 排序后逐行比较。
+source:
+  type: file
+  name: source-csv
+  resource:
+    type: file
+    name: ./examples/files/data/source.csv
+    format: csv
+    hasHeader: true
+    delimiter: ","
+
+target:
+  type: file
+  name: target-csv
+  resource:
+    type: file
+    name: ./examples/files/data/target.csv
+    format: csv
+    hasHeader: true
+    delimiter: ","
+
+comparison:
+  keys:
+    source: [id]
+    target: [id]
+  fields:
+    source: [name, amount]
+    target: [name, amount]
+
+strategy:
+  # 文件源没有 pushdown 能力，planner 会自动落到 streaming merge
+  mode: checksum
+  algorithm: concat
+  bisectionFactor: 4
+  bisectionThreshold: 5000
+  batchSize: 500
+
+result:
+  sinks:
+    - format: console
+      type: result

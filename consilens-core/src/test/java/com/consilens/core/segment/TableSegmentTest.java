@@ -1,11 +1,20 @@
 package com.consilens.core.segment;
 
+import com.consilens.connector.api.DatabaseDialect;
+import com.consilens.core.database.adpter.DatabaseAdapter;
+import com.consilens.connector.api.model.ColumnInfo;
+import com.consilens.connector.api.model.DataType;
+import com.consilens.connector.api.model.TableSchema;
 import com.consilens.connector.api.model.TablePath;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
+import java.time.LocalDate;
+import java.util.Collections;
 import java.util.Arrays;
 import java.util.List;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -195,8 +204,226 @@ public class TableSegmentTest {
 
         String whereClause = segment.buildWhereClause();
 
-        assertTrue(whereClause.contains("(biz_date > '2026-05-01' OR (biz_date = '2026-05-01' AND status >= 'active'))"));
-        assertTrue(whereClause.contains("(biz_date < '2026-05-01' OR (biz_date = '2026-05-01' AND status <= 'pending'))"));
+        // Date-looking strings are emitted as ANSI literals so Presto/Trino strict
+        // type checking accepts the comparison.
+        assertTrue(whereClause.contains("(biz_date > DATE '2026-05-01' OR (biz_date = DATE '2026-05-01' AND status >= 'active'))"));
+        assertTrue(whereClause.contains("(biz_date < DATE '2026-05-01' OR (biz_date = DATE '2026-05-01' AND status <= 'pending'))"));
+    }
+
+    @Test
+    public void testBuildWhereClauseWithLocalDateKeyUsesAnsiLiteral() {
+        TableSegment segment = TableSegment.builder()
+                .tablePath(TablePath.of("test_table"))
+                .keyColumns(Arrays.asList("created"))
+                .minKey(Optional.of(Arrays.asList(LocalDate.of(2026, 5, 1))))
+                .maxKey(Optional.of(Arrays.asList(LocalDate.of(2026, 5, 31))))
+                .build();
+
+        String whereClause = segment.buildWhereClause();
+
+        assertTrue(whereClause.contains("created >= DATE '2026-05-01'"));
+        assertTrue(whereClause.contains("created < DATE '2026-05-31'"));
+    }
+
+    @Test
+    public void testBuildWhereClauseQuotesNumericLookingVarcharKey() {
+        Map<String, ColumnInfo> columns = new LinkedHashMap<>();
+        columns.put("code", column("code", DataType.VARCHAR));
+        TableSchema schema = TableSchema.of(TablePath.of("test_table"), columns);
+
+        TableSegment segment = TableSegment.builder()
+                .tablePath(TablePath.of("test_table"))
+                .keyColumns(Collections.singletonList("code"))
+                .schema(Optional.of(schema))
+                .minKey(Optional.of(Collections.singletonList("00123")))
+                .maxKey(Optional.of(Collections.singletonList("00200")))
+                .build();
+
+        String whereClause = segment.buildWhereClause();
+
+        assertTrue(whereClause.contains("code >= '00123'"));
+        assertTrue(whereClause.contains("code < '00200'"));
+    }
+
+    /**
+     * 单键列边界为 NULL（整列全 NULL 时 MIN/MAX 为 NULL）时不得静默丢弃谓词：
+     * 闭合上界（{@code <= NULL}）改写为 {@code IS NULL}，开区间上界（{@code < NULL}）恒假。
+     */
+    @Test
+    public void testBuildWhereClauseWithNullSingleColumnBounds() {
+        TableSegment inclusive = TableSegment.builder()
+                .tablePath(TablePath.of("test_table"))
+                .keyColumns(Collections.singletonList("code"))
+                .minKey(Optional.of(Collections.singletonList(null)))
+                .maxKey(Optional.of(Collections.singletonList(null)))
+                .upperBoundInclusive(true)
+                .build();
+
+        assertEquals("code IS NULL", inclusive.buildWhereClause());
+
+        TableSegment exclusive = TableSegment.builder()
+                .tablePath(TablePath.of("test_table"))
+                .keyColumns(Collections.singletonList("code"))
+                .minKey(Optional.of(Collections.singletonList(null)))
+                .maxKey(Optional.of(Collections.singletonList(null)))
+                .build();
+
+        assertEquals("1 = 0", exclusive.buildWhereClause());
+    }
+
+    @Test
+    public void testBuildWhereClauseUnquotesNumericKeyFromDriverString() {
+        Map<String, ColumnInfo> columns = new LinkedHashMap<>();
+        columns.put("id", column("id", DataType.BIGINT));
+        TableSchema schema = TableSchema.of(TablePath.of("test_table"), columns);
+
+        TableSegment segment = TableSegment.builder()
+                .tablePath(TablePath.of("test_table"))
+                .keyColumns(Collections.singletonList("id"))
+                .schema(Optional.of(schema))
+                .minKey(Optional.of(Collections.singletonList("123")))
+                .maxKey(Optional.of(Collections.singletonList("456")))
+                .build();
+
+        String whereClause = segment.buildWhereClause();
+
+        assertTrue(whereClause.contains("id >= 123"));
+        assertTrue(whereClause.contains("id < 456"));
+        assertFalse(whereClause.contains("id >= '123'"));
+    }
+
+    /**
+     * 只有上界的分段（尾扫 below-min 场景）必须生成上界谓词。
+     * 旧实现把整个键区间块挂在 minKey.isPresent() 上，导致该段退化为整表扫描。
+     */
+    @Test
+    public void testBuildWhereClauseWithOnlyUpperBound() {
+        TableSegment inclusive = TableSegment.builder()
+                .tablePath(TablePath.of("test_table"))
+                .keyColumns(Collections.singletonList("id"))
+                .maxKey(Optional.of(Collections.singletonList("100")))
+                .upperBoundInclusive(true)
+                .build();
+
+        assertEquals("id <= 100", inclusive.buildWhereClause());
+
+        TableSegment exclusive = TableSegment.builder()
+                .tablePath(TablePath.of("test_table"))
+                .keyColumns(Collections.singletonList("id"))
+                .maxKey(Optional.of(Collections.singletonList("100")))
+                .build();
+
+        assertEquals("id < 100", exclusive.buildWhereClause());
+    }
+
+    @Test
+    public void testBuildWhereClauseWithOnlyLowerBound() {
+        TableSegment segment = TableSegment.builder()
+                .tablePath(TablePath.of("test_table"))
+                .keyColumns(Collections.singletonList("id"))
+                .minKey(Optional.of(Collections.singletonList("10")))
+                .build();
+
+        assertEquals("id >= 10", segment.buildWhereClause());
+    }
+
+    @Test
+    public void testBuildWhereClauseCompositeWithOnlyUpperBound() {
+        TableSegment segment = TableSegment.builder()
+                .tablePath(TablePath.of("test_table"))
+                .keyColumns(Arrays.asList("id", "type"))
+                .maxKey(Optional.of(Arrays.asList(100, "Z")))
+                .upperBoundInclusive(true)
+                .build();
+
+        assertEquals("(id < 100 OR (id = 100 AND type <= 'Z'))", segment.buildWhereClause());
+    }
+
+    @Test
+    public void testBuildWhereClauseCompositeWithOnlyLowerBound() {
+        TableSegment segment = TableSegment.builder()
+                .tablePath(TablePath.of("test_table"))
+                .keyColumns(Arrays.asList("id", "type"))
+                .minKey(Optional.of(Arrays.asList(1, "A")))
+                .build();
+
+        assertEquals("(id > 1 OR (id = 1 AND type >= 'A'))", segment.buildWhereClause());
+    }
+
+    @Test
+    public void testCompositeLowerBoundWithNullLastComponentIncludesPrefixRows() {
+        // last 维为 NULL 时它就是该前缀下的最小值：>= (1, NULL) 应包含所有 id=1 的行
+        TableSegment segment = TableSegment.builder()
+                .tablePath(TablePath.of("test_table"))
+                .keyColumns(Arrays.asList("id", "type"))
+                .minKey(Optional.of(Arrays.asList(1, null)))
+                .build();
+
+        assertEquals("(id > 1 OR (id = 1))", segment.buildWhereClause());
+    }
+
+    @Test
+    public void testCompositeLowerBoundWithNullFirstComponentKeepsNullRows() {
+        TableSegment segment = TableSegment.builder()
+                .tablePath(TablePath.of("test_table"))
+                .keyColumns(Arrays.asList("id", "type"))
+                .minKey(Optional.of(Arrays.asList(null, "B")))
+                .build();
+
+        assertEquals("(id IS NOT NULL OR (id IS NULL AND type >= 'B'))", segment.buildWhereClause());
+    }
+
+    private ColumnInfo column(String name, DataType type) {
+        return ColumnInfo.builder()
+                .name(name)
+                .type(type)
+                .nullable(true)
+                .ordinalPosition(1)
+                .precision(Optional.empty())
+                .scale(Optional.empty())
+                .maxLength(Optional.empty())
+                .defaultValue(Optional.empty())
+                .collation(Optional.empty())
+                .primaryKey(false)
+                .uniqueKey(false)
+                .comment(Optional.empty())
+                .build();
+    }
+
+    @Test
+    public void testBuildWhereClauseWithLocalDateKeyUsesQuotedLiteralForSqlServer() {
+        DatabaseDialect sqlServerDialect = (DatabaseDialect) java.lang.reflect.Proxy.newProxyInstance(
+                DatabaseDialect.class.getClassLoader(),
+                new Class<?>[]{DatabaseDialect.class},
+                (proxy, method, args) -> "usesAnsiTemporalLiterals".equals(method.getName()) ? false : null);
+        DatabaseAdapter sqlServerAdapter = (DatabaseAdapter) java.lang.reflect.Proxy.newProxyInstance(
+                DatabaseAdapter.class.getClassLoader(),
+                new Class<?>[]{DatabaseAdapter.class},
+                (proxy, method, args) -> {
+                    if ("getConnectorType".equals(method.getName())) {
+                        return "sqlserver";
+                    }
+                    if ("getDialect".equals(method.getName())) {
+                        return sqlServerDialect;
+                    }
+                    return null;
+                });
+
+        TableSegment segment = TableSegment.builder()
+                .database(sqlServerAdapter)
+                .tablePath(TablePath.of("test_table"))
+                .keyColumns(Arrays.asList("created"))
+                .minKey(Optional.of(Arrays.asList(LocalDate.of(2026, 5, 1))))
+                .maxKey(Optional.of(Arrays.asList(LocalDate.of(2026, 5, 31))))
+                .build();
+
+        String whereClause = segment.buildWhereClause();
+
+        // SQL Server has no ANSI DATE literal; quoted strings are implicitly converted.
+        assertTrue(whereClause.contains("created >= '2026-05-01'"));
+        assertTrue(whereClause.contains("created < '2026-05-31'"));
+        assertFalse(whereClause.contains("DATE '"));
+        assertFalse(whereClause.contains("TIMESTAMP '"));
     }
 
     @Test

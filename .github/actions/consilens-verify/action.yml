@@ -1,0 +1,129 @@
+name: Consilens Verify
+description: Run Consilens `verify` as a CI gate and write JUnit/SARIF/Markdown reports.
+author: Consilens
+
+inputs:
+  config:
+    description: Path to the Consilens YAML configuration, relative to `working-directory`.
+    required: true
+  version:
+    description: Release version (for example `0.1.0`). When set, the action downloads that release; otherwise `consilens-cli.sh` must already be on PATH.
+    required: false
+    default: ''
+  fail-on:
+    description: Gate mode passed to `verify --fail-on` (`any`, `new`, `none`). `new` requires the `baseline` input.
+    required: false
+    default: 'any'
+  engine:
+    description: Comparison engine passed to `verify --engine` (`java` or `duckdb` for local files).
+    required: false
+    default: 'java'
+  baseline:
+    description: Optional baseline JSONL produced by a previous run (`--baseline`).
+    required: false
+    default: ''
+  max-mismatch-rate:
+    description: Optional maximum mismatch rate percentage (`--max-mismatch-rate`).
+    required: false
+    default: ''
+  max-row-count-delta-pct:
+    description: Optional maximum row-count delta percentage (`--max-row-count-delta-pct`).
+    required: false
+    default: ''
+  max-new-differences:
+    description: Optional maximum number of new differences (`--max-new-differences`).
+    required: false
+    default: ''
+  required-columns:
+    description: Optional comma-separated columns that must be compared (`--required-columns`).
+    required: false
+    default: ''
+  format:
+    description: Report formats (`json`, `junit`, `sarif`, `markdown`; comma-separated).
+    required: false
+    default: 'junit,markdown'
+  output-dir:
+    description: Directory for generated reports, relative to `working-directory`.
+    required: false
+    default: 'consilens-reports'
+  working-directory:
+    description: Directory used as the working directory for the verify command.
+    required: false
+    default: '.'
+  java-opts:
+    description: Extra JVM options passed through `JAVA_OPTS`.
+    required: false
+    default: '-Xmx2g'
+
+outputs:
+  report-dir:
+    description: Directory containing the generated reports.
+    value: ${{ steps.verify.outputs.report-dir }}
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve Consilens CLI
+      id: cli
+      shell: bash
+      env:
+        INPUT_VERSION: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+        if [ -n "$INPUT_VERSION" ]; then
+          archive="consilens-${INPUT_VERSION}.tar.gz"
+          url="https://github.com/datavane/consilens/releases/download/v${INPUT_VERSION}/${archive}"
+          install_dir="${RUNNER_TEMP}/consilens-${INPUT_VERSION}"
+          mkdir -p "$install_dir"
+          curl -fsSL "$url" -o "${RUNNER_TEMP}/${archive}"
+          tar -xzf "${RUNNER_TEMP}/${archive}" -C "$install_dir" --strip-components=1
+          echo "path=${install_dir}/bin/consilens-cli.sh" >> "$GITHUB_OUTPUT"
+        else
+          if ! command -v consilens-cli.sh >/dev/null 2>&1; then
+            echo "consilens-cli.sh not found on PATH. Set the 'version' input or install the CLI first." >&2
+            exit 1
+          fi
+          echo "path=$(command -v consilens-cli.sh)" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Run Consilens verify
+      id: verify
+      shell: bash
+      working-directory: ${{ inputs['working-directory'] }}
+      env:
+        CONFIG: ${{ inputs.config }}
+        FAIL_ON: ${{ inputs['fail-on'] }}
+        ENGINE: ${{ inputs.engine }}
+        BASELINE: ${{ inputs.baseline }}
+        MAX_MISMATCH_RATE: ${{ inputs['max-mismatch-rate'] }}
+        MAX_ROW_COUNT_DELTA_PCT: ${{ inputs['max-row-count-delta-pct'] }}
+        MAX_NEW_DIFFERENCES: ${{ inputs['max-new-differences'] }}
+        REQUIRED_COLUMNS: ${{ inputs['required-columns'] }}
+        REPORT_FORMAT: ${{ inputs.format }}
+        OUTPUT_DIR: ${{ inputs['output-dir'] }}
+        JAVA_OPTS: ${{ inputs['java-opts'] }}
+      run: |
+        set -euo pipefail
+        args=(-c "$CONFIG" --fail-on "$FAIL_ON" --engine "$ENGINE"
+              --format "$REPORT_FORMAT" --output-dir "$OUTPUT_DIR")
+        if [ -n "$BASELINE" ]; then args+=(--baseline "$BASELINE"); fi
+        if [ -n "$MAX_MISMATCH_RATE" ]; then args+=(--max-mismatch-rate "$MAX_MISMATCH_RATE"); fi
+        if [ -n "$MAX_ROW_COUNT_DELTA_PCT" ]; then args+=(--max-row-count-delta-pct "$MAX_ROW_COUNT_DELTA_PCT"); fi
+        if [ -n "$MAX_NEW_DIFFERENCES" ]; then args+=(--max-new-differences "$MAX_NEW_DIFFERENCES"); fi
+        if [ -n "$REQUIRED_COLUMNS" ]; then args+=(--required-columns "$REQUIRED_COLUMNS"); fi
+
+        echo "report-dir=$(pwd)/${OUTPUT_DIR}" >> "$GITHUB_OUTPUT"
+        "${{ steps.cli.outputs.path }}" verify "${args[@]}"
+
+    - name: Publish report summary
+      if: always()
+      shell: bash
+      working-directory: ${{ inputs['working-directory'] }}
+      env:
+        OUTPUT_DIR: ${{ inputs['output-dir'] }}
+      run: |
+        set -euo pipefail
+        summary="${OUTPUT_DIR}/verify-summary.md"
+        if [ -f "$summary" ]; then
+          cat "$summary" >> "$GITHUB_STEP_SUMMARY"
+        fi

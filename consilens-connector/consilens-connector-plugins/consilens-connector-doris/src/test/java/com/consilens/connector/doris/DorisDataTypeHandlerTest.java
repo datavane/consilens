@@ -5,6 +5,9 @@ import com.consilens.connector.api.model.DataType;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.util.HashMap;
+import java.util.Map;
+
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
@@ -24,14 +27,18 @@ class DorisDataTypeHandlerTest {
     @Test
     void testNormalizeColumn_Int() {
         String result = handler.normalizeColumn("age", DataType.INTEGER);
-        assertEquals("COALESCE(TRIM(CAST(`age` AS CHAR)), '0')", result);
+        // NULL 哨兵统一为空串（与其它方言一致）
+        assertEquals("COALESCE(TRIM(CAST(`age` AS CHAR)), '')", result);
     }
 
     @Test
     void testNormalizeColumn_Timestamp() {
         String result = handler.normalizeColumn("created_at", DataType.TIMESTAMP);
+        // 以固定锚点求偏移，再整体平移：命名时区不依赖 mysql.time_zone 表
         assertEquals(
-                "COALESCE(DATE_FORMAT(CONVERT_TZ(`created_at`, @@session.time_zone, '+00:00'), '%Y-%m-%d %H:%i:%s'), '')",
+                "COALESCE(DATE_FORMAT(DATE_ADD(`created_at`, INTERVAL -TIMESTAMPDIFF(SECOND, "
+                        + "CONVERT_TZ('2020-06-01 12:00:00', @@session.time_zone, '+00:00'), "
+                        + "'2020-06-01 12:00:00') SECOND), '%Y-%m-%d %H:%i:%s'), '')",
                 result);
     }
 
@@ -41,6 +48,54 @@ class DorisDataTypeHandlerTest {
         assertTrue(result.contains("CASE"));
         assertTrue(result.contains("'1'"));
         assertTrue(result.contains("'0'"));
+    }
+
+    @Test
+    void testNormalizeFloatGuardsExtremeValuesBeforeDecimalCast() {
+        String result = handler.normalizeFloat("`c_double`");
+        // Doris 会对外层 CASE 的两支做类型统一；1e300 进入 DECIMAL(38,6) 会直接溢出。
+        // 固定值分支必须先把极端值折成 NULL，科学计数分支才负责渲染它们。
+        assertTrue(result.contains("CASE WHEN (`c_double` IS NOT NULL AND (ABS(`c_double`) > 1e10"),
+                result);
+        assertTrue(result.contains("THEN NULL ELSE `c_double` END"), result);
+        assertTrue(result.contains("AS DECIMAL(38, 6)"), result);
+    }
+
+    @Test
+    void testNormalizeDecimalCarriesRoundingIntoIntegerPart() {
+        String result = handler.normalizeColumn("amount", DataType.DECIMAL);
+        // 整段断言一次钉死：ROUND 直接作用在 DECIMAL 列上（不进 DOUBLE），
+        // 再转成固定 scale 的 DECIMAL 保留尾零；NULL 哨兵为空串（不再是 '0.0000'）
+        assertEquals("COALESCE(TRIM(CAST(CAST(ROUND(`amount`, 4) AS DECIMAL(38, 4)) AS CHAR)),'')",
+                result);
+        assertFalse(result.contains("Math.pow"));
+        assertFalse(result.contains("FLOOR(ABS"));
+        assertFalse(result.contains("AS DOUBLE"));
+    }
+
+    @Test
+    void testNormalizeDecimalCapsPrecisionToDecimalLimit() {
+        Map<String, Object> config = new HashMap<>();
+        config.put("decimal", new DorisDecimalRule(38));
+        DorisDataTypeHandler configured = new DorisDataTypeHandler(capabilityProvider, config);
+
+        String result = configured.normalizeColumn("amount", DataType.DECIMAL);
+        // precision > 30 must be capped to keep DECIMAL(38, scale) valid instead of
+        // overflowing (long) Math.pow(10, precision).
+        assertTrue(result.contains("AS DECIMAL(38, 30)"));
+    }
+
+    /** Minimal normalization rule with a getPrecision() method for test configs. */
+    public static class DorisDecimalRule {
+        private final int precision;
+
+        public DorisDecimalRule(int precision) {
+            this.precision = precision;
+        }
+
+        public int getPrecision() {
+            return precision;
+        }
     }
 
     @Test

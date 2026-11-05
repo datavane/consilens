@@ -40,6 +40,17 @@ public class DorisDataTypeHandler extends BaseDataTypeHandler {
         super(capabilityProvider, normalizationConfig);
     }
 
+    /**
+     * 科学计数渲染：转发到 {@link BaseDataTypeHandler#mysqlFamilyScientificFloatExpression(String)}
+     * 的共享实现——mysql 族各方言必须逐字同形，不能各自拷贝。
+     */
+    @Override
+    protected String scientificFloatExpression(String quotedCol) {
+        return mysqlFamilyScientificFloatExpression(quotedCol);
+    }
+
+
+
     @Override
     public TypeDescriptor convertToTypeDescriptor(String originType) {
         if (originType == null || originType.isBlank()) {
@@ -209,7 +220,7 @@ public class DorisDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeString(String quotedCol) {
-        return "COALESCE(TRIM(" + quotedCol + "), '')";
+        return "COALESCE(TRIM(" + quotedCol + "), " + stringNullReplacement() + ")";
     }
 
     /**
@@ -218,18 +229,17 @@ public class DorisDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeInteger(String quotedCol) {
-        return "COALESCE(TRIM(CAST(" + quotedCol + " AS CHAR)), '0')";
+        return "COALESCE(TRIM(CAST(" + quotedCol + " AS CHAR)), '')";
     }
 
     /**
      * Doris-specific decimal normalization with configurable decimal places.
-     * Use FORMAT to ensure specified decimal places with trailing zeros, then remove commas.
-     * This ensures consistent decimal representation across databases.
-     */
-    /**
-     * Doris-specific decimal normalization with configurable decimal places.
-     * Use FORMAT to ensure specified decimal places with trailing zeros, then remove commas.
-     * This ensures consistent decimal representation across databases.
+     * Formats decimal with trailing zeros to ensure consistent representation.
+     *
+     * Rounds/truncates first, then casts to a fixed-scale DECIMAL so the CHAR
+     * output keeps trailing zeros. Casting the whole rounded value (instead of
+     * formatting the integer and fractional parts separately) lets carry-over
+     * propagate into the integer part, e.g. ROUND(-1.99999, 4) becomes '-2.0000'.
      */
     @Override
     protected String normalizeDecimal(String quotedCol) {
@@ -241,18 +251,24 @@ public class DorisDataTypeHandler extends BaseDataTypeHandler {
         // If precision is 0, return integer format without decimal point
         if (precision == 0) {
             String roundFunction = rounding ? "ROUND" : "TRUNCATE";
-            return "COALESCE(TRIM(CAST(" + roundFunction + "(" + quotedCol + ", 0) AS CHAR)), '0')";
+            return "COALESCE(TRIM(CAST(" + roundFunction + "(" + quotedCol + ", 0) AS CHAR)), '')";
         }
 
-        String defaultValue = "0." + "0".repeat(precision);
+        String roundFunction = rounding ? "ROUND" : "TRUNCATE";
+        // DECIMAL(38, scale) keeps at least one integer digit; scale above 30 would
+        // exceed Doris's DECIMAL limits and (long) Math.pow(10, precision) overflows
+        // for precision > 18, so cap the normalized scale.
+        int scale = Math.min(precision, 30);
 
-        if (rounding) {
-            // Round half up: ROUND first, then format
-            return "COALESCE(REPLACE(FORMAT(ROUND(" + quotedCol + ", " + precision + "), " + precision + "), ',', ''), '" + defaultValue + "')";
-        } else {
-            // Truncate: TRUNCATE first, then format
-            return "COALESCE(REPLACE(FORMAT(TRUNCATE(" + quotedCol + ", " + precision + "), " + precision + "), ',', ''), '" + defaultValue + "')";
-        }
+        // Round/truncate directly on the DECIMAL value (no DOUBLE detour, which would
+        // lose precision for large DECIMAL(38, N) values), then normalize to a
+        // fixed-scale DECIMAL and convert to CHAR. The DECIMAL cast preserves trailing
+        // zeros and carries rounding into the integer part, matching MySQL's
+        // FORMAT(ROUND(col, N), N) semantics.
+        return "COALESCE("
+                + "TRIM(CAST(CAST(" + roundFunction + "(" + quotedCol + ", " + precision
+                + ") AS DECIMAL(38, " + scale + ")) AS CHAR)),"
+                + "'')";
     }
 
     /**
@@ -262,25 +278,31 @@ public class DorisDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeFloat(String quotedCol) {
-        // Get precision from config, default to 4
-        int precision = getPrecision("float", 4);
+        // Get precision from config, default to 6
+        int precision = getPrecision("float", 6);
         // Get rounding config, default to true (round half up)
         boolean rounding = getRounding("float", true);
+
+        // 极端值（|v| > 1e10 或 0 < |v| < 1e-10）由调用方的科学计数分支渲染。
+        // Doris 会对 CASE 的两个分支做类型统一，即使外层选了科学计数，ELSE 里的
+        // DECIMAL(38, scale) 仍可能被求值；1e300 这类值直接溢出（Float64 -> Decimal(38,6)）。
+        // 这里先把极端值折成 NULL，保证 DECIMAL cast 永远不会看到溢出值。
+        String extreme = "(" + quotedCol + " IS NOT NULL AND (ABS(" + quotedCol + ") > 1e10"
+                + " OR (ABS(" + quotedCol + ") < 1e-10 AND " + quotedCol + " <> 0)))";
+        String safeCol = "CASE WHEN " + extreme + " THEN NULL ELSE " + quotedCol + " END";
 
         // If precision is 0, return integer format without decimal point
         if (precision == 0) {
             String roundFunction = rounding ? "ROUND" : "TRUNCATE";
-            return "COALESCE(TRIM(CAST(" + roundFunction + "(CAST(" + quotedCol + " AS DOUBLE), 0) AS CHAR)), '0')";
+            return "COALESCE(TRIM(CAST(" + roundFunction + "(CAST(" + safeCol + " AS DOUBLE), 0) AS CHAR)), '')";
         }
-
-        String defaultValue = "0." + "0".repeat(precision);
 
         if (rounding) {
             // Round half up: ROUND first, then format
-            return "COALESCE(REPLACE(FORMAT(ROUND(CAST(" + quotedCol + " AS DOUBLE), " + precision + "), " + precision + "), ',', ''), '" + defaultValue + "')";
+            return "COALESCE(TRIM(CAST(CAST(ROUND(CAST(" + safeCol + " AS DOUBLE), " + precision + ") AS DECIMAL(38, " + precision + ")) AS CHAR)), '')";
         } else {
             // Truncate: TRUNCATE first, then format
-            return "COALESCE(REPLACE(FORMAT(TRUNCATE(CAST(" + quotedCol + " AS DOUBLE), " + precision + "), " + precision + "), ',', ''), '" + defaultValue + "')";
+            return "COALESCE(TRIM(CAST(CAST(TRUNCATE(CAST(" + safeCol + " AS DOUBLE), " + precision + ") AS DECIMAL(38, " + precision + ")) AS CHAR)), '')";
         }
     }
 
@@ -315,13 +337,11 @@ public class DorisDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeDateTime(String quotedCol) {
-        String expression = quotedCol;
-        String targetTimezone = getTimezone("datetime", null);
-        if (targetTimezone != null && !targetTimezone.isBlank()) {
-            expression = "CONVERT_TZ(" + quotedCol + ", @@session.time_zone, '"
-                    + resolveDorisTimezone("datetime", "+00:00") + "')";
-        }
-        return "COALESCE(DATE_FORMAT(" + expression + ", '" + resolveDorisTemporalFormat("datetime",
+        // Always convert session→UTC like MySQL/TiDB/StarRocks: DATETIME must be
+        // compared as the same instant across mysql-protocol dialects, and a
+        // conditional literal fallback desynchronizes Doris from the others.
+        String targetTimezone = resolveDorisTimezone("datetime", "+00:00");
+        return "COALESCE(DATE_FORMAT(" + tzShiftByAnchor(quotedCol, targetTimezone) + ", '" + resolveDorisTemporalFormat("datetime",
                 "%Y-%m-%d %H:%i:%s", "%Y-%m-%d") + "'), '')";
     }
 
@@ -335,8 +355,7 @@ public class DorisDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeTimestamp(String quotedCol) {
-        return "COALESCE(DATE_FORMAT(CONVERT_TZ(" + quotedCol + ", @@session.time_zone, '"
-                + resolveDorisTimezone("timestamp", "+00:00") + "'), '" + resolveDorisTemporalFormat("timestamp",
+        return "COALESCE(DATE_FORMAT(" + tzShiftByAnchor(quotedCol, resolveDorisTimezone("timestamp", "+00:00")) + ", '" + resolveDorisTemporalFormat("timestamp",
                 "%Y-%m-%d %H:%i:%s", "%Y-%m-%d") + "'), '')";
     }
 
@@ -346,8 +365,7 @@ public class DorisDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeTimestampWithTimezone(String quotedCol) {
-        return "COALESCE(DATE_FORMAT(CONVERT_TZ(" + quotedCol + ", @@session.time_zone, '"
-                + resolveDorisTimezone("timestamp_with_timezone", "+00:00") + "'), '" + resolveDorisTemporalFormat("timestamp_with_timezone",
+        return "COALESCE(DATE_FORMAT(" + tzShiftByAnchor(quotedCol, resolveDorisTimezone("timestamp_with_timezone", "+00:00")) + ", '" + resolveDorisTemporalFormat("timestamp_with_timezone",
                 "%Y-%m-%d %H:%i:%s", "%Y-%m-%d") + "'), '')";
     }
 
@@ -382,7 +400,7 @@ public class DorisDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeBoolean(String quotedCol) {
-        return "CASE WHEN " + quotedCol + " = 1 THEN '1' ELSE '0' END";
+        return "CASE WHEN " + quotedCol + " IS NULL THEN '' WHEN " + quotedCol + " = 1 THEN '1' ELSE '0' END";
     }
 
     /**
@@ -398,7 +416,8 @@ public class DorisDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeJson(String quotedCol) {
-        return "COALESCE(CAST(" + quotedCol + " AS CHAR), '')";
+        // Canonical compact JSON (see MySQLDataTypeHandler note).
+        return "COALESCE(REPLACE(REPLACE(CAST(" + quotedCol + " AS CHAR), ': ', ':'), ', ', ','), '')";
     }
 
     /**
@@ -406,7 +425,7 @@ public class DorisDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeDefault(String quotedCol) {
-        return "COALESCE(TRIM(CAST(" + quotedCol + " AS CHAR)), '0')";
+        return "COALESCE(TRIM(CAST(" + quotedCol + " AS CHAR)), '')";
     }
 
     @Override

@@ -33,6 +33,30 @@ public class MySQLDataTypeHandler extends BaseDataTypeHandler {
         super(capabilityProvider, normalizationConfig);
     }
 
+    /**
+     * 科学计数渲染：转发到 {@link BaseDataTypeHandler#mysqlFamilyScientificFloatExpression(String)}
+     * 的共享实现——mysql 族各方言必须逐字同形，不能各自拷贝。
+     */
+    @Override
+    protected String scientificFloatExpression(String quotedCol) {
+        return mysqlFamilyScientificFloatExpression(quotedCol);
+    }
+
+    /**
+     * MySQL 的 YEAR 逻辑上是 16 位整数，但 JDBC 驱动把它读成 {@code java.sql.Date}
+     * （如 2092-01-01），而 PostgreSQL 的等价列读成整数。按逻辑类型归一化为年份整数，
+     * 让跨库本地比对不依赖具体驱动的返回形态。
+     */
+    @Override
+    public Object normalizeValueForComparison(Object value, DataType dataType) {
+        if (value instanceof java.sql.Date && dataType != null && dataType.isNumeric()) {
+            return ((java.sql.Date) value).toLocalDate().getYear();
+        }
+        return value;
+    }
+
+
+
     @Override
     public TypeDescriptor convertToTypeDescriptor(String originType) {
         if (originType == null || originType.isBlank()) {
@@ -102,11 +126,23 @@ public class MySQLDataTypeHandler extends BaseDataTypeHandler {
                         .numericScale(precisionScale[1] != null ? precisionScale[1] : 0)
                         .build();
             }
-            case "BIT":
+            case "BIT": {
+                // BIT(1) 语义是布尔：若按 BINARY 归一化会被渲染成 HEX，与其他方言对同一逻辑列的
+                // 整数/布尔归一化（'1'/'0'）不一致——跨源比对时 NULL 行一侧渲染 ''、另一侧 '0'
+                // （实测 dq_cmp_alltype pk=2 全 NULL 行在 mysql↔starrocks 误报 c_bit/c_boolean）。
+                // BIT(n>1) 仍是位串，保持 BINARY。
+                Integer bitLength = extractLength(upperType);
+                int bits = bitLength != null ? bitLength : 1;
+                if (bits <= 1) {
+                    return TypeDescriptor.builder(com.consilens.common.enums.DataType.BOOLEAN_TYPE)
+                            .originType(originType)
+                            .build();
+                }
                 return TypeDescriptor.builder(com.consilens.common.enums.DataType.BINARY_TYPE)
                         .originType(originType)
-                        .length(extractLength(upperType) != null ? extractLength(upperType) : 1)
+                        .length(bits)
                         .build();
+            }
             case "CHAR":
                 return TypeDescriptor.builder(com.consilens.common.enums.DataType.STRING_TYPE)
                         .originType(originType)
@@ -142,7 +178,10 @@ public class MySQLDataTypeHandler extends BaseDataTypeHandler {
                         .build();
             case "ENUM":
             case "SET":
-                return TypeDescriptor.builder(com.consilens.common.enums.DataType.ENUM_TYPE)
+                // ENUM/SET 的取值是标签字符串，必须按字符串归一化：落到默认分支会渲染成
+                // COALESCE(CAST(col AS CHAR), '0')，与其他方言的 VARCHAR（NULL → ''）不一致，
+                // 跨源比对时 NULL 行会误报（实测 dq_cmp_alltype pk=2 的 c_enum）。
+                return TypeDescriptor.builder(com.consilens.common.enums.DataType.STRING_TYPE)
                         .originType(originType)
                         .build();
             case "BINARY":
@@ -325,7 +364,7 @@ public class MySQLDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeInteger(String quotedCol) {
-        return "COALESCE(TRIM(CAST(" + quotedCol + " AS CHAR)), '0')";
+        return "COALESCE(TRIM(CAST(" + quotedCol + " AS CHAR)), '')";
     }
     /**
      * MySQL-specific string normalization.
@@ -335,7 +374,7 @@ public class MySQLDataTypeHandler extends BaseDataTypeHandler {
     @Override
     protected String normalizeString(String quotedCol) {
         // Just TRIM, no CAST needed for MySQL
-        return "COALESCE(TRIM(" + quotedCol + "), '')";
+        return "COALESCE(TRIM(" + quotedCol + "), " + stringNullReplacement() + ")";
     }
 
     /**
@@ -354,18 +393,17 @@ public class MySQLDataTypeHandler extends BaseDataTypeHandler {
         if (precision == 0) {
             // Return integer format without decimal point
             if (rounding) {
-                return "COALESCE(TRIM(CAST(ROUND(" + quotedCol + ", 0) AS CHAR)), '0')";
+                return "COALESCE(TRIM(CAST(ROUND(" + quotedCol + ", 0) AS CHAR)), '')";
             } else {
-                return "COALESCE(TRIM(CAST(TRUNCATE(" + quotedCol + ", 0) AS CHAR)), '0')";
+                return "COALESCE(TRIM(CAST(TRUNCATE(" + quotedCol + ", 0) AS CHAR)), '')";
             }
         }
         
-        String defaultValue = "0." + "0".repeat(precision);
         if (rounding) {
-            return "COALESCE(REPLACE(FORMAT(" + quotedCol + ", " + precision + "), ',', ''), '" + defaultValue + "')";
+            return "COALESCE(REPLACE(FORMAT(" + quotedCol + ", " + precision + "), ',', ''), '')";
         } else {
             // MySQL TRUNCATE + FORMAT: truncate then format
-            return "COALESCE(REPLACE(FORMAT(TRUNCATE(" + quotedCol + ", " + precision + "), " + precision + "), ',', ''), '" + defaultValue + "')";
+            return "COALESCE(REPLACE(FORMAT(TRUNCATE(" + quotedCol + ", " + precision + "), " + precision + "), ',', ''), '')";
         }
     }
 
@@ -385,18 +423,17 @@ public class MySQLDataTypeHandler extends BaseDataTypeHandler {
         if (precision == 0) {
             // Return integer format without decimal point
             if (rounding) {
-                return "COALESCE(TRIM(CAST(ROUND(CAST(" + quotedCol + " AS DOUBLE), 0) AS CHAR)), '0')";
+                return "COALESCE(TRIM(CAST(ROUND(CAST(" + quotedCol + " AS DOUBLE), 0) AS CHAR)), '')";
             } else {
-                return "COALESCE(TRIM(CAST(TRUNCATE(CAST(" + quotedCol + " AS DOUBLE), 0) AS CHAR)), '0')";
+                return "COALESCE(TRIM(CAST(TRUNCATE(CAST(" + quotedCol + " AS DOUBLE), 0) AS CHAR)), '')";
             }
         }
         
-        String defaultValue = "0." + "0".repeat(precision);
         if (rounding) {
-            return "COALESCE(REPLACE(FORMAT(CAST(" + quotedCol + " AS DOUBLE), " + precision + "), ',', ''), '" + defaultValue + "')";
+            return "COALESCE(REPLACE(FORMAT(CAST(" + quotedCol + " AS DOUBLE), " + precision + "), ',', ''), '')";
         } else {
             // MySQL TRUNCATE + FORMAT: truncate then format
-            return "COALESCE(REPLACE(FORMAT(TRUNCATE(CAST(" + quotedCol + " AS DOUBLE), " + precision + "), " + precision + "), ',', ''), '" + defaultValue + "')";
+            return "COALESCE(REPLACE(FORMAT(TRUNCATE(CAST(" + quotedCol + " AS DOUBLE), " + precision + "), " + precision + "), ',', ''), '')";
         }
     }
 
@@ -427,20 +464,19 @@ public class MySQLDataTypeHandler extends BaseDataTypeHandler {
     /**
      * MySQL-specific datetime normalization: YYYY-MM-DD HH:MM:SS format.
      * CRITICAL: Convert to UTC timezone to ensure cross-database consistency.
-     * 
+     *
      * For DATETIME type:
      * - MySQL DATETIME stores literal values without timezone information
      * - But when comparing with PostgreSQL TIMESTAMPTZ, we need to convert to UTC
      * - Assume the DATETIME value is in the session timezone
-     * 
+     *
      * Note: This matches PostgreSQL TIMESTAMPTZ behavior (timezone-aware).
      */
     @Override
     protected String normalizeDateTime(String quotedCol) {
         String targetTimezone = resolveMySqlTimezone("datetime", "+00:00");
         String format = resolveMySqlTemporalFormat("datetime", "%Y-%m-%d %H:%i:%s", "%Y-%m-%d");
-        return "COALESCE(DATE_FORMAT(CONVERT_TZ(" + quotedCol + ", @@session.time_zone, '"
-                + targetTimezone + "'), '" + format + "'), '')";
+        return "COALESCE(DATE_FORMAT(" + tzShiftByAnchor(quotedCol, targetTimezone) + ", '" + format + "'), '')";
     }
 
     /**
@@ -455,8 +491,7 @@ public class MySQLDataTypeHandler extends BaseDataTypeHandler {
     protected String normalizeTimestamp(String quotedCol) {
         String targetTimezone = resolveMySqlTimezone("timestamp", "+00:00");
         String format = resolveMySqlTemporalFormat("timestamp", "%Y-%m-%d %H:%i:%s", "%Y-%m-%d");
-        return "COALESCE(DATE_FORMAT(CONVERT_TZ(" + quotedCol + ", @@session.time_zone, '"
-                + targetTimezone + "'), '" + format + "'), '')";
+        return "COALESCE(DATE_FORMAT(" + tzShiftByAnchor(quotedCol, targetTimezone) + ", '" + format + "'), '')";
     }
 
     /**
@@ -471,8 +506,7 @@ public class MySQLDataTypeHandler extends BaseDataTypeHandler {
     protected String normalizeTimestampWithTimezone(String quotedCol) {
         String targetTimezone = resolveMySqlTimezone("timestamp_with_timezone", "+00:00");
         String format = resolveMySqlTemporalFormat("timestamp_with_timezone", "%Y-%m-%d %H:%i:%s", "%Y-%m-%d");
-        return "COALESCE(DATE_FORMAT(CONVERT_TZ(" + quotedCol + ", @@session.time_zone, '"
-                + targetTimezone + "'), '" + format + "'), '')";
+        return "COALESCE(DATE_FORMAT(" + tzShiftByAnchor(quotedCol, targetTimezone) + ", '" + format + "'), '')";
     }
 
     /**
@@ -481,7 +515,7 @@ public class MySQLDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeBoolean(String quotedCol) {
-        return "CASE WHEN " + quotedCol + " = 1 THEN '1' ELSE '0' END";
+        return "CASE WHEN " + quotedCol + " IS NULL THEN '' WHEN " + quotedCol + " = 1 THEN '1' ELSE '0' END";
     }
 
     /**
@@ -498,7 +532,16 @@ public class MySQLDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeJson(String quotedCol) {
-        return "COALESCE(CAST(" + quotedCol + " AS CHAR), '')";
+        // Canonical JSON = compact rendering (strip the ": " and ", "
+        // separators that some engines add). Every dialect applies the identical
+        // transform, so semantically equal JSON hashes equal across engines;
+        // engines with natively compact output (trino/presto json_format) are
+        // already in this form.
+        //
+        // 已知限制：这是文本级变换——字符串值内恰含 ": " / ", " 的内容会被一并改写；
+        // 键序也不由本表达式抹平，而是依赖 MySQL 二进制 JSON 自身的键序规范化
+        // （结构化重渲染的方言见 pg jsonb / ClickHouse toJSONString / SQL Server OPENJSON）。
+        return "COALESCE(REPLACE(REPLACE(CAST(" + quotedCol + " AS CHAR), ': ', ':'), ', ', ','), '')";
     }
 
     /**
@@ -508,7 +551,7 @@ public class MySQLDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeDefault(String quotedCol) {
-        return "COALESCE(TRIM(CAST(" + quotedCol + " AS CHAR)), '0')";
+        return "COALESCE(TRIM(CAST(" + quotedCol + " AS CHAR)), '')";
     }
 
     private String resolveMySqlTimezone(String dataTypeName, String defaultTimezone) {

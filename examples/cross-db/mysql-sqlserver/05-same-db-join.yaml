@@ -1,0 +1,68 @@
+# SQL Server 同库 JOIN 比对配置
+# 目标：测试同一数据库内两张表的 JOIN 比对
+
+source:
+  type: sqlserver
+  connection:
+    url: jdbc:sqlserver://127.0.0.1:1433;databaseName=mydb;sendStringParametersAsUnicode=true;encrypt=false
+    username: ${env.SQLSERVER_USER}
+    password: ${env.SQLSERVER_PASSWORD}
+  resource:
+    type: table
+    name: orders
+  readOptions:
+    consistency: snapshot
+    batchSize: 500
+    fetchSize: 1000
+
+target:
+  type: sqlserver
+  connection:
+    url: jdbc:sqlserver://127.0.0.1:1433;databaseName=mydb;sendStringParametersAsUnicode=true;encrypt=false
+    username: ${env.SQLSERVER_USER}
+    password: ${env.SQLSERVER_PASSWORD}
+  resource:
+    type: table
+    name: orders_backup
+  readOptions:
+    consistency: snapshot
+    batchSize: 500
+    fetchSize: 1000
+
+comparison:
+  keys:
+    source: [order_id]
+    target: [order_id]
+  fields:
+    source: [customer_id, amount, status, created_at]
+    target: [customer_id, amount, status, created_at]
+
+strategy:
+  mode: join
+  localCompare:
+    mode: row-hash
+  maxDifferences: 10000
+
+normalization:
+  global:
+    decimal:
+      precision: 4
+      rounding: true
+    float:
+      precision: 6
+      rounding: true
+    date:
+      format: yyyy-MM-dd
+    time:
+      format: HH:mm:ss
+    datetime:
+      format: yyyy-MM-dd HH:mm:ss
+      timezone: Asia/Shanghai
+    timestamp:
+      format: yyyy-MM-dd HH:mm:ss
+      timezone: Asia/Shanghai
+
+result:
+  sinks:
+    - format: console
+      type: result

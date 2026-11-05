@@ -30,6 +30,7 @@ class ConnectorProviderDiscoveryTest {
         assertTrue(registry.findProvider("starrocks").isPresent());
         assertTrue(registry.findProvider("clickhouse").isPresent());
         assertTrue(registry.findProvider("tidb").isPresent());
+        assertTrue(registry.findProvider("oceanbase").isPresent());
     }
 
     @Test

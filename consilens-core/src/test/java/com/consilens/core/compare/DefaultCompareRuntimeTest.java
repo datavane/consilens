@@ -38,8 +38,22 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 class DefaultCompareRuntimeTest {
+
+    @Test
+    void shouldFailFastWhenSnapshotRequestedWithoutProvider() {
+        com.consilens.connector.api.ConnectorException error = org.junit.jupiter.api.Assertions.assertThrows(
+                com.consilens.connector.api.ConnectorException.class,
+                () -> DefaultCompareRuntime.requireSnapshotProvider("source", " snapshot ", false));
+        org.junit.jupiter.api.Assertions.assertTrue(error.getMessage().contains("snapshot"), error.getMessage());
+
+        // 有快照能力、或没有请求 snapshot 时都不应抛
+        DefaultCompareRuntime.requireSnapshotProvider("source", "snapshot", true);
+        DefaultCompareRuntime.requireSnapshotProvider("source", null, false);
+        DefaultCompareRuntime.requireSnapshotProvider("source", "none", false);
+    }
 
     @Test
     void shouldAttachNormalizationToReadOptionsInsteadOfConnection() throws Exception {
@@ -113,7 +127,11 @@ class DefaultCompareRuntimeTest {
                 .targetFilter(targetFilter)
                 .build();
 
-        runtime.execute(request);
+        DiffResult executed = runtime.execute(request);
+
+        // P2-11：日志里的 strategy 是配置值，真正执行哪套计划由 core 决定（方言能力可能降级），
+        // 必须把实际计划带回结果，CLI 才能打印一致的信息。
+        assertEquals("pushdown-checksum", executed.getMetadata().get("executedPlan"));
 
         CompareSegment sourceSegment = executor.lastSourceSegment;
         CompareSegment targetSegment = executor.lastTargetSegment;
@@ -278,6 +296,7 @@ class DefaultCompareRuntimeTest {
 
         private CompareSegment lastSourceSegment;
         private CompareSegment lastTargetSegment;
+        private final java.util.Map<String, Object> metadata = new java.util.HashMap<>();
 
         @Override
         public boolean supports(ComparePlan plan) {
@@ -288,7 +307,9 @@ class DefaultCompareRuntimeTest {
         public DiffResult execute(ComparePlan plan, CompareRequest request, CompareSegment source, CompareSegment target) {
             this.lastSourceSegment = source;
             this.lastTargetSegment = target;
-            return mock(DiffResult.class);
+            DiffResult result = mock(DiffResult.class);
+            when(result.getMetadata()).thenReturn(metadata);
+            return result;
         }
     }
 }

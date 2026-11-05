@@ -8,7 +8,7 @@
     <parent>
         <groupId>com.consilens</groupId>
         <artifactId>consilens-connector-plugins</artifactId>
-        <version>0.2.0</version>
+        <version>0.1-SNAPSHOT</version>
     </parent>
     
     <artifactId>consilens-connector-clickhouse</artifactId>
@@ -64,7 +64,7 @@
         <dependency>
             <groupId>com.clickhouse</groupId>
             <artifactId>clickhouse-jdbc</artifactId>
-            <version>0.4.6</version>
+            <version>0.9.8</version>
             <classifier>all</classifier>
         </dependency>
     </dependencies>

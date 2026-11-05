@@ -1,7 +1,9 @@
 package com.consilens.connector.tidb;
 
+import com.consilens.connector.api.ConnectorTypes;
 import com.consilens.connector.api.*;
 import com.consilens.conncetor.base.AbstractDatabaseDialect;
+import com.consilens.conncetor.base.MySQLProtocolConnectionPoolOptimizer;
 
 import java.util.Map;
 
@@ -43,7 +45,25 @@ public class TiDBDatabaseDialect extends AbstractDatabaseDialect {
 
     @Override
     public String getConnectorType() {
-        return "tidb";
+        return ConnectorTypes.TIDB;
+    }
+
+    @Override
+    public String getJdbcDriverClassName() {
+        return "com.mysql.cj.jdbc.Driver";
+    }
+
+    @Override
+    public int getDefaultPort() {
+        return 4000;
+    }
+
+    @Override
+    public String buildJdbcUrl(Map<String, Object> params) {
+        String host = String.valueOf(params.get("host"));
+        int port = params.get("port") != null ? ((Number) params.get("port")).intValue() : getDefaultPort();
+        String database = params.get("database") != null ? String.valueOf(params.get("database")) : "";
+        return "jdbc:mysql://" + host + ":" + port + "/" + database;
     }
 
     @Override
@@ -59,6 +79,15 @@ public class TiDBDatabaseDialect extends AbstractDatabaseDialect {
     @Override
     public DataTypeHandler getDataTypeHandler() {
         return dataTypeHandler;
+    }
+
+    /**
+     * 校验和比较依赖 MD5(GROUP_CONCAT(...))，必须抬高 group_concat_max_len，
+     * 否则行数一多拼接结果被静默截断，真实差异会被漏检。
+     */
+    @Override
+    public ConnectionPoolOptimizer getConnectionPoolOptimizer() {
+        return new MySQLProtocolConnectionPoolOptimizer();
     }
 
     @Override

@@ -20,6 +20,7 @@ import com.consilens.connector.api.dataset.SegmentDigest;
 import com.consilens.connector.api.dataset.RecordScanner;
 import com.consilens.connector.api.dataset.SnapshotProvider;
 import com.consilens.connector.api.dataset.SplitPlanner;
+import com.consilens.connector.api.dataset.SplitOptions;
 
 import com.consilens.connector.api.model.ComparisonSpec;
 import com.consilens.connector.api.model.ConnectorNativeType;
@@ -43,6 +44,10 @@ import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
 import lombok.extern.slf4j.Slf4j;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.sql.Clob;
+import java.sql.Blob;
 import java.sql.Connection;
 import java.sql.DatabaseMetaData;
 import java.sql.DriverManager;
@@ -66,15 +71,27 @@ import java.util.Set;
 import java.util.function.Function;
 
 @Slf4j
-public class JdbcDatasetHandle implements DatasetHandle, RelationalDatasetSupport {
+public class JdbcDatasetHandle implements DatasetHandle, RelationalDatasetSupport, com.consilens.connector.api.dataset.DialectProvider {
 
     private static final int DEFAULT_STREAM_FETCH_SIZE = 1000;
-    private static final Pattern DORIS_PARTITION_PATTERN = Pattern.compile("PARTITION\\s+BY\\s+.*?\\(([^\\)]*)\\)",
+
+    // readRecord 每行调用；下面三份缓存把"每行重建列名映射/解析 key 列/建 key 集合"的开销摊到每段一次。
+    // 20k 行 × 37 列的场景下，仅 foldedFields 重建就是 74 万次 map 写入。
+    private SchemaDescriptor cachedFoldSchema;
+    private Map<String, FieldDescriptor> cachedFoldedFields = Collections.emptyMap();
+    private CompareSegment cachedKeySegment;
+    private List<String> cachedKeyColumns = Collections.emptyList();
+    private Set<String> cachedKeyColumnSet = Collections.emptySet();
+    private static final Pattern PARTITION_PATTERN = Pattern.compile("PARTITION\\s+BY\\s+.*?\\(([^\\)]*)\\)",
             Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
 
     private final String connectorName;
     private final ResourceLocator resource;
-    private final DatasetMetadata metadata;
+    /**
+     * 惰性初始化：createMetadata 里的分区属性探测会通过 JDBC 执行
+     * {@code SHOW CREATE TABLE}，构造期不能触发任何数据库连接。
+     */
+    private volatile DatasetMetadata metadata;
     private final String connectorType;
     private final Map<String, Object> connection;
     private final ReadOptions readOptions;
@@ -104,7 +121,7 @@ public class JdbcDatasetHandle implements DatasetHandle, RelationalDatasetSuppor
                 .pushedPredicate(predicate)
                 .residualPredicate(null)
                 .build();
-        this.metadata = createMetadata(connectorName, connectorType, this.connection, resource, readOptions);
+        // metadata 延迟到 getMetadata() 首次调用时再构建（见该字段注释）。
     }
 
     @Override
@@ -114,7 +131,16 @@ public class JdbcDatasetHandle implements DatasetHandle, RelationalDatasetSuppor
 
     @Override
     public DatasetMetadata getMetadata() {
-        return metadata;
+        DatasetMetadata local = metadata;
+        if (local != null) {
+            return local;
+        }
+        synchronized (this) {
+            if (metadata == null) {
+                metadata = createMetadata(connectorName, connectorType, connection, resource, readOptions);
+            }
+            return metadata;
+        }
     }
 
     @Override
@@ -138,7 +164,7 @@ public class JdbcDatasetHandle implements DatasetHandle, RelationalDatasetSuppor
 
     @Override
     public Optional<SplitPlanner> getSplitPlanner() {
-        return Optional.empty();
+        return Optional.of(this::planKeyRangeSplits);
     }
 
     @Override
@@ -223,8 +249,8 @@ public class JdbcDatasetHandle implements DatasetHandle, RelationalDatasetSuppor
         attributes.put("databaseType", connectorType);
         attributes.put("resourceType", resource != null ? resource.getType() : null);
         attributes.put("connectorName", connectorName);
-        if ("doris".equalsIgnoreCase(connectorType) && !isSqlResource(resource)) {
-            attributes.putAll(discoverDorisPartitionAttributes(resource));
+        if (dialect.discoversPartitionAttributes() && !isSqlResource(resource)) {
+            attributes.putAll(discoverPartitionAttributes(resource));
         }
 
         EnumSet<ConnectorCapability> capabilities = EnumSet.of(
@@ -239,6 +265,16 @@ public class JdbcDatasetHandle implements DatasetHandle, RelationalDatasetSuppor
             capabilities.add(ConnectorCapability.SERVER_SIDE_JOIN);
         }
 
+        // 方言侧按需裁剪能力/补充属性（如 Oracle 的 SQL 侧摘要限制），base 不按连接器类型分支
+        dialect.adjustDatasetCapabilities(capabilities, attributes, () -> hasLobColumns(resource));
+
+        // Presto（prestodb/presto:latest = 0.298.1 + presto-jdbc 0.286）无需在此裁剪能力：
+        // 曾经的"join 取数卡死"根因在客户端——无参 SQL 走 prepareStatement 会命中服务端
+        // PREPARE 路径并挂起，已由 AbstractDatabaseAdapter 按 supportsServerSidePrepare()
+        // 改用普通 Statement。checksum 与 join 两条下推均已实测可用（edge/typediff/
+        // scale_100k/edge_dup 全绿，含 10 万行与重复键）。仅 alltype 表受上游 catalog
+        // 限制（INT UNSIGNED → integer(32 位)，值 2147483650 越界）无法经 Presto 读取。
+
         return DatasetMetadata.builder()
                 .logicalName(resource != null ? (resource.getName() != null ? resource.getName() : resource.getPath()) : null)
                 .executionDomainId(buildExecutionDomainId(connectorType, connection))
@@ -250,6 +286,79 @@ public class JdbcDatasetHandle implements DatasetHandle, RelationalDatasetSuppor
     private String buildExecutionDomainId(String connectorType, Map<String, Object> connection) {
         Object jdbcUrl = connection != null ? connection.get("url") : null;
         return connectorType + ":" + String.valueOf(jdbcUrl);
+    }
+
+    /**
+     * 给裸类型名补精度/标度：JDBC 元数据的 TYPE_NAME 常不带括号参数（Oracle 全是
+     * {@code NUMBER}、PG 的 {@code numeric}），而类型映射要靠 precision/scale 区分
+     * 整数与定点——不补的话 {@code NUMBER(19)} 会被当成 DECIMAL，本地比对把主键
+     * 归一化成 {@code 1.0000}（对侧 MySQL 是 {@code 1}），整表判为不一致。
+     */
+    private String qualifiedTypeName(String typeName, ResultSet columns) throws SQLException {
+        int precision = columns.getInt("COLUMN_SIZE");
+        int scale = columns.getInt("DECIMAL_DIGITS");
+        return refineTypeName(typeName, precision, scale);
+    }
+
+    /**
+     * 给裸类型名补精度/标度：JDBC 元数据的 TYPE_NAME 常不带括号参数（Oracle 全是
+     * {@code NUMBER}、PG 的 {@code numeric}），而类型映射要靠 precision/scale 区分
+     * 整数与定点——不补的话 {@code NUMBER(38,10)} 会被当成 DOUBLE（%.6f），
+     * 定点列的"第 5 位起是窗口"的口径失效（实测 oracle 的 c_high_precision 第 6 位差异被误报）。
+     */
+    private String refineTypeName(String typeName, int precision, int scale) {
+        if (typeName == null || typeName.contains("(")) {
+            return typeName;
+        }
+        String upper = typeName.trim().toUpperCase(Locale.ROOT);
+        if (!upper.equals("NUMBER") && !upper.equals("NUMERIC") && !upper.equals("DECIMAL")) {
+            return typeName;
+        }
+        if (precision <= 0) {
+            return typeName;
+        }
+        return scale > 0 ? upper + "(" + precision + "," + scale + ")" : upper + "(" + precision + ")";
+    }
+
+    /**
+     * 表是否含 LOB 列（CLOB/BLOB 等 SQL 侧无法归一化的类型）。
+     * 元数据查询失败时按"不含"处理，避免因探测本身让 open 失败。
+     */
+    private boolean hasLobColumns(ResourceLocator resource) {
+        if (resource == null || isSqlResource(resource)) {
+            return false;
+        }
+        try {
+            TablePath path = resolveTablePath(resource);
+            String schema = path.getSchema().orElse(null);
+            String table = path.getTableName();
+            try (Connection connection = getConnection()) {
+                DatabaseMetaData metaData = connection.getMetaData();
+                String catalog = connection.getCatalog();
+                // 目录大小写与元数据存储不一致时（Oracle 存大写、资源名小写）直接匹配不到，
+                // 大小写两种写法都试一次。
+                for (String candidate : new String[] { table, table.toUpperCase(Locale.ROOT),
+                        table.toLowerCase(Locale.ROOT) }) {
+                    try (ResultSet columns = metaData.getColumns(catalog, schema, candidate, null)) {
+                        while (columns.next()) {
+                            String typeName = columns.getString("TYPE_NAME");
+                            if (typeName == null) {
+                                continue;
+                            }
+                            String upper = typeName.toUpperCase(Locale.ROOT);
+                            if (upper.contains("CLOB") || upper.contains("BLOB") || upper.contains("NCLOB")) {
+                                log.info("LOB column detected in {}.{} ({}): SQL-side normalization unavailable, "
+                                        + "falling back to local comparison path", schema, table, upper);
+                                return true;
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            log.debug("LOB column discovery failed for {}: {}", resource.getPath(), e.getMessage());
+        }
+        return false;
     }
 
     private HikariDataSource getOrCreateDataSource() {
@@ -296,10 +405,31 @@ public class JdbcDatasetHandle implements DatasetHandle, RelationalDatasetSuppor
             config.addDataSourceProperty(propertyName, properties.getProperty(propertyName));
         }
         config.setMinimumIdle(1);
-        config.setMaximumPoolSize(8);
+        config.setMaximumPoolSize(resolveMaxPoolSize(connection));
+        String initSql = dialect.getConnectionInitSql();
+        if (initSql != null && !initSql.isBlank()) {
+            config.setConnectionInitSql(initSql);
+        }
         config.setPoolName("connector-" + connectorName + "-" + Integer.toHexString(System.identityHashCode(this)));
         return config;
     }
+
+    private int resolveMaxPoolSize(Map<String, Object> connection) {
+        Object raw = connection.get("maxPoolSize");
+        if (raw instanceof Number) {
+            return Math.max(((Number) raw).intValue(), 1);
+        }
+        if (raw != null) {
+            try {
+                return Math.max(Integer.parseInt(raw.toString().trim()), 1);
+            } catch (NumberFormatException e) {
+                log.warn("Invalid maxPoolSize '{}', falling back to default", raw);
+            }
+        }
+        return DEFAULT_MAX_POOL_SIZE;
+    }
+
+    private static final int DEFAULT_MAX_POOL_SIZE = 10;
 
     private String requireJdbcUrl() {
         Object rawUrl = connection.get("url");
@@ -322,39 +452,54 @@ public class JdbcDatasetHandle implements DatasetHandle, RelationalDatasetSuppor
 
         TablePath tablePath = resolveTablePath(resource);
         log.debug("Discovering JDBC schema for {}", tablePath.getFullPath());
-        try (Connection jdbcConnection = openConnection();
-             ResultSet columns = metadataColumns(jdbcConnection, tablePath)) {
-            List<FieldDescriptor> fields = new ArrayList<>();
-            while (columns.next()) {
-                String columnName = columns.getString("COLUMN_NAME");
-                String typeName = columns.getString("TYPE_NAME");
-                boolean nullable = DatabaseMetaData.columnNullable == columns.getInt("NULLABLE");
-                int ordinal = columns.getInt("ORDINAL_POSITION");
-                TypeDescriptor typeDescriptor = dialect.getDataTypeHandler().convertToTypeDescriptor(typeName).toBuilder()
-                        .nullable(nullable)
-                        .build();
-                fields.add(FieldDescriptor.builder()
-                        .name(columnName)
-                        .canonicalType(LegacyTypeMapper.toCanonicalType(typeDescriptor))
-                        .typeDescriptor(typeDescriptor)
-                        .nativeType(ConnectorNativeType.builder().name(typeName).declaration(typeName).build())
-                        .nullable(nullable)
-                        .ordinal(ordinal)
-                        .attributes(Map.of("sourceType", typeName))
-                        .build());
+        try (Connection jdbcConnection = openConnection()) {
+            SchemaDescriptor viaMetadata = null;
+            // 部分方言的 DatabaseMetaData.getColumns 会偶发挂起且无法设超时（典型：Presto），
+            // 由方言声明能否安全使用 JDBC 元数据；不支持时直接走 result-set 发现。
+            if (dialect.supportsJdbcMetadata()) {
+                try (ResultSet columns = metadataColumns(jdbcConnection, tablePath)) {
+                List<FieldDescriptor> fields = new ArrayList<>();
+                while (columns.next()) {
+                    String columnName = columns.getString("COLUMN_NAME");
+                    String typeName = columns.getString("TYPE_NAME");
+                    boolean nullable = DatabaseMetaData.columnNullable == columns.getInt("NULLABLE");
+                    int ordinal = columns.getInt("ORDINAL_POSITION");
+                    TypeDescriptor typeDescriptor = dialect.getDataTypeHandler()
+                            .convertToTypeDescriptor(qualifiedTypeName(typeName, columns)).toBuilder()
+                            .nullable(nullable)
+                            .build();
+                    fields.add(FieldDescriptor.builder()
+                            .name(columnName)
+                            .canonicalType(LegacyTypeMapper.toCanonicalType(typeDescriptor))
+                            .typeDescriptor(typeDescriptor)
+                            .nativeType(ConnectorNativeType.builder().name(typeName).declaration(typeName).build())
+                            .nullable(nullable)
+                            .ordinal(ordinal)
+                            .attributes(Map.of("sourceType", typeName))
+                            .build());
+                }
+                if (!fields.isEmpty()) {
+                    Map<String, FieldDescriptor> fieldMap = new LinkedHashMap<>();
+                    for (FieldDescriptor field : fields) {
+                        fieldMap.put(field.getName(), field);
+                    }
+                    viaMetadata = SchemaDescriptor.builder()
+                            .fields(List.copyOf(fields))
+                            .fieldMap(fieldMap)
+                            .build();
+                }
+            } catch (RuntimeException e) {
+                // Some MySQL-protocol engines (e.g. Doris) emit non-numeric metadata
+                // values (COLUMN_SIZE="*") that make the driver's DatabaseMetaData
+                // blow up mid-iteration; fall back to the result-set based discovery.
+                log.info("DatabaseMetaData.getColumns failed for {} ({}), falling back to result-set discovery",
+                        tablePath.getFullPath(), e.getMessage());
+                }
             }
-
-            if (fields.isEmpty()) {
+            if (viaMetadata == null) {
                 return discoverSchemaFromResultSet(jdbcConnection, tablePath);
             }
-            Map<String, FieldDescriptor> fieldMap = new LinkedHashMap<>();
-            for (FieldDescriptor field : fields) {
-                fieldMap.put(field.getName(), field);
-            }
-            return SchemaDescriptor.builder()
-                    .fields(List.copyOf(fields))
-                    .fieldMap(fieldMap)
-                    .build();
+            return viaMetadata;
         } catch (SQLException e) {
             throw new ConnectorException("Failed to discover JDBC schema for " + tablePath.getFullPath(), e);
         }
@@ -364,7 +509,31 @@ public class JdbcDatasetHandle implements DatasetHandle, RelationalDatasetSuppor
         DatabaseMetaData databaseMetaData = jdbcConnection.getMetaData();
         String catalog = tablePath.getCatalog().orElse(null);
         String schemaName = tablePath.getSchema().orElse(null);
-        return databaseMetaData.getColumns(catalog, schemaName, tablePath.getTableName(), null);
+        String resolved = resolveTableName(databaseMetaData, catalog, schemaName, tablePath.getTableName());
+        return databaseMetaData.getColumns(catalog, schemaName, resolved, null);
+    }
+
+    /**
+     * 解析表的真实大小写名：Oracle 元数据存大写、资源名常为小写，直接用资源名查列会返回空集，
+     * 引擎会退到 ResultSetMetaData 路径（拿不到 DECIMAL_DIGITS，定点列被当成 DOUBLE）。
+     * 用 getTables 按大小写不敏感匹配，取元数据里的真实名字（避免 beforeFirst，前向结果集不支持）。
+     */
+    private String resolveTableName(DatabaseMetaData databaseMetaData, String catalog, String schema,
+                                    String table) {
+        for (String candidate : new String[] { table, table.toUpperCase(Locale.ROOT),
+                table.toLowerCase(Locale.ROOT) }) {
+            try (ResultSet tables = databaseMetaData.getTables(catalog, schema, candidate, null)) {
+                while (tables.next()) {
+                    String name = tables.getString("TABLE_NAME");
+                    if (name != null && name.equalsIgnoreCase(table)) {
+                        return name;
+                    }
+                }
+            } catch (SQLException e) {
+                log.debug("Table name resolution failed for {}: {}", table, e.getMessage());
+            }
+        }
+        return table;
     }
 
     private SchemaDescriptor discoverSchemaFromResultSet(Connection jdbcConnection, TablePath tablePath) throws SQLException {
@@ -381,7 +550,8 @@ public class JdbcDatasetHandle implements DatasetHandle, RelationalDatasetSuppor
     }
 
     private SchemaDescriptor discoverSchemaFromSqlResultSet(Connection jdbcConnection, String sqlResource) throws SQLException {
-        String sql = "SELECT * FROM (" + sqlResource + ") consilens_schema WHERE 1 = 0";
+        String sql = dialect.getSqlQueryGenerator().getSelectSQLFromSql(
+                sqlResource, List.of("*"), "1 = 0", null);
         try (PreparedStatement statement = jdbcConnection.prepareStatement(sql);
              ResultSet resultSet = statement.executeQuery()) {
             return toSchemaDescriptor(resultSet.getMetaData());
@@ -394,7 +564,12 @@ public class JdbcDatasetHandle implements DatasetHandle, RelationalDatasetSuppor
         for (int index = 1; index <= resultSetMetaData.getColumnCount(); index++) {
             String columnName = resultSetMetaData.getColumnLabel(index);
             String typeName = resultSetMetaData.getColumnTypeName(index);
-            TypeDescriptor typeDescriptor = dialect.getDataTypeHandler().convertToTypeDescriptor(typeName).toBuilder()
+            // Oracle 的 getColumnTypeName 只给裸 "NUMBER"（无精度/标度）：不补参数时
+            // 整数列会被当成 DECIMAL（"54.0000" vs "54"）、定点列会被当成 DOUBLE
+            // （第 5 位起本该是窗口的差异被误报）。用 JDBC 的 precision/scale 补全。
+            String refinedTypeName = refineTypeName(typeName,
+                    resultSetMetaData.getPrecision(index), resultSetMetaData.getScale(index));
+            TypeDescriptor typeDescriptor = dialect.getDataTypeHandler().convertToTypeDescriptor(refinedTypeName).toBuilder()
                     .nullable(resultSetMetaData.isNullable(index) != ResultSetMetaData.columnNoNulls)
                     .build();
             FieldDescriptor field = FieldDescriptor.builder()
@@ -531,49 +706,153 @@ public class JdbcDatasetHandle implements DatasetHandle, RelationalDatasetSuppor
             selectExpressions.add(dialect.getCapabilityProvider().quote(column));
         }
         List<String> keyColumns = keyColumns(segment);
-        StringBuilder sql = new StringBuilder();
-        sql.append("SELECT ").append(String.join(", ", selectExpressions))
-                .append(" FROM (").append(sqlResource).append(") consilens_base");
         String whereClause = buildWhereClause(segment, keyColumns);
-        if (whereClause != null && !whereClause.isBlank()) {
-            sql.append(" WHERE ").append(whereClause);
-        }
-        if (includeOrderBy && !keyColumns.isEmpty()) {
-            sql.append(" ORDER BY ");
-            sql.append(String.join(", ", keyColumns.stream()
-                    .map(dialect.getCapabilityProvider()::quote)
-                    .toArray(String[]::new)));
-        }
+        // 走 generator 的统一入口：ORDER BY 必须与 Java 归并比较用同一归一化形态，
+        // 且会去除 SQL 资源末尾分号（否则包装成派生表后语法错误）。
+        String sql = dialect.getSqlQueryGenerator().getSelectSQLFromSql(
+                sqlResource,
+                selectExpressions,
+                whereClause,
+                includeOrderBy && !keyColumns.isEmpty() ? keyColumns : null);
         if (segment.getSplit() instanceof OffsetLimitSplit) {
             OffsetLimitSplit split = (OffsetLimitSplit) segment.getSplit();
-            sql.append(" ").append(dialect.getSqlQueryGenerator().getLimitClause(split.getOffset(), split.getLimit()));
+            sql = sql + " " + dialect.getSqlQueryGenerator().getLimitClause(split.getOffset(), split.getLimit());
         }
-        return sql.toString();
+        return sql;
     }
 
     private CanonicalRecord readRecord(ResultSet resultSet,
                                        List<String> selectColumns,
                                        CompareSegment segment,
                                        SchemaDescriptor schemaDescriptor) throws SQLException {
-        List<String> keyColumns = keyColumns(segment);
+        List<String> keyColumns = keyColumnsCached(segment);
+        Set<String> keyColumnSet = keyColumnSetCached(segment);
         List<Object> keyParts = new ArrayList<>(keyColumns.size());
         Map<String, CanonicalValue> values = new LinkedHashMap<>();
         Map<String, FieldDescriptor> fieldMap = schemaDescriptor.getFieldMap() != null
                 ? schemaDescriptor.getFieldMap()
                 : Collections.emptyMap();
+        Map<String, FieldDescriptor> foldedFields = foldedFieldsCached(schemaDescriptor, fieldMap);
         for (int index = 0; index < selectColumns.size(); index++) {
             String column = selectColumns.get(index);
-            Object value = resultSet.getObject(index + 1);
-            if (keyColumns.contains(column)) {
+            FieldDescriptor field = fieldMap.get(column);
+            if (field == null) {
+                // Oracle 元数据列名全大写，任务列名小写：大小写敏感查找会落空，
+                // CanonicalValue 的类型会退化成 UNKNOWN（本地归一化随即失真）
+                field = foldedFields.get(column.toLowerCase(Locale.ROOT));
+            }
+            // 日期时间列按字符串取：Oracle 驱动对 TIMESTAMP WITH TIME ZONE 返回
+            // oracle.sql.TIMESTAMPTZ 句柄（无 stringValue()，toString 只有句柄地址），
+            // 两侧句柄必然不同 → 全表误报。getString 给的是可解析的 SQL 文本。
+            Object value = isTemporal(field)
+                    ? resultSet.getString(index + 1)
+                    : toPortableValue(materializeLob(resultSet.getObject(index + 1)));
+            if (keyColumnSet.contains(column.toLowerCase(Locale.ROOT))) {
                 keyParts.add(value);
             }
-            FieldDescriptor field = fieldMap.get(column);
             values.put(column, CanonicalValue.builder()
                     .type(resolveCanonicalType(field))
                     .value(value)
                     .build());
         }
         return new JdbcCanonicalRecord(RecordKey.builder().parts(keyParts).build(), values);
+    }
+
+    private List<String> keyColumnsCached(CompareSegment segment) {
+        if (segment != cachedKeySegment) {
+            cachedKeySegment = segment;
+            cachedKeyColumns = keyColumns(segment);
+            Set<String> folded = new LinkedHashSet<>();
+            for (String key : cachedKeyColumns) {
+                if (key != null) {
+                    folded.add(key.toLowerCase(Locale.ROOT));
+                }
+            }
+            cachedKeyColumnSet = folded;
+        }
+        return cachedKeyColumns;
+    }
+
+    private Set<String> keyColumnSetCached(CompareSegment segment) {
+        keyColumnsCached(segment);
+        return cachedKeyColumnSet;
+    }
+
+    private Map<String, FieldDescriptor> foldedFieldsCached(SchemaDescriptor schema,
+                                                            Map<String, FieldDescriptor> fieldMap) {
+        if (schema != cachedFoldSchema) {
+            cachedFoldSchema = schema;
+            Map<String, FieldDescriptor> folded = new LinkedHashMap<>();
+            for (Map.Entry<String, FieldDescriptor> entry : fieldMap.entrySet()) {
+                folded.putIfAbsent(entry.getKey().toLowerCase(Locale.ROOT), entry.getValue());
+            }
+            cachedFoldedFields = folded;
+        }
+        return cachedFoldedFields;
+    }
+
+    private boolean isTemporal(FieldDescriptor field) {
+        if (field == null) {
+            return false;
+        }
+        String canonical = field.getTypeDescriptor() != null
+                ? field.getTypeDescriptor().getType() != null ? field.getTypeDescriptor().getType().name() : null
+                : field.getCanonicalType();
+        if (canonical == null) {
+            return false;
+        }
+        String upper = canonical.toUpperCase(Locale.ROOT);
+        return upper.contains("DATE") || upper.contains("TIME");
+    }
+
+    /**
+     * 把驱动专有类型折叠成通用 Java 值：Oracle 的 {@code oracle.sql.TIMESTAMP} 等
+     * 既不能被 Jackson 序列化（差异写入 sink 时抛异常），也不能被 Java 侧归一化器识别。
+     * 只保留标准类型（字符串/数字/布尔/字节/日期时间），其余取其字符串形态。
+     */
+    private Object toPortableValue(Object value) {
+        if (value == null || value instanceof String || value instanceof Number || value instanceof Boolean
+                || value instanceof byte[] || value instanceof java.util.Date
+                || value instanceof java.time.temporal.Temporal) {
+            return value;
+        }
+        // Oracle 驱动的 oracle.sql.* 句柄：取其 stringValue() 的 SQL 形态文本。
+        // toString() 只给句柄地址（oracle.sql.TIMESTAMPTZ@1a2b），两侧句柄必然不同，
+        // 会把所有行判成差异（实测 c_timestamptz 全表误报）。
+        if (value.getClass().getName().startsWith("oracle.sql.")) {
+            try {
+                Object text = value.getClass().getMethod("stringValue").invoke(value);
+                if (text != null) {
+                    return text.toString();
+                }
+            } catch (Exception ignored) {
+                // 反射失败时落到下面的 toString 兜底
+            }
+        }
+        String text = value.toString();
+        log.debug("Converting driver-specific value {} to text: {}", value.getClass().getName(), text);
+        return text;
+    }
+
+    /**
+     * LOB 物化：驱动对 CLOB/BLOB 返回 {@link Clob}/{@link Blob} 句柄，直接 toString
+     * 会得到 "oracle.sql.CLOB@..." 之类的句柄串，本地归一化必然出错。取回实际内容
+     * （CLOB → String，BLOB → byte[]），与其它方言的字符串/二进制值同形。
+     */
+    private Object materializeLob(Object value) throws SQLException {
+        if (value instanceof Clob) {
+            Clob clob = (Clob) value;
+            long length = clob.length();
+            return length > Integer.MAX_VALUE ? clob.getSubString(1, Integer.MAX_VALUE)
+                    : clob.getSubString(1, (int) length);
+        }
+        if (value instanceof Blob) {
+            Blob blob = (Blob) value;
+            long length = blob.length();
+            return length > Integer.MAX_VALUE ? blob.getBytes(1, Integer.MAX_VALUE)
+                    : blob.getBytes(1, (int) length);
+        }
+        return value;
     }
 
     private void applyReadOptions(PreparedStatement statement) throws SQLException {
@@ -616,6 +895,12 @@ public class JdbcDatasetHandle implements DatasetHandle, RelationalDatasetSuppor
                 return "user";
             case "driver":
             case "driverclassname":
+            // host/port/database are URL constituents injected by server-side
+            // datasource references; strict drivers (trino/presto, clickhouse-jdbc)
+            // reject them as unknown properties
+            case "host":
+            case "port":
+            case "database":
                 return null;
             default:
                 return key;
@@ -634,16 +919,33 @@ public class JdbcDatasetHandle implements DatasetHandle, RelationalDatasetSuppor
     }
 
     private void configureStreamingConnection(Connection jdbcConnection) throws SQLException {
-        if ("postgresql".equals(connectorType) && jdbcConnection.getAutoCommit()) {
+        if (dialect.requiresTransactionForStreamingReads() && jdbcConnection.getAutoCommit()) {
             jdbcConnection.setAutoCommit(false);
         }
     }
 
     private List<String> selectColumns(CompareSegment segment, SchemaDescriptor schemaDescriptor) {
         List<String> keyColumns = keyColumns(segment);
-        LinkedHashSet<String> columns = new LinkedHashSet<>(keyColumns);
+        LinkedHashSet<String> columns = new LinkedHashSet<>();
+        // 键名可能来自用户配置（小写），而数据库元数据可能是大写（Oracle）。
+        // 统一解析成 schema 中的实际列名，避免同一列被选两次。
+        for (String key : keyColumns) {
+            columns.add(resolveColumnName(key, schemaDescriptor));
+        }
         columns.addAll(comparisonColumns(segment.getComparisons(), schemaDescriptor, keyColumns));
         return List.copyOf(columns);
+    }
+
+    private static String resolveColumnName(String name, SchemaDescriptor schemaDescriptor) {
+        if (name == null || schemaDescriptor == null || schemaDescriptor.getFields() == null) {
+            return name;
+        }
+        for (FieldDescriptor field : schemaDescriptor.getFields()) {
+            if (field.getName() != null && field.getName().equalsIgnoreCase(name)) {
+                return field.getName();
+            }
+        }
+        return name;
     }
 
     private List<String> comparisonColumns(ComparisonSpec comparisons,
@@ -653,8 +955,8 @@ public class JdbcDatasetHandle implements DatasetHandle, RelationalDatasetSuppor
         if (comparisons != null && comparisons.getFields() != null && !comparisons.getFields().isEmpty()) {
             List<String> result = new ArrayList<>();
             for (String field : comparisons.getFields()) {
-                if (field != null && !excluded.contains(field)) {
-                    result.add(field);
+                if (field != null && !isExcluded(excluded, field)) {
+                    result.add(resolveColumnName(field, schemaDescriptor));
                 }
             }
             return List.copyOf(result);
@@ -662,17 +964,26 @@ public class JdbcDatasetHandle implements DatasetHandle, RelationalDatasetSuppor
         if (schemaDescriptor == null || schemaDescriptor.getFields() == null) {
             return List.of();
         }
-        Set<String> keys = new LinkedHashSet<>(keyColumns);
+        Set<String> keys = new java.util.HashSet<>();
+        for (String key : keyColumns) {
+            if (key != null) {
+                keys.add(key.toLowerCase(java.util.Locale.ROOT));
+            }
+        }
         List<String> result = new ArrayList<>();
         for (FieldDescriptor field : schemaDescriptor.getFields()) {
             if (field.getName() != null
-                    && !keys.contains(field.getName())
-                    && !excluded.contains(field.getName())
+                    && !keys.contains(field.getName().toLowerCase(java.util.Locale.ROOT))
+                    && !isExcluded(excluded, field.getName())
                     && !DerivedCompareColumns.isDerived(field.getName())) {
                 result.add(field.getName());
             }
         }
         return result;
+    }
+
+    private static boolean isExcluded(Set<String> excluded, String field) {
+        return field != null && excluded.contains(field.toLowerCase(java.util.Locale.ROOT));
     }
 
     private Set<String> excludedColumns(ComparisonSpec comparisons) {
@@ -682,7 +993,7 @@ public class JdbcDatasetHandle implements DatasetHandle, RelationalDatasetSuppor
         Set<String> result = new LinkedHashSet<>();
         for (String field : comparisons.getExclude()) {
             if (field != null && !field.trim().isEmpty()) {
-                result.add(field.trim());
+                result.add(field.trim().toLowerCase(java.util.Locale.ROOT));
             }
         }
         return result;
@@ -700,8 +1011,15 @@ public class JdbcDatasetHandle implements DatasetHandle, RelationalDatasetSuppor
         Map<String, FieldDescriptor> fieldMap = schemaDescriptor.getFieldMap() != null
                 ? schemaDescriptor.getFieldMap()
                 : Collections.emptyMap();
+        Map<String, FieldDescriptor> folded = new LinkedHashMap<>();
+        for (Map.Entry<String, FieldDescriptor> entry : fieldMap.entrySet()) {
+            folded.putIfAbsent(entry.getKey().toLowerCase(Locale.ROOT), entry.getValue());
+        }
         for (String column : columns) {
             FieldDescriptor field = fieldMap.get(column);
+            if (field == null && column != null) {
+                field = folded.get(column.toLowerCase(Locale.ROOT));
+            }
             result.put(column, field != null ? resolveDataType(resolveCanonicalType(field)) : DataType.UNKNOWN);
         }
         return result;
@@ -737,6 +1055,161 @@ public class JdbcDatasetHandle implements DatasetHandle, RelationalDatasetSuppor
                 .addBaseFilter(segment.getFilter())
                 .addSplit(segment.getSplit(), keyColumns)
                 .build();
+    }
+
+    private List<SegmentSplit> planKeyRangeSplits(CompareSegment segment, SplitOptions options) {
+        validateRangeSplitResource();
+        String keyColumn = validateRangeSplitKey(segment);
+        String baseWhereClause = new WhereClauseBuilder(dialect)
+                .addBaseFilter(segment.getFilter())
+                .build();
+        TablePath tablePath = resolveTablePath(resource);
+
+        try (Connection jdbcConnection = openConnection()) {
+            long rowCount = queryCount(jdbcConnection, tablePath, baseWhereClause);
+            if (rowCount == 0) {
+                return List.of();
+            }
+            rejectNullKeys(jdbcConnection, tablePath, keyColumn, baseWhereClause);
+            BigDecimal minKey = queryKeyBound(jdbcConnection, tablePath, keyColumn, true, baseWhereClause);
+            BigDecimal maxKey = queryKeyBound(jdbcConnection, tablePath, keyColumn, false, baseWhereClause);
+            if (minKey == null || maxKey == null) {
+                throw new ConnectorException("JDBC range split key '" + keyColumn + "' must not contain null values");
+            }
+            return buildRangeSplits(minKey, maxKey, resolveSplitCount(options, rowCount));
+        } catch (SQLException e) {
+            throw new ConnectorException("Failed to plan JDBC key range splits for " + tablePath.getFullPath(), e);
+        }
+    }
+
+    private void validateRangeSplitResource() {
+        if (resource == null || resource.getType() == null || !"table".equalsIgnoreCase(resource.getType())) {
+            throw new ConnectorException("JDBC key range splits require a table resource");
+        }
+    }
+
+    private String validateRangeSplitKey(CompareSegment segment) {
+        if (segment == null || segment.getKeySpec() == null || segment.getKeySpec().getFields() == null
+                || segment.getKeySpec().getFields().size() != 1) {
+            throw new ConnectorException("JDBC key range splits require exactly one key column");
+        }
+        String keyColumn = segment.getKeySpec().getFields().get(0);
+        if (keyColumn == null || keyColumn.trim().isEmpty()) {
+            throw new ConnectorException("JDBC key range split column must not be blank");
+        }
+        FieldDescriptor field = findField(getSchema(), keyColumn);
+        if (field == null) {
+            throw new ConnectorException("JDBC key range split column is not present in the table schema: " + keyColumn);
+        }
+        DataType keyType = resolveDataType(resolveCanonicalType(field));
+        if (!isRangeSplitKeyType(keyType)) {
+            throw new ConnectorException("JDBC key range split requires an integer, DECIMAL, or NUMERIC key column: "
+                    + keyColumn);
+        }
+        return field.getName();
+    }
+
+    private boolean isRangeSplitKeyType(DataType keyType) {
+        return keyType == DataType.TINYINT
+                || keyType == DataType.SMALLINT
+                || keyType == DataType.INTEGER
+                || keyType == DataType.BIGINT
+                || keyType == DataType.DECIMAL
+                || keyType == DataType.NUMERIC;
+    }
+
+    private FieldDescriptor findField(SchemaDescriptor schemaDescriptor, String fieldName) {
+        if (schemaDescriptor == null || schemaDescriptor.getFields() == null) {
+            return null;
+        }
+        for (FieldDescriptor field : schemaDescriptor.getFields()) {
+            if (field != null && fieldName.equals(field.getName())) {
+                return field;
+            }
+        }
+        return null;
+    }
+
+    private long queryCount(Connection jdbcConnection, TablePath tablePath, String whereClause) throws SQLException {
+        String sql = dialect.getSqlQueryGenerator().getCountSQL(
+                tablePath.getSchema().orElse(null), tablePath.getTableName(), whereClause);
+        try (PreparedStatement statement = jdbcConnection.prepareStatement(sql);
+             ResultSet resultSet = statement.executeQuery()) {
+            return resultSet.next() ? resultSet.getLong(1) : 0L;
+        }
+    }
+
+    private void rejectNullKeys(Connection jdbcConnection,
+                                TablePath tablePath,
+                                String keyColumn,
+                                String baseWhereClause) throws SQLException {
+        String nullKeyPredicate = dialect.getCapabilityProvider().quote(keyColumn) + " IS NULL";
+        String whereClause = baseWhereClause == null
+                ? nullKeyPredicate
+                : baseWhereClause + " AND " + nullKeyPredicate;
+        if (queryCount(jdbcConnection, tablePath, whereClause) > 0) {
+            throw new ConnectorException("JDBC key range split key must not contain null values: " + keyColumn);
+        }
+    }
+
+    private BigDecimal queryKeyBound(Connection jdbcConnection,
+                                     TablePath tablePath,
+                                     String keyColumn,
+                                     boolean min,
+                                     String whereClause) throws SQLException {
+        String sql = dialect.getSqlQueryGenerator().getMinMaxKeySQL(
+                tablePath.getSchema().orElse(null), tablePath.getTableName(), List.of(keyColumn), min, whereClause);
+        try (PreparedStatement statement = jdbcConnection.prepareStatement(sql);
+             ResultSet resultSet = statement.executeQuery()) {
+            return resultSet.next() ? resultSet.getBigDecimal(1) : null;
+        }
+    }
+
+    private int resolveSplitCount(SplitOptions options, long rowCount) {
+        if (options == null) {
+            throw new ConnectorException("JDBC key range split options are required");
+        }
+        Integer expectedSplitCount = options.getExpectedSplitCount();
+        Long targetRowsPerSplit = options.getTargetRowsPerSplit();
+        if (expectedSplitCount != null && targetRowsPerSplit != null) {
+            throw new ConnectorException("Specify either expectedSplitCount or targetRowsPerSplit for JDBC key range splits");
+        }
+        if (expectedSplitCount != null) {
+            if (expectedSplitCount <= 0) {
+                throw new ConnectorException("expectedSplitCount must be greater than zero");
+            }
+            return (int) Math.min(expectedSplitCount.longValue(), rowCount);
+        }
+        if (targetRowsPerSplit == null || targetRowsPerSplit <= 0) {
+            throw new ConnectorException("targetRowsPerSplit must be greater than zero when expectedSplitCount is absent");
+        }
+        long splitCount = rowCount / targetRowsPerSplit
+                + (rowCount % targetRowsPerSplit == 0 ? 0 : 1);
+        if (splitCount > Integer.MAX_VALUE) {
+            throw new ConnectorException("Derived JDBC key range split count exceeds integer range");
+        }
+        return (int) splitCount;
+    }
+
+    private List<SegmentSplit> buildRangeSplits(BigDecimal minKey, BigDecimal maxKey, int splitCount) {
+        if (minKey.compareTo(maxKey) == 0 || splitCount == 1) {
+            return List.of(KeyRangeSplit.builder().startKey(List.of(minKey)).endKey(null).build());
+        }
+        int scale = Math.max(Math.max(minKey.scale(), maxKey.scale()), 0) + 16;
+        BigDecimal step = maxKey.subtract(minKey)
+                .divide(BigDecimal.valueOf(splitCount), scale, RoundingMode.UP);
+        List<SegmentSplit> splits = new ArrayList<>(splitCount);
+        BigDecimal start = minKey;
+        for (int index = 1; index < splitCount; index++) {
+            BigDecimal end = minKey.add(step.multiply(BigDecimal.valueOf(index)));
+            if (end.compareTo(maxKey) >= 0) {
+                break;
+            }
+            splits.add(KeyRangeSplit.builder().startKey(List.of(start)).endKey(List.of(end)).build());
+            start = end;
+        }
+        splits.add(KeyRangeSplit.builder().startKey(List.of(start)).endKey(null).build());
+        return List.copyOf(splits);
     }
 
     private String buildKeyRangePredicate(KeyRangeSplit split, List<String> keyColumns) {
@@ -819,7 +1292,7 @@ public class JdbcDatasetHandle implements DatasetHandle, RelationalDatasetSuppor
         }
     }
 
-    private Map<String, Object> discoverDorisPartitionAttributes(ResourceLocator resourceLocator) {
+    private Map<String, Object> discoverPartitionAttributes(ResourceLocator resourceLocator) {
         Map<String, Object> attributes = new LinkedHashMap<>();
         if (resourceLocator == null) {
             return attributes;
@@ -847,7 +1320,7 @@ public class JdbcDatasetHandle implements DatasetHandle, RelationalDatasetSuppor
                 if (ddl.toUpperCase(Locale.ROOT).contains("PARTITION BY")) {
                     attributes.put("partitioned", Boolean.TRUE);
                 }
-                Matcher matcher = DORIS_PARTITION_PATTERN.matcher(ddl);
+                Matcher matcher = PARTITION_PATTERN.matcher(ddl);
                 if (matcher.find()) {
                     String[] columns = matcher.group(1).split(",");
                     List<String> keys = new ArrayList<>();

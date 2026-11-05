@@ -108,6 +108,35 @@ class JsonDiffRecordSinkTest {
         assertEquals("task-1", row.get("taskId").asText());
     }
 
+    @Test
+    void shouldWriteRecordsIncrementallyAcrossBatches() throws Exception {
+        Path output = tempDir.resolve("streamed-diff-records.json");
+        Map<String, Object> properties = new LinkedHashMap<>();
+        properties.put("path", output.toString());
+
+        SinkConfig config = new SinkConfig();
+        config.setFormat("json");
+        config.setType("diff-record");
+        config.setProperties(OBJECT_MAPPER.writeValueAsString(properties));
+
+        DiffContext context = DiffContext.builder().taskId("task-1").build();
+        JsonDiffRecordSink sink = new JsonDiffRecordSink();
+        sink.open(config, context);
+        sink.onDiffRecords(List.of(
+                DiffRow.added(List.of(1), List.of("A"), List.of("id", "name")),
+                DiffRow.added(List.of(2), List.of("B"), List.of("id", "name"))),
+                context);
+        sink.onDiffRecords(List.of(
+                DiffRow.removed(List.of(3), List.of("C"), List.of("id", "name"))),
+                context);
+        sink.close();
+
+        JsonNode root = OBJECT_MAPPER.readTree(Files.readString(output));
+        assertTrue(root.isArray());
+        assertEquals(3, root.size());
+        assertEquals("3", root.get(2).get("primaryKey").asText());
+    }
+
     private void write(Path output, Map<String, Object> properties, DiffRow row) throws Exception {
         Map<String, Object> jsonProperties = new LinkedHashMap<>(properties);
         jsonProperties.put("path", output.toString());

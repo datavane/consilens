@@ -41,7 +41,7 @@ public enum DataType {
     static {
         for (DataType dataType : values()) {
             LOOKUP.put(dataType.name(), dataType);
-            LOOKUP.put(dataType.typeName, dataType);
+            LOOKUP.put(dataType.typeName.toUpperCase(), dataType);
         }
     }
 

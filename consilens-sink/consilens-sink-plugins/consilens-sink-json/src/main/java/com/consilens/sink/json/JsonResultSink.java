@@ -1,5 +1,6 @@
 package com.consilens.sink.json;
 
+import com.consilens.common.io.PathSupport;
 import com.consilens.core.diff.DiffResult;
 import com.consilens.core.lifecycle.DiffContext;
 import com.consilens.sink.api.ColumnValueInterpolator;
@@ -63,9 +64,7 @@ public class JsonResultSink implements Sink {
             return;
         }
         Path path = Paths.get(resolvedPath);
-        if (path.getParent() != null) {
-            Files.createDirectories(path.getParent());
-        }
+        PathSupport.ensureParent(path);
         Object output;
         if (sinkConfig.hasCustomColumns()) {
             List<ColumnMapping> fields = sinkConfig.getColumns();

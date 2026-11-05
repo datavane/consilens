@@ -1,0 +1,26 @@
+# 集群提交测试专用 profile（默认不启用）。
+#
+# 本机开发时业务数据源通常指向 localhost（127.0.0.1:3306），
+# 但 YARN AM 容器 / K8s Pod 内的 127.0.0.1 指向容器自身，
+# 因此提交 descriptor 时需要按平台把 loopback host 替换成集群内可达地址。
+#
+# 启用方式（仅在需要跑 YARN/K8s 提交时）：
+#   --spring.profiles.active=mysql,cluster-e2e
+#
+# 生产环境的数据源本身就是集群可达地址，无需启用本 profile。
+spring:
+  config:
+    activate:
+      on-profile: cluster-e2e
+
+consilens:
+  server:
+    cluster:
+      loopback-hosts:
+        # YARN 容器在同一个 Docker 网络内，通过容器名访问 MySQL（容器内端口 3306）
+        yarn: mysql-host
+        kubernetes: mysql-host.default.svc.cluster.local
+      loopback-ports:
+        # YARN 用容器内端口；K8s Service 同样暴露 3306
+        yarn: 3306
+        kubernetes: 3306

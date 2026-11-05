@@ -50,8 +50,8 @@ public class ConfigNormalizer {
         if (strategy.getBisectionFactor() == null || strategy.getBisectionFactor() <= 0) {
             strategy.setBisectionFactor(4);
         }
-        if (strategy.getEnableProfiling() == null) {
-            strategy.setEnableProfiling(false);
+        if (strategy.getAllowNullableKeys() == null) {
+            strategy.setAllowNullableKeys(false);
         }
 
         if (config.getConcurrency() == null) {

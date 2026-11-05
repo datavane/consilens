@@ -52,13 +52,4 @@ public class MySQLCapabilityProvider extends BaseCapabilityProvider {
         return EnumSet.copyOf(MYSQL_FEATURES);
     }
 
-    @Override
-    public String getDefaultSchema() {
-        return "mysql";
-    }
-
-    @Override
-    public String getPaginationHint(long offset, long limit) {
-        return ""; // MySQL doesn't need pagination hints
-    }
 }

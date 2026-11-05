@@ -52,18 +52,4 @@ public class DorisCapabilityProvider extends BaseCapabilityProvider {
         return EnumSet.copyOf(DORIS_FEATURES);
     }
 
-    @Override
-    public String getDefaultSchema() {
-        return "doris";
-    }
-
-    @Override
-    public char getWildcardEscapeChar() {
-        return '\\';
-    }
-
-    @Override
-    public String getPaginationHint(long offset, long limit) {
-        return ""; // Doris doesn't need pagination hints
-    }
 }

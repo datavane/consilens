@@ -33,7 +33,25 @@ public class ChecksumPlanExecutor implements PlanExecutor<ComparePlan> {
              RelationalCompareSegmentAdapter.PreparedTableSegment targetSegment =
                       RelationalCompareSegmentAdapter.toTableSegment(target, executionSettings);
              ChecksumDiffer differ = new ChecksumDiffer(executionSettings.toDifferConfig())) {
+            warnIfRowBudgetNotEnforceable(executionSettings);
             return differ.diffTables(sourceSegment.getTableSegment(), targetSegment.getTableSegment()).get();
+        }
+    }
+
+    /**
+     * pushdown-checksum 只在"哈希不一致、需要本地比对"的分段上统计扫描行数；纯 SQL 哈希对比
+     * 一行都不在本地过，因此 {@code maxRowsScanned} 不会累计。这里显式提示，
+     * 避免用户以为设了行数上限就被保护住了（静默失效比报错更危险）。
+     */
+    private static void warnIfRowBudgetNotEnforceable(CompareExecutionSettings settings) {
+        if (settings == null) {
+            return;
+        }
+        long maxRows = settings.getMaxRowsScanned();
+        if (maxRows > 0 && maxRows < Long.MAX_VALUE) {
+            log.warn("maxRowsScanned={} is only enforced on segments that fall back to local comparison; "
+                    + "a pure SQL hash comparison scans no rows locally, so the budget may never trip. "
+                    + "Use maxDurationMs, or the join/java engine, if you need a hard cap.", maxRows);
         }
     }
 

@@ -24,6 +24,11 @@ import java.util.Map;
 @Slf4j
 public class TiDBSqlQueryGenerator extends BaseSqlQueryGenerator {
 
+    @Override
+    public boolean backslashEscapesStringLiterals() {
+        return true;
+    }
+
     private final CapabilityProvider capabilityProvider;
     private final DataTypeHandler dataTypeHandler;
 
@@ -32,6 +37,25 @@ public class TiDBSqlQueryGenerator extends BaseSqlQueryGenerator {
         super(capabilityProvider);
         this.capabilityProvider = capabilityProvider;
         this.dataTypeHandler = dataTypeHandler;
+    }
+
+
+    /** MySQL 族没有 VARCHAR 类型，字符串化排序用 CHAR（与 MySQL 生成器一致）。 */
+    @Override
+    protected String orderByExpression(String column) {
+        return "CAST(" + capabilityProvider.quote(column) + " AS CHAR)";
+    }
+
+    /** join 计划比较列的类型归一化处理器（与 checksum 路径同口径）。 */
+    @Override
+    protected com.consilens.connector.api.DataTypeHandler dataTypeHandler() {
+        return this.dataTypeHandler;
+    }
+
+    /** 归一化结果为字符串时，须做字节级比较以规避库内排序规则（如 utf8mb4_0900_ai_ci）。 */
+    @Override
+    protected String binarySafeExpression(String expression) {
+        return "HEX(" + expression + ")";
     }
 
     @Override
@@ -60,10 +84,13 @@ public class TiDBSqlQueryGenerator extends BaseSqlQueryGenerator {
         if (columns.isEmpty()) {
             sql.append("'' as checksum ");
         } else {
-            // BUGFIX: Use only primary key columns for ordering to ensure stable sort
-            // TiDB is MySQL-compatible, use same approach as MySQL
-            sql.append("COALESCE(MD5(GROUP_CONCAT(row_checksum ORDER BY pk_key SEPARATOR '|')), '') as checksum ");
+            // TiDB bug workaround: GROUP_CONCAT(... ORDER BY <alias>) causes TiDB to crash
+            // with "runtime error: index out of range". Use nested subquery with ORDER BY + LIMIT
+            // to achieve deterministic ordering without triggering the bug.
+            // Verified: produces identical checksums to MySQL's GROUP_CONCAT(ORDER BY) approach.
+            sql.append("COALESCE(MD5(GROUP_CONCAT(row_checksum SEPARATOR '|')), '') as checksum ");
             sql.append("FROM (");
+            sql.append("SELECT row_checksum FROM (");
             sql.append("SELECT ");
 
             // Build primary key for stable ordering
@@ -74,7 +101,7 @@ public class TiDBSqlQueryGenerator extends BaseSqlQueryGenerator {
                 }
                 String col = keyColumns.get(i);
                 DataType dataType = columnDataTypes.get(col);
-                sql.append(dataTypeHandler.normalizeColumn(col, dataType));
+                sql.append(escapeHashValue(dataTypeHandler.normalizeColumn(col, dataType)));
             }
             sql.append(") as pk_key, ");
 
@@ -86,7 +113,7 @@ public class TiDBSqlQueryGenerator extends BaseSqlQueryGenerator {
                 }
                 String col = columns.get(i);
                 DataType dataType = columnDataTypes.get(col);
-                sql.append(dataTypeHandler.normalizeColumn(col, dataType));
+                sql.append(escapeHashValue(dataTypeHandler.normalizeColumn(col, dataType)));
             }
             sql.append(")) as row_checksum ");
 
@@ -97,6 +124,11 @@ public class TiDBSqlQueryGenerator extends BaseSqlQueryGenerator {
                 sql.append(" WHERE ").append(whereClause);
             }
 
+            // ORDER BY in subquery requires LIMIT to be enforced by optimizer.
+            // The unsigned-bigint cap keeps ORDER BY effective without truncating
+            // checksums on tables larger than ten million rows.
+            sql.append(" ORDER BY pk_key, row_checksum LIMIT 18446744073709551615");
+            sql.append(") AS ordered");
             sql.append(") AS data");
         }
 
@@ -106,38 +138,46 @@ public class TiDBSqlQueryGenerator extends BaseSqlQueryGenerator {
     }
 
     @Override
-    public String getFullOuterJoinSQL(String table1, String table2,
-            List<String> joinColumns,
+    public String getRowHashSQL(String schemaName, String tableName,
+            List<String> primaryKeys,
+            List<String> columns,
+            Map<String, DataType> columnDataTypes,
             String whereClause) {
-        // TiDB doesn't support FULL OUTER JOIN directly, simulate using UNION
         StringBuilder sql = new StringBuilder();
 
-        sql.append("(SELECT * FROM ").append(capabilityProvider.quote(table1))
-                .append(" LEFT JOIN ").append(capabilityProvider.quote(table2))
-                .append(" ON ").append(buildJoinCondition(table1, table2, joinColumns))
-                .append(") UNION (SELECT * FROM ").append(capabilityProvider.quote(table1))
-                .append(" RIGHT JOIN ").append(capabilityProvider.quote(table2))
-                .append(" ON ").append(buildJoinCondition(table1, table2, joinColumns))
-                .append(" WHERE ");
-
-        for (int i = 0; i < joinColumns.size(); i++) {
+        // SELECT primary key columns
+        sql.append("SELECT ");
+        for (int i = 0; i < primaryKeys.size(); i++) {
             if (i > 0) {
-                sql.append(" AND ");
+                sql.append(", ");
             }
-            sql.append(capabilityProvider.quote(table1)).append(".")
-                    .append(capabilityProvider.quote(joinColumns.get(i)))
-                    .append(" IS NULL");
+            sql.append(capabilityProvider.quote(primaryKeys.get(i)));
         }
-        sql.append(")");
 
+        // Add row_hash column using MD5(CONCAT_WS('|', ...))
+        // TiDB is MySQL-compatible, so CONCAT_WS and MD5 work the same way
+        sql.append(", MD5(CONCAT_WS('|'");
+
+        // Add normalized columns using type-specific normalization
+        for (String col : columns) {
+            sql.append(", ");
+            DataType dataType = columnDataTypes.get(col);
+            sql.append(escapeHashValue(dataTypeHandler.normalizeColumn(col, dataType)));
+        }
+
+        sql.append(")) AS row_hash");
+
+        // FROM clause
+        sql.append(" FROM ");
+        sql.append(buildRelationRef(schemaName, tableName));
+
+        // WHERE clause (if provided)
         if (whereClause != null && !whereClause.trim().isEmpty()) {
-            sql.insert(0, "SELECT * FROM (");
-            sql.append(") AS full_join WHERE ").append(whereClause);
+            sql.append(" WHERE ").append(whereClause);
         }
 
         return sql.toString();
     }
-
     @Override
     public String getBatchInsertSQL(String tableName, List<String> columns, int batchSize) {
         if (batchSize < 1) {
@@ -169,23 +209,5 @@ public class TiDBSqlQueryGenerator extends BaseSqlQueryGenerator {
         }
 
         return sql.toString();
-    }
-
-    /**
-     * Build join condition for the given columns.
-     */
-    private String buildJoinCondition(String table1, String table2, List<String> joinColumns) {
-        StringBuilder condition = new StringBuilder();
-        for (int i = 0; i < joinColumns.size(); i++) {
-            if (i > 0) {
-                condition.append(" AND ");
-            }
-            condition.append(capabilityProvider.quote(table1)).append(".")
-                    .append(capabilityProvider.quote(joinColumns.get(i)))
-                    .append(" = ")
-                    .append(capabilityProvider.quote(table2)).append(".")
-                    .append(capabilityProvider.quote(joinColumns.get(i)));
-        }
-        return condition.toString();
     }
 }

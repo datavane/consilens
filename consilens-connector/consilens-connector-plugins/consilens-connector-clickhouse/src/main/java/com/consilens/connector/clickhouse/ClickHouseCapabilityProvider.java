@@ -55,18 +55,4 @@ public class ClickHouseCapabilityProvider extends BaseCapabilityProvider {
         return EnumSet.copyOf(CLICKHOUSE_FEATURES);
     }
 
-    @Override
-    public String getDefaultSchema() {
-        return "public"; // ClickHouse default schema is "public"
-    }
-
-    @Override
-    public char getWildcardEscapeChar() {
-        return '\\';
-    }
-
-    @Override
-    public String getPaginationHint(long offset, long limit) {
-        return ""; // ClickHouse doesn't need pagination hints
-    }
 }

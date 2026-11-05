@@ -1,0 +1,64 @@
+# MySQL vs PostgreSQL 自定义 SQL Checksum 比对配置
+# 目标：验证 resource.type=sql 与 table 同级，并优先走 checksum。
+# 适用场景：上下游字段名不同、下游存在计算列时，先在 SQL 中统一成同一组逻辑列。
+#
+# 前置条件：
+#   1. MySQL 中已加载 load-mysql.sql
+#   2. PostgreSQL 中已加载 load-postgresql.sql
+
+source:
+  type: mysql
+  name: source-mysql-custom-sql
+  connection:
+    url: jdbc:mysql://127.0.0.1:13306/consilens_demo?useUnicode=true&characterEncoding=UTF-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+    username: ${env.MYSQL_USER}
+    password: ${env.MYSQL_PASSWORD}
+  resource:
+    type: sql
+    path: |
+      SELECT record_id,
+        col_tinyint,
+        col_int,
+        col_decimal,
+        amount,
+        status,
+        updated_at
+      FROM consilens_performance_demo_table
+
+target:
+  type: postgresql
+  name: target-postgresql-custom-sql
+  connection:
+    url: jdbc:postgresql://127.0.0.1:5432/consilens_demo?currentSchema=public
+    username: ${env.PG_USER}
+    password: ${env.PG_PASSWORD}
+  resource:
+    type: sql
+    path: |
+      SELECT record_id,
+        col_tinyint,
+        col_int,
+        col_decimal,
+        amount,
+        status,
+        updated_at
+      FROM consilens_performance_demo_table
+
+comparison:
+  keys:
+    source:
+      - record_id
+    target:
+      - record_id
+
+strategy:
+  mode: checksum
+  algorithm: xor
+  bisectionFactor: 8
+  bisectionThreshold: 8000
+  batchSize: 1000
+
+result:
+  sinks:
+    - format: console
+      type: result

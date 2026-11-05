@@ -1,0 +1,37 @@
+# Copy this file into .github/workflows/ of the repository that owns the data.
+# Consilens compares the configured source/target and fails the job when the
+# verify policy is violated.
+name: Consilens data verify
+
+on:
+  pull_request:
+  schedule:
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run Consilens verify
+        id: consilens
+        uses: datavane/consilens/.github/actions/consilens-verify@v0.1.0
+        with:
+          # Path is relative to the repository root (working-directory input).
+          config: consilens/compare.yaml
+          version: 0.1.0
+          fail-on: new
+          engine: java
+          baseline: consilens/baseline.jsonl
+          max-mismatch-rate: '0.5'
+          format: junit,markdown
+          output-dir: consilens-reports
+
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: consilens-reports
+          path: consilens-reports/

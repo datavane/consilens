@@ -11,6 +11,8 @@ import com.consilens.core.segment.TableSegment;
 import com.consilens.core.util.ResourceManager;
 import lombok.extern.slf4j.Slf4j;
 
+import java.math.BigDecimal;
+
 import java.sql.*;
 import java.util.*;
 
@@ -20,6 +22,12 @@ import java.util.*;
  */
 @Slf4j
 public abstract class AbstractDatabaseAdapter implements DatabaseAdapter {
+
+    /**
+     * 行哈希流式扫描的 JDBC fetch size：1000 行足以摊薄往返开销，又不会让
+     * 驱动/服务端为单次批量预取过多行而抬高内存占用。
+     */
+    private static final int ROW_HASH_FETCH_SIZE = 1000;
 
     protected final ConnectionPool connectionPool;
     protected final DatabaseDialect dialect;
@@ -62,52 +70,7 @@ public abstract class AbstractDatabaseAdapter implements DatabaseAdapter {
 
     @Override
     public <T> List<T> query(String sql, Class<T> resultType) {
-        return query(sql, (rs, rowNum) -> {
-            try {
-                if (resultType == String.class) {
-                    return resultType.cast(rs.getString(1));
-                } else if (resultType == Integer.class || resultType == int.class) {
-                    return resultType.cast(rs.getInt(1));
-                } else if (resultType == Long.class || resultType == long.class) {
-                    return resultType.cast(rs.getLong(1));
-                } else if (resultType == Double.class || resultType == double.class) {
-                    return resultType.cast(rs.getDouble(1));
-                } else if (resultType == Boolean.class || resultType == boolean.class) {
-                    return resultType.cast(rs.getBoolean(1));
-                } else if (resultType == java.sql.Date.class) {
-                    return resultType.cast(rs.getDate(1));
-                } else if (resultType == java.util.Date.class) {
-                    return resultType.cast(rs.getTimestamp(1));
-                } else if (resultType.isArray() && resultType.getComponentType() == Object.class) {
-                    // Handle Object[] case - read all columns into array
-                    ResultSetMetaData metaData = rs.getMetaData();
-                    int columnCount = metaData.getColumnCount();
-                    Object[] row = new Object[columnCount];
-                    for (int i = 0; i < columnCount; i++) {
-                        // CRITICAL: Use getString() instead of getObject() to ensure
-                        // normalized values (especially BLOB/HEX conversions) are read as strings
-                        // This prevents byte[] from being returned for BLOB columns that were
-                        // converted to HEX strings in the SQL query
-                        String value = rs.getString(i + 1);
-                        row[i] = value;
-                        
-                        // Debug log for DECIMAL and BLOB columns
-                        String columnName = metaData.getColumnLabel(i + 1);
-                        if (columnName != null && (columnName.toLowerCase().contains("decimal") || 
-                                                   columnName.toLowerCase().contains("numeric") ||
-                                                   columnName.toLowerCase().contains("blob"))) {
-                            log.debug("Read column {} (type={}): value=[{}]", 
-                                    columnName, metaData.getColumnTypeName(i + 1), value);
-                        }
-                    }
-                    return resultType.cast(row);
-                } else {
-                    return resultType.cast(rs.getObject(1));
-                }
-            } catch (SQLException e) {
-                throw new RuntimeException("Error mapping result to type " + resultType, e);
-            }
-        });
+        return query(sql, createResultSetMapper(resultType));
     }
 
     @Override
@@ -123,14 +86,15 @@ public abstract class AbstractDatabaseAdapter implements DatabaseAdapter {
     @Override
     public <T> List<T> query(String sql, RowMapper<T> rowMapper, Object... parameters) {
         Connection connection = null;
-        PreparedStatement statement = null;
+        Statement statement = null;
         ResultSet resultSet = null;
 
         try {
             connection = getConnection();
-            statement = connection.prepareStatement(sql);
-            setParameters(statement, parameters);
-            resultSet = statement.executeQuery();
+            statement = createQueryStatement(connection, sql, parameters);
+            resultSet = statement instanceof PreparedStatement
+                    ? ((PreparedStatement) statement).executeQuery()
+                    : statement.executeQuery(sql);
 
             return processResultSet(resultSet, rowMapper);
         } catch (SQLException e) {
@@ -323,8 +287,10 @@ public abstract class AbstractDatabaseAdapter implements DatabaseAdapter {
             log.info("Executing checksum query: {}", checksumQuery);
 
             // Execute query using a RowMapper that returns Maps
+            // Use TreeMap with case-insensitive comparator for cross-database compatibility
+            // Oracle returns column labels in uppercase by default
             List<Map<String, Object>> results = query(checksumQuery, (rs, rowNum) -> {
-                Map<String, Object> row = new HashMap<>();
+                Map<String, Object> row = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
                 int columnCount = rs.getMetaData().getColumnCount();
                 for (int i = 1; i <= columnCount; i++) {
                     String columnName = rs.getMetaData().getColumnLabel(i);
@@ -391,7 +357,7 @@ public abstract class AbstractDatabaseAdapter implements DatabaseAdapter {
             return new TableSegment.ChecksumResult(rowCount, null, minKey, maxKey);
 
         } catch (Exception e) {
-            log.error("Error getting count and bounds for segment: {}", segment.getTablePath(), e);
+            log.error("Error getting count and bounds for segment {}: {}", segment.getTablePath(), e.getMessage());
             throw new RuntimeException("Count and bounds calculation failed", e);
         }
     }
@@ -405,19 +371,8 @@ public abstract class AbstractDatabaseAdapter implements DatabaseAdapter {
 
         // Extract column data types from the schema
         Map<String, DataType> columnDataTypes = new HashMap<>();
-        TableSchema tableSchema;
-        // If segment doesn't have schema, fetch it from database
-        if (segment.getSchema().isPresent()) {
-            tableSchema = segment.getSchema().get();
-        } else {
-            if (segment.hasRelationSource()) {
-                throw new IllegalStateException("Schema is required for SQL relation segment: " + segment.getDisplayName());
-            }
-            // Fetch schema from database
-            List<String> tablePathComponents = segment.getTablePath().getComponents();
-            tableSchema = getTableSchema(tablePathComponents);
-            segment.withSchema(tableSchema);
-        }
+        segment = resolveSegmentSchema(segment);
+        TableSchema tableSchema = segment.getSchema().orElseThrow();
         // Now extract data types for all columns
         for (String column : columns) {
             DataType dataType = tableSchema.getColumnType(column);
@@ -448,121 +403,6 @@ public abstract class AbstractDatabaseAdapter implements DatabaseAdapter {
 
 
     /**
-     * Build database-specific checksum expression.
-     */
-    protected String buildDatabaseChecksumExpression(List<String> columns, TableSegment segment) {
-        if (columns.isEmpty()) {
-            return "''";
-        }
-
-        String databaseType = getConnectorType();
-
-        switch (databaseType) {
-            case "postgresql":
-                return buildPostgreSQLChecksum(columns);
-            case "mysql":
-                return buildMySQLChecksum(columns);
-            case "oracle":
-                return buildOracleChecksum(columns);
-            case "sqlserver":
-            case "mssql":
-                return buildSQLServerChecksum(columns);
-            default:
-                return buildGenericChecksum(columns);
-        }
-    }
-
-    /**
-     * PostgreSQL checksum expression.
-     */
-    private String buildPostgreSQLChecksum(List<String> columns) {
-        StringBuilder expr = new StringBuilder();
-        if (columns.size() == 1) {
-            expr.append("COALESCE(CAST(").append(columns.get(0)).append(" AS TEXT), '')");
-        } else {
-            expr.append("MD5(");
-            for (int i = 0; i < columns.size(); i++) {
-                if (i > 0) {
-                    expr.append(" || '|' || ");
-                }
-                expr.append("COALESCE(CAST(").append(columns.get(i)).append(" AS TEXT), '')");
-            }
-            expr.append(")");
-        }
-        return expr.toString();
-    }
-
-    /**
-     * MySQL checksum expression.
-     */
-    private String buildMySQLChecksum(List<String> columns) {
-        StringBuilder expr = new StringBuilder();
-        expr.append("MD5(CONCAT_WS('|'");
-        for (String column : columns) {
-            expr.append(", COALESCE(CAST(").append(column).append(" AS CHAR), '')");
-        }
-        expr.append("))");
-        return expr.toString();
-    }
-
-    /**
-     * Oracle checksum expression.
-     */
-    private String buildOracleChecksum(List<String> columns) {
-        StringBuilder expr = new StringBuilder();
-        expr.append("STANDARD_HASH(");
-        if (columns.size() == 1) {
-            expr.append("COALESCE(TO_CHAR(").append(columns.get(0)).append("), '')");
-        } else {
-            expr.append("CONCAT(");
-            for (int i = 0; i < columns.size(); i++) {
-                if (i > 0)
-                    expr.append(", '|', ");
-                expr.append("COALESCE(TO_CHAR(").append(columns.get(i)).append("), '')");
-            }
-            expr.append(")");
-        }
-        expr.append(", 'MD5')");
-        return expr.toString();
-    }
-
-    /**
-     * SQL Server checksum expression.
-     */
-    private String buildSQLServerChecksum(List<String> columns) {
-        StringBuilder expr = new StringBuilder();
-        expr.append("CONVERT(VARCHAR(32), HASHBYTES('MD5', ");
-        if (columns.size() == 1) {
-            expr.append("COALESCE(CAST(").append(columns.get(0)).append(" AS VARCHAR(MAX)), '')");
-        } else {
-            expr.append("CONCAT(");
-            for (int i = 0; i < columns.size(); i++) {
-                if (i > 0)
-                    expr.append(", '|', ");
-                expr.append("COALESCE(CAST(").append(columns.get(i)).append(" AS VARCHAR(MAX)), '')");
-            }
-            expr.append(")");
-        }
-        expr.append("))");
-        return expr.toString();
-    }
-
-    /**
-     * Generic checksum expression.
-     */
-    private String buildGenericChecksum(List<String> columns) {
-        StringBuilder expr = new StringBuilder();
-        expr.append("MD5(CONCAT(");
-        for (int i = 0; i < columns.size(); i++) {
-            if (i > 0)
-                expr.append(", '|', ");
-            expr.append("COALESCE(CAST(").append(columns.get(i)).append(" AS VARCHAR), '')");
-        }
-        expr.append("))");
-        return expr.toString();
-    }
-
-    /**
      * Get min or max key values for the segment.
      */
     private List<Object> getMinMaxKey(TableSegment segment, boolean getMin) {
@@ -578,9 +418,15 @@ public abstract class AbstractDatabaseAdapter implements DatabaseAdapter {
             List<Object[]> results = query(sql, Object[].class);
             if (!results.isEmpty()) {
                 Object[] row = results.get(0);
-                List<Object> keyValues = new ArrayList<>();
-                for (Object value : row) {
-                    keyValues.add(value);
+                List<String> keyColumns = segment.getKeyColumns();
+                Optional<TableSchema> schema = segment.getSchema();
+                List<Object> keyValues = new ArrayList<>(row.length);
+                for (int i = 0; i < row.length; i++) {
+                    DataType type = null;
+                    if (schema.isPresent() && i < keyColumns.size()) {
+                        type = schema.get().getColumnType(keyColumns.get(i));
+                    }
+                    keyValues.add(coerceBoundaryValue(row[i], type));
                 }
                 return keyValues;
             }
@@ -593,13 +439,63 @@ public abstract class AbstractDatabaseAdapter implements DatabaseAdapter {
                     return Collections.singletonList(singleResults.get(0));
                 }
             } catch (Exception e2) {
-                log.warn("Error getting min/max key values even with single column approach", e2);
+                log.warn("Error getting min/max key values even with single column approach: {}", e2.getMessage());
             }
         } catch (Exception e) {
-            log.warn("Error getting min/max key values", e);
+            log.warn("Error getting min/max key values: {}", e.getMessage());
         }
 
         return null;
+    }
+
+    /**
+     * 边界值统一成可比较的类型。
+     *
+     * <p>边界查询通过 {@code Object[]} 映射器读取，所有列都被 {@code rs.getString} 转成字符串
+     * （这是为了 BLOB/HEX 归一化值，见 {@code query(sql, Object[].class)}）。字符串边界的
+     * 字典序与数值序不同：{@code "9999" > "20000"}，会让并集上界变小、整段数据从未被扫描。
+     * 因此这里按键列类型把数值边界转成 {@link BigDecimal}，后续比较/格式化都按数值处理。
+     */
+    private static Object coerceBoundaryValue(Object value, DataType type) {
+        if (value == null || type == null || !isNumericType(type)) {
+            return value;
+        }
+        if (value instanceof BigDecimal) {
+            return value;
+        }
+        if (value instanceof Number) {
+            return new BigDecimal(value.toString());
+        }
+        try {
+            return new BigDecimal(value.toString().trim());
+        } catch (NumberFormatException e) {
+            return value;
+        }
+    }
+
+    private static boolean isNumericType(DataType dataType) {
+        switch (dataType) {
+            case TINYINT:
+            case SMALLINT:
+            case INTEGER:
+            case BIGINT:
+            case DECIMAL:
+            case NUMERIC:
+            case FLOAT:
+            case DOUBLE:
+            case REAL:
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    private String appendNotNullKeys(List<String> keyColumns) {
+        StringBuilder condition = new StringBuilder();
+        for (String column : keyColumns) {
+            condition.append(" AND ").append(quoteColumn(column)).append(" IS NOT NULL");
+        }
+        return condition.toString();
     }
 
     private String buildSingleColumnBoundaryKeyQuery(TableSegment segment, boolean getMin) {
@@ -627,8 +523,13 @@ public abstract class AbstractDatabaseAdapter implements DatabaseAdapter {
 
         if (whereClause != null && !whereClause.trim().isEmpty()) {
             sql.append(" WHERE ").append(whereClause);
+        } else {
+            sql.append(" WHERE 1 = 1");
         }
 
+        // 边界键必须排除 NULL：NULL 无法用区间谓词表达，且各库对 NULL 的排序位置不同
+        // （PostgreSQL 的 DESC 把 NULL 排最前），取到 NULL 行会让整段谓词恒假、差异全漏。
+        sql.append(appendNotNullKeys(keyColumns));
         String direction = getMin ? "ASC" : "DESC";
         sql.append(" ORDER BY ");
         sql.append(String.join(", ",
@@ -675,19 +576,66 @@ public abstract class AbstractDatabaseAdapter implements DatabaseAdapter {
         }
     }
 
+    /**
+     * 唯一键探针（严格档）：按键表达式分组，列出 count>1 的键及两侧行数。
+     * 键表达式与比对口径一致（归一化 + 二进制安全），因此"仅大小写/空白不同的键"
+     * 也按契约算同一键。
+     *
+     * <p>探测失败（SQL 资源、方言不支持等）时抛出异常而非返回空结果：调用方必须能区分
+     * "键唯一"与"根本没验证成"——严格档（validateUniqueKeys=true）据此明确失败，
+     * 开放档（JoinDiffer）自行捕获并降级。
+     */
+    @Override
+    public List<String> findDuplicateKeys(TableSegment segment) {
+        Optional<TableSchema> schemaOpt = segment.getSchema();
+        Map<String, DataType> keyTypes = new HashMap<>();
+        if (schemaOpt.isPresent()) {
+            for (String key : segment.getKeyColumns()) {
+                DataType type = schemaOpt.get().getColumnType(key);
+                if (type != null) {
+                    keyTypes.put(key, type);
+                }
+            }
+        }
+        String schema = segment.getTablePath().getSchema().orElse(null);
+        String table = segment.getTablePath().getTableName();
+        String sql = dialect.getSqlQueryGenerator().getDuplicateKeyProbeSQL(
+                schema, table, segment.getKeyColumns(), keyTypes, segment.buildWhereClause());
+        log.info("Executing duplicate-key probe: {}", sql);
+        List<Object[]> rows = query(sql, Object[].class);
+        List<String> violations = new ArrayList<>();
+        for (Object[] row : rows) {
+            StringBuilder sb = new StringBuilder();
+            for (int i = 0; i < row.length - 1; i++) {
+                if (i > 0) {
+                    sb.append(", ");
+                }
+                sb.append(row[i]);
+            }
+            sb.append(" => ").append(row[row.length - 1]).append(" 行");
+            violations.add(sb.toString());
+        }
+        return violations;
+    }
+
     @Override
     public Map<List<Object>, String> querySegmentRowHashes(TableSegment segment) {
+        Map<List<Object>, String> rowHashes = new LinkedHashMap<>();
+        forEachSegmentRowHash(segment, rowHashes::put);
+        return rowHashes;
+    }
+
+    @Override
+    public void forEachSegmentRowHash(TableSegment segment, RowHashConsumer consumer) {
         try {
             String rowHashQuery = buildRowHashQuery(segment);
 
             log.debug("Executing row hash query for segment: {}, keys: {}", 
                     segment.getTablePath(), segment.getKeyColumns().size());
 
-            Map<List<Object>, String> rowHashes = new LinkedHashMap<>();
-
             try (Connection connection = getConnection();
                  PreparedStatement statement = connection.prepareStatement(rowHashQuery)) {
-                statement.setFetchSize(1000);
+                statement.setFetchSize(ROW_HASH_FETCH_SIZE);
                 try (ResultSet resultSet = statement.executeQuery()) {
                     int keyColumnCount = segment.getKeyColumns().size();
                     int rowCount = 0;
@@ -701,12 +649,11 @@ public abstract class AbstractDatabaseAdapter implements DatabaseAdapter {
 
                         // Extract row hash (last column)
                         String rowHash = resultSet.getString(resultSet.getMetaData().getColumnCount());
-                        rowHashes.put(primaryKey, rowHash);
+                        consumer.accept(primaryKey, rowHash);
                         rowCount++;
                     }
 
-                    log.debug("Retrieved {} row hashes for segment: {}", rowHashes.size(), segment.getTablePath());
-                    return rowHashes;
+                    log.debug("Retrieved {} row hashes for segment: {}", rowCount, segment.getTablePath());
                 }
             }
 
@@ -756,10 +703,10 @@ public abstract class AbstractDatabaseAdapter implements DatabaseAdapter {
         List<String> keyColumns = segment.getKeyColumns();
         String whereClause = segment.buildWhereClause();
 
-        String baseSelect = selectSql(segment, keyColumns, whereClause, keyColumns);
+        String baseSelect = selectSql(segment, keyColumns, whereClause, null);
 
         String limitClause = dialect.getSqlQueryGenerator().getLimitClause(offset, limit);
-        return baseSelect + " " + limitClause;
+        return baseSelect + nativeKeyOrderClause(keyColumns) + " " + limitClause;
     }
 
     @Override
@@ -783,10 +730,30 @@ public abstract class AbstractDatabaseAdapter implements DatabaseAdapter {
             whereClause = keysetClause;
         }
 
-        String baseSelect = selectSql(segment, keyColumns, whereClause, keyColumns);
+        String baseSelect = selectSql(segment, keyColumns, whereClause, null);
 
         String limitClause = dialect.getSqlQueryGenerator().getLimitClause(0, limit);
-        return baseSelect + " " + limitClause;
+        return baseSelect + nativeKeyOrderClause(keyColumns) + " " + limitClause;
+    }
+
+    /**
+     * 采样必须按**键的原生顺序**排序：offset/keyset 采样的前提是"第 N 行"与键区间一一对应。
+     * 不能复用 {@code getSelectSQL} 的字符串化 ORDER BY（那是本地归并比对的跨方言对齐口径），
+     * 否则字典序会把边界键取成完全不同的行——实测 dq_cmp_scale_100k 因此把
+     * [54994,100010] 切成 [100000,100010]+[100010,100010]，(54994,100000) 整段从未参与比对。
+     */
+    private String nativeKeyOrderClause(List<String> keyColumns) {
+        if (keyColumns == null || keyColumns.isEmpty()) {
+            return "";
+        }
+        StringBuilder clause = new StringBuilder(" ORDER BY ");
+        for (int i = 0; i < keyColumns.size(); i++) {
+            if (i > 0) {
+                clause.append(", ");
+            }
+            clause.append(quoteColumn(keyColumns.get(i)));
+        }
+        return clause.toString();
     }
 
     @Override
@@ -940,11 +907,26 @@ public abstract class AbstractDatabaseAdapter implements DatabaseAdapter {
         }
         
         List<String> selectColumns = new ArrayList<>();
+        java.util.Set<String> emitted = new java.util.HashSet<>();
         for (String column : relevantColumns) {
+            // SQL-source segments may carry the same column twice under different
+            // identifier case (config key vs metadata fields); Oracle rejects the
+            // duplicate alias with ORA-00960, so deduplicate case-insensitively.
+            if (!emitted.add(column.toLowerCase(java.util.Locale.ROOT))) {
+                continue;
+            }
             DataType dataType = columnDataTypes.get(column);
+            // Key columns must stay raw in the SELECT: range predicates and ORDER BY
+            // reference the column name, and dialects like ClickHouse resolve a WHERE
+            // reference to a same-named SELECT alias (string-cast key + numeric range
+            // bound fails with NO_COMMON_TYPE). Keys are normalized Java-side.
+            if (keyColumns.contains(column)) {
+                selectColumns.add(quote(column) + " AS " + quote(column));
+                continue;
+            }
             // Use DataTypeHandler to normalize the column (same as row-hash query)
             // Use original column names as aliases for compatibility
-            selectColumns.add(dialect.getDataTypeHandler().normalizeColumn(column, dataType) + 
+            selectColumns.add(dialect.getDataTypeHandler().normalizeColumn(column, dataType) +
                     " AS " + quote(column));
         }
         String whereClause = segment.buildWhereClause();
@@ -966,6 +948,15 @@ public abstract class AbstractDatabaseAdapter implements DatabaseAdapter {
      * maintaining consistency across local comparison modes.
      */
     protected String buildNormalizedQuery(TableSegment segment) {
+        return buildNormalizedQuery(segment, null);
+    }
+
+    /**
+     * 与 {@link #buildNormalizedQuery(TableSegment)} 同形，额外拼接引擎生成的谓词
+     * （如开放档 join 的"键重复"过滤器）。额外谓词不经用户 where 校验器（它是引擎构造的、
+     * 含 EXISTS/子查询，校验器会拒绝函数调用）；用户 filter 仍走 segment.buildWhereClause() 校验。
+     */
+    protected String buildNormalizedQuery(TableSegment segment, String extraPredicate) {
         // Get schema and column information
         Optional<TableSchema> schemaOpt = segment.getSchema();
         if (!schemaOpt.isPresent()) {
@@ -986,15 +977,26 @@ public abstract class AbstractDatabaseAdapter implements DatabaseAdapter {
         }
         
         List<String> selectColumns = new ArrayList<>();
+        java.util.Set<String> emitted = new java.util.HashSet<>();
         for (String column : relevantColumns) {
+            // Deduplicate case-insensitively (see buildNormalizedQueryByKeys).
+            if (!emitted.add(column.toLowerCase(java.util.Locale.ROOT))) {
+                continue;
+            }
             DataType dataType = columnDataTypes.get(column);
+            // Keep key columns raw so WHERE/ORDER BY never resolve to a normalized
+            // alias (see buildNormalizedQueryByKeys); keys are normalized Java-side.
+            if (keyColumns.contains(column)) {
+                selectColumns.add(quote(column) + " AS " + quote(column));
+                continue;
+            }
             // Use DataTypeHandler to normalize the column (same as row-hash query)
             // Use original column names as aliases for compatibility
-            selectColumns.add(dialect.getDataTypeHandler().normalizeColumn(column, dataType) + 
+            selectColumns.add(dialect.getDataTypeHandler().normalizeColumn(column, dataType) +
                     " AS " + quote(column));
         }
 
-        String whereClause = segment.buildWhereClause();
+        String whereClause = combinePredicates(segment.buildWhereClause(), extraPredicate);
 
         String sql = selectSql(segment, selectColumns, whereClause, keyColumns);
         
@@ -1002,6 +1004,27 @@ public abstract class AbstractDatabaseAdapter implements DatabaseAdapter {
                 segment.getDisplayName());
         
         return sql;
+    }
+
+    private String combinePredicates(String whereClause, String extraPredicate) {
+        boolean hasWhere = whereClause != null && !whereClause.trim().isEmpty();
+        boolean hasExtra = extraPredicate != null && !extraPredicate.trim().isEmpty();
+        if (hasWhere && hasExtra) {
+            return "(" + whereClause + ") AND (" + extraPredicate + ")";
+        }
+        return hasWhere ? whereClause : (hasExtra ? extraPredicate : null);
+    }
+
+    @Override
+    public List<Object[]> querySegmentWithPredicate(TableSegment segment, String extraPredicate) {
+        try {
+            String selectQuery = buildNormalizedQuery(segment, extraPredicate);
+            log.debug("Executing normalized segment query with predicate: {}", selectQuery);
+            return query(selectQuery, Object[].class);
+        } catch (Exception e) {
+            log.error("Error querying segment with predicate: {}", segment.getTablePath(), e);
+            throw new RuntimeException("Segment query failed", e);
+        }
     }
 
 
@@ -1013,20 +1036,6 @@ public abstract class AbstractDatabaseAdapter implements DatabaseAdapter {
         List<String> keyColumns = segment.getKeyColumns();
         String whereClause = segment.buildWhereClause();
         return selectSql(segment, relevantColumns, whereClause, keyColumns);
-    }
-
-    /**
-     * Extract key values from query result.
-     */
-    private List<Object> extractKeyValues(Object[] result, int startIndex, int count) {
-        List<Object> keyValues = new ArrayList<>();
-        int endIndex = Math.min(startIndex + count, result.length);
-
-        for (int i = startIndex; i < endIndex; i++) {
-            keyValues.add(result[i]);
-        }
-
-        return keyValues;
     }
 
     // Helper methods
@@ -1048,6 +1057,29 @@ public abstract class AbstractDatabaseAdapter implements DatabaseAdapter {
                     return resultType.cast(rs.getDate(1));
                 } else if (resultType == java.util.Date.class) {
                     return resultType.cast(rs.getTimestamp(1));
+                } else if (resultType.isArray() && resultType.getComponentType() == Object.class) {
+                    // Handle Object[] case - read all columns into array
+                    ResultSetMetaData metaData = rs.getMetaData();
+                    int columnCount = metaData.getColumnCount();
+                    Object[] row = new Object[columnCount];
+                    for (int i = 0; i < columnCount; i++) {
+                        // CRITICAL: Use getString() instead of getObject() to ensure
+                        // normalized values (especially BLOB/HEX conversions) are read as strings
+                        // This prevents byte[] from being returned for BLOB columns that were
+                        // converted to HEX strings in the SQL query
+                        String value = rs.getString(i + 1);
+                        row[i] = value;
+
+                        // Debug log for DECIMAL and BLOB columns
+                        String columnName = metaData.getColumnLabel(i + 1);
+                        if (columnName != null && (columnName.toLowerCase().contains("decimal") ||
+                                                   columnName.toLowerCase().contains("numeric") ||
+                                                   columnName.toLowerCase().contains("blob"))) {
+                            log.debug("Read column {} (type={}): value=[{}]",
+                                    columnName, metaData.getColumnTypeName(i + 1), value);
+                        }
+                    }
+                    return resultType.cast(row);
                 } else {
                     return resultType.cast(rs.getObject(1));
                 }
@@ -1055,6 +1087,24 @@ public abstract class AbstractDatabaseAdapter implements DatabaseAdapter {
                 throw new RuntimeException("Error mapping result to type " + resultType, e);
             }
         };
+    }
+
+    /**
+     * 有参查询始终用 {@link PreparedStatement}；无参查询是否可走服务端 prepare
+     * 由 {@link DatabaseDialect#supportsServerSidePrepare()} 决定（Presto 返回 false，
+     * 改用普通 {@link Statement}，原因见其方言实现）。
+     */
+    private Statement createQueryStatement(Connection connection, String sql, Object[] parameters)
+            throws SQLException {
+        if (parameters != null && parameters.length > 0) {
+            PreparedStatement prepared = connection.prepareStatement(sql);
+            setParameters(prepared, parameters);
+            return prepared;
+        }
+        if (!dialect.supportsServerSidePrepare()) {
+            return connection.createStatement();
+        }
+        return connection.prepareStatement(sql);
     }
 
     protected void setParameters(PreparedStatement statement, Object... parameters) throws SQLException {
@@ -1094,6 +1144,22 @@ public abstract class AbstractDatabaseAdapter implements DatabaseAdapter {
 
 
     /**
+     * 取出 segment 已携带的 schema；没有则查一次元数据并回填到返回的副本上。
+     * 注意 withSchema 返回副本而非原地修改，必须接收返回值，否则 schema 丢失、
+     * 同一 segment 后续每次构建查询都会重复查元数据。
+     */
+    private TableSegment resolveSegmentSchema(TableSegment segment) {
+        if (segment.getSchema().isPresent()) {
+            return segment;
+        }
+        if (segment.hasRelationSource()) {
+            throw new IllegalStateException("Schema is required for SQL relation segment: " + segment.getDisplayName());
+        }
+        List<String> tablePathComponents = segment.getTablePath().getComponents();
+        return segment.withSchema(getTableSchema(tablePathComponents));
+    }
+
+    /**
      * Build the SQL query for row-hash based local comparison.
      */
     protected String buildRowHashQuery(TableSegment segment) {
@@ -1103,17 +1169,8 @@ public abstract class AbstractDatabaseAdapter implements DatabaseAdapter {
 
         // Retrieve column data types
         Map<String, DataType> columnDataTypes = new HashMap<>();
-        TableSchema tableSchema;
-        if (segment.getSchema().isPresent()) {
-            tableSchema = segment.getSchema().get();
-        } else {
-            if (segment.hasRelationSource()) {
-                throw new IllegalStateException("Schema is required for SQL relation segment: " + segment.getDisplayName());
-            }
-            List<String> tablePathComponents = segment.getTablePath().getComponents();
-            tableSchema = getTableSchema(tablePathComponents);
-            segment.withSchema(tableSchema);
-        }
+        segment = resolveSegmentSchema(segment);
+        TableSchema tableSchema = segment.getSchema().orElseThrow();
 
         for (String column : columns) {
             DataType dataType = tableSchema.getColumnType(column);

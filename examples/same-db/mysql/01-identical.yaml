@@ -1,0 +1,50 @@
+source:
+  type: mysql
+  name: source-mysql
+  connection:
+    url: jdbc:mysql://127.0.0.1:13306/mydb?useUnicode=true&characterEncoding=UTF-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+    username: ${env.MYSQL_USER}
+    password: ${env.MYSQL_PASSWORD}
+  resource:
+    type: table
+    name: orders
+
+target:
+  type: mysql
+  name: target-mysql
+  connection:
+    url: jdbc:mysql://127.0.0.1:13306/mydb?useUnicode=true&characterEncoding=UTF-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+    username: ${env.MYSQL_USER}
+    password: ${env.MYSQL_PASSWORD}
+  resource:
+    type: table
+    name: orders
+
+comparison:
+  keys:
+    source: [order_id]
+    target: [order_id]
+  fields:
+    source: [customer_id, amount, status, created_at]
+    target: [customer_id, amount, status, created_at]
+  filters:
+    source: "order_id >= 1 AND order_id <= 1000"
+    target: "order_id >= 1 AND order_id <= 1000"
+
+strategy:
+  mode: join
+  algorithm: concat
+  bisectionFactor: 4
+  bisectionThreshold: 5000
+  batchSize: 500
+  localCompare:
+    mode: full
+  # 预算（可选）：超限抛 BudgetExceededException，结果标记为部分结果而非通过
+  maxDurationMs: 3600000
+  maxRowsScanned: 100000000
+  maxBytesFetched: 1073741824
+
+result:
+  sinks:
+    - format: console
+      type: result

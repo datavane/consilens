@@ -8,7 +8,7 @@
     <parent>
         <groupId>com.consilens</groupId>
         <artifactId>consilens</artifactId>
-        <version>0.2.0</version>
+        <version>0.1-SNAPSHOT</version>
     </parent>
 
     <artifactId>consilens-core</artifactId>
@@ -16,6 +16,14 @@
 
     <name>consilens core</name>
     <description>Core domain logic and business entities</description>
+
+    <properties>
+        <!-- Fixed external services are opt-in; Testcontainers tests remain in the default verify suite. -->
+        <failsafe.external-database.exclude.1>**/CrossDatabaseDockerITest.java</failsafe.external-database.exclude.1>
+        <failsafe.external-database.exclude.2>**/OceanBaseSameDbComparisonTest.java</failsafe.external-database.exclude.2>
+        <failsafe.external-database.exclude.3>**/OceanBaseCrossDbComparisonTest.java</failsafe.external-database.exclude.3>
+        <failsafe.oceanbase-container.exclude>**/CrossDatabaseMysqlOceanBaseITest.java</failsafe.oceanbase-container.exclude>
+    </properties>
 
     <dependencies>
         <!-- Internal Dependencies -->
@@ -45,6 +53,77 @@
             <groupId>com.consilens</groupId>
             <artifactId>consilens-connector-postgresql</artifactId>
             <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>com.consilens</groupId>
+            <artifactId>consilens-connector-oracle</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>com.consilens</groupId>
+            <artifactId>consilens-connector-tidb</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>com.consilens</groupId>
+            <artifactId>consilens-connector-clickhouse</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>com.consilens</groupId>
+            <artifactId>consilens-connector-sqlserver</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>com.consilens</groupId>
+            <artifactId>consilens-connector-starrocks</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>com.consilens</groupId>
+            <artifactId>consilens-connector-doris</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>com.consilens</groupId>
+            <artifactId>consilens-connector-trino</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>com.consilens</groupId>
+            <artifactId>consilens-connector-presto</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>com.consilens</groupId>
+            <artifactId>consilens-connector-oceanbase</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- Oracle JDBC Driver for testcontainers -->
+        <dependency>
+            <groupId>com.oracle.database.jdbc</groupId>
+            <artifactId>ojdbc11</artifactId>
+            <version>21.9.0.0</version>
             <scope>test</scope>
         </dependency>
 
@@ -138,6 +217,58 @@
             <scope>test</scope>
         </dependency>
 
+        <!-- SQL Server Testcontainer (1.17.6 is available in local repo) -->
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>mssqlserver</artifactId>
+            <version>1.17.6</version>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- ClickHouse Testcontainer (1.17.6 is available in local repo) -->
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>clickhouse</artifactId>
+            <version>1.17.6</version>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- SQL Server JDBC Driver -->
+        <dependency>
+            <groupId>com.microsoft.sqlserver</groupId>
+            <artifactId>mssql-jdbc</artifactId>
+            <version>12.4.2.jre11</version>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- ClickHouse JDBC Driver (use older yandex version for HTTP protocol support) -->
+        <dependency>
+            <groupId>ru.yandex.clickhouse</groupId>
+            <artifactId>clickhouse-jdbc</artifactId>
+            <version>0.2.4</version>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- Trino JDBC Driver (428 available in local repo) -->
+        <dependency>
+            <groupId>io.trino</groupId>
+            <artifactId>trino-jdbc</artifactId>
+            <version>428</version>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- Presto JDBC Driver (0.284 available in local repo) -->
+        <dependency>
+            <groupId>com.facebook.presto</groupId>
+            <artifactId>presto-jdbc</artifactId>
+            <version>0.286</version>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- TiDB uses MySQL protocol, already have MySQL driver -->
+        <!-- StarRocks uses MySQL protocol, already have MySQL driver -->
+        <!-- Doris uses MySQL protocol, already have MySQL driver -->
+
         <!-- H2 Database for testing -->
         <dependency>
             <groupId>com.h2database</groupId>
@@ -183,6 +314,8 @@
                     <excludes>
                         <exclude>**/*ITest.java</exclude>
                         <exclude>**/*ITest$*.java</exclude>
+                        <exclude>**/OceanBaseSameDbComparisonTest.java</exclude>
+                        <exclude>**/OceanBaseCrossDbComparisonTest.java</exclude>
                     </excludes>
                 </configuration>
             </plugin>
@@ -191,9 +324,18 @@
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-failsafe-plugin</artifactId>
                 <configuration>
+                    <failIfNoTests>true</failIfNoTests>
                     <includes>
                         <include>**/*ITest.java</include>
+                        <include>**/OceanBaseSameDbComparisonTest.java</include>
+                        <include>**/OceanBaseCrossDbComparisonTest.java</include>
                     </includes>
+                    <excludes>
+                        <exclude>${failsafe.external-database.exclude.1}</exclude>
+                        <exclude>${failsafe.external-database.exclude.2}</exclude>
+                        <exclude>${failsafe.external-database.exclude.3}</exclude>
+                        <exclude>${failsafe.oceanbase-container.exclude}</exclude>
+                    </excludes>
                 </configuration>
                 <executions>
                     <execution>
@@ -245,4 +387,23 @@
             </plugin>
         </plugins>
     </build>
+
+    <profiles>
+        <profile>
+            <id>external-databases</id>
+            <properties>
+                <!-- Use non-matching patterns to include the fixed-service integration tests. -->
+                <failsafe.external-database.exclude.1>__no_external_database_test_excluded__</failsafe.external-database.exclude.1>
+                <failsafe.external-database.exclude.2>__no_external_database_test_excluded__</failsafe.external-database.exclude.2>
+                <failsafe.external-database.exclude.3>__no_external_database_test_excluded__</failsafe.external-database.exclude.3>
+            </properties>
+        </profile>
+        <profile>
+            <id>oceanbase-testcontainer</id>
+            <properties>
+                <!-- OceanBase has a dedicated mandatory CI job because its image requires more startup resources. -->
+                <failsafe.oceanbase-container.exclude>__no_oceanbase_container_test_excluded__</failsafe.oceanbase-container.exclude>
+            </properties>
+        </profile>
+    </profiles>
 </project>

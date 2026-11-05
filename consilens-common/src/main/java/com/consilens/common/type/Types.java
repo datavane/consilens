@@ -2,19 +2,12 @@ package com.consilens.common.type;
 
 import com.consilens.common.enums.DataType;
 
-import java.util.Arrays;
-import java.util.List;
-
 /**
  * Factory helpers for common logical types.
  */
 public final class Types {
 
     private Types() {
-    }
-
-    public static TypeDescriptor NULL() {
-        return TypeDescriptor.builder(DataType.NULL_TYPE).build();
     }
 
     public static TypeDescriptor BOOLEAN() {
@@ -40,13 +33,6 @@ public final class Types {
     public static TypeDescriptor INTEGER(int bitWidth) {
         return TypeDescriptor.builder(DataType.INTEGER_TYPE)
                 .bitWidth(bitWidth)
-                .build();
-    }
-
-    public static TypeDescriptor INTEGER(int bitWidth, boolean unsigned) {
-        return TypeDescriptor.builder(DataType.INTEGER_TYPE)
-                .bitWidth(bitWidth)
-                .unsigned(unsigned)
                 .build();
     }
 
@@ -86,12 +72,6 @@ public final class Types {
                 .build();
     }
 
-    public static TypeDescriptor CHAR(int length) {
-        return STRING(length).toBuilder()
-                .originType("CHAR(" + length + ")")
-                .build();
-    }
-
     public static TypeDescriptor TEXT() {
         return TypeDescriptor.builder(DataType.STRING_TYPE)
                 .originType("TEXT")
@@ -103,25 +83,6 @@ public final class Types {
         return TypeDescriptor.builder(DataType.BINARY_TYPE).build();
     }
 
-    public static TypeDescriptor BINARY(int length) {
-        return TypeDescriptor.builder(DataType.BINARY_TYPE)
-                .length(length)
-                .build();
-    }
-
-    public static TypeDescriptor VARBINARY(int length) {
-        return BINARY(length).toBuilder()
-                .originType("VARBINARY(" + length + ")")
-                .build();
-    }
-
-    public static TypeDescriptor BLOB() {
-        return TypeDescriptor.builder(DataType.BINARY_TYPE)
-                .originType("BLOB")
-                .blobType(true)
-                .build();
-    }
-
     public static TypeDescriptor DATE() {
         return TypeDescriptor.builder(DataType.DATE_TYPE).build();
     }
@@ -130,27 +91,8 @@ public final class Types {
         return TypeDescriptor.builder(DataType.TIME_TYPE).build();
     }
 
-    public static TypeDescriptor TIME(int precision) {
-        return TypeDescriptor.builder(DataType.TIME_TYPE)
-                .timePrecision(precision)
-                .build();
-    }
-
     public static TypeDescriptor TIMESTAMP() {
         return TypeDescriptor.builder(DataType.TIMESTAMP_TYPE).build();
-    }
-
-    public static TypeDescriptor TIMESTAMP(int precision) {
-        return TypeDescriptor.builder(DataType.TIMESTAMP_TYPE)
-                .timePrecision(precision)
-                .build();
-    }
-
-    public static TypeDescriptor TIMESTAMP(int precision, boolean withTimezone) {
-        return TypeDescriptor.builder(DataType.TIMESTAMP_TYPE)
-                .timePrecision(precision)
-                .withTimezone(withTimezone)
-                .build();
     }
 
     public static TypeDescriptor ARRAY(TypeDescriptor elementType) {
@@ -166,32 +108,12 @@ public final class Types {
                 .build();
     }
 
-    public static TypeDescriptor STRUCT(StructField... fields) {
-        return STRUCT(Arrays.asList(fields));
-    }
-
-    public static TypeDescriptor STRUCT(List<StructField> fields) {
-        return TypeDescriptor.builder(DataType.STRUCT_TYPE)
-                .fields(fields)
-                .build();
-    }
-
     public static TypeDescriptor JSON() {
         return TypeDescriptor.builder(DataType.JSON_TYPE).build();
     }
 
-    public static TypeDescriptor XML() {
-        return TypeDescriptor.builder(DataType.XML_TYPE).build();
-    }
-
     public static TypeDescriptor UUID() {
         return TypeDescriptor.builder(DataType.UUID_TYPE).build();
-    }
-
-    public static TypeDescriptor ENUM(List<String> enumValues) {
-        return TypeDescriptor.builder(DataType.ENUM_TYPE)
-                .enumValues(enumValues)
-                .build();
     }
 
     public static TypeDescriptor OBJECT() {

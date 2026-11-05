@@ -68,7 +68,7 @@ class JoinDifferMySQLITest {
         TestDatabaseHelper.insertStandardData(adapter, "join_source");
         TestDatabaseHelper.insertStandardData(adapter, "join_target");
 
-        DifferConfig config = new DifferConfig(4, 100, false,
+        DifferConfig config = new DifferConfig(4, 100,
                 ChecksumAlgorithm.CONCAT);
 
         TableSegment seg1 = TableSegment.builder()
@@ -89,7 +89,7 @@ class JoinDifferMySQLITest {
                 .maxKey(Optional.of(Arrays.asList(11)))
                 .build();
 
-        try (JoinDiffer differ = new JoinDiffer(config, JoinDifferOptions.defaultOptions())) {
+        try (JoinDiffer differ = new JoinDiffer(config, new JoinDifferOptions(false))) {
             DiffResult result = differ.diffTables(seg1, seg2).get(60, TimeUnit.SECONDS);
 
             assertThat(result).isNotNull();
@@ -112,7 +112,7 @@ class JoinDifferMySQLITest {
         // Insert into target table
         TestDatabaseHelper.insertExtraRow(adapter, "join_mix_target", 11, "join_extra", 110.00);
 
-        DifferConfig config = new DifferConfig(4, 100, false,
+        DifferConfig config = new DifferConfig(4, 100,
                 ChecksumAlgorithm.CONCAT);
 
         TableSegment seg1 = TableSegment.builder()
@@ -133,7 +133,7 @@ class JoinDifferMySQLITest {
                 .maxKey(Optional.of(Arrays.asList(12)))
                 .build();
 
-        try (JoinDiffer differ = new JoinDiffer(config, JoinDifferOptions.defaultOptions())) {
+        try (JoinDiffer differ = new JoinDiffer(config, new JoinDifferOptions(false))) {
             DiffResult result = differ.diffTables(seg1, seg2).get(60, TimeUnit.SECONDS);
 
             assertThat(result).isNotNull();
@@ -158,7 +158,7 @@ class JoinDifferMySQLITest {
         TestDatabaseHelper.createTestTable(adapter, "join_empty_source");
         TestDatabaseHelper.createTestTable(adapter, "join_empty_target");
 
-        DifferConfig config = new DifferConfig(4, 100, false,
+        DifferConfig config = new DifferConfig(4, 100,
                 ChecksumAlgorithm.CONCAT);
 
         TableSegment seg1 = TableSegment.builder()
@@ -175,7 +175,7 @@ class JoinDifferMySQLITest {
                 .extraColumns(Arrays.asList("name", "value", "status"))
                 .build();
 
-        try (JoinDiffer differ = new JoinDiffer(config, JoinDifferOptions.defaultOptions())) {
+        try (JoinDiffer differ = new JoinDiffer(config, new JoinDifferOptions(false))) {
             DiffResult result = differ.diffTables(seg1, seg2).get(60, TimeUnit.SECONDS);
 
             assertThat(result).isNotNull();
@@ -191,7 +191,7 @@ class JoinDifferMySQLITest {
         TestDatabaseHelper.insertExtraRow(adapter, "join_single_source", 1, "only_row", 100.00);
         TestDatabaseHelper.insertExtraRow(adapter, "join_single_target", 1, "only_row", 100.00);
 
-        DifferConfig config = new DifferConfig(4, 100, false,
+        DifferConfig config = new DifferConfig(4, 100,
                 ChecksumAlgorithm.CONCAT);
 
         TableSegment seg1 = TableSegment.builder()
@@ -212,7 +212,7 @@ class JoinDifferMySQLITest {
                 .maxKey(Optional.of(Arrays.asList(2)))
                 .build();
 
-        try (JoinDiffer differ = new JoinDiffer(config, JoinDifferOptions.defaultOptions())) {
+        try (JoinDiffer differ = new JoinDiffer(config, new JoinDifferOptions(false))) {
             DiffResult result = differ.diffTables(seg1, seg2).get(60, TimeUnit.SECONDS);
 
             assertThat(result).isNotNull();

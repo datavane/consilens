@@ -53,14 +53,14 @@ public class ColumnInfo {
         this.name = name.trim();
         this.type = type;
         this.nullable = nullable;
-        this.precision = precision;
-        this.scale = scale;
-        this.maxLength = maxLength;
-        this.defaultValue = defaultValue.map(String::trim);
-        this.collation = collation.map(String::trim);
+        this.precision = optional(precision);
+        this.scale = optional(scale);
+        this.maxLength = optional(maxLength);
+        this.defaultValue = optional(defaultValue).map(String::trim);
+        this.collation = optional(collation).map(String::trim);
         this.primaryKey = primaryKey;
         this.uniqueKey = uniqueKey;
-        this.comment = comment;
+        this.comment = optional(comment);
         this.ordinalPosition = ordinalPosition;
     }
 
@@ -157,6 +157,10 @@ public class ColumnInfo {
         return parenIndex > 0 ? rawType.substring(0, parenIndex).trim() : rawType.trim();
     }
 
+    private static <T> Optional<T> optional(Optional<T> value) {
+        return value == null ? Optional.empty() : value;
+    }
+
     /**
      * Map a string type name to DataType enum.
      * Handles various database-specific type names.
@@ -235,9 +239,16 @@ public class ColumnInfo {
             return DataType.TIME;
         }
 
-        if (upperType.equals("DATETIME") || upperType.equals("TIMESTAMP") ||
-                upperType.equals("TIMESTAMPTZ")) {
+        if (upperType.equals("DATETIME")) {
             return DataType.DATETIME;
+        }
+
+        if (upperType.equals("TIMESTAMP")) {
+            return DataType.TIMESTAMP;
+        }
+
+        if (upperType.equals("TIMESTAMPTZ") || upperType.equals("TIMESTAMP WITH TIME ZONE")) {
+            return DataType.TIMESTAMP_WITH_TIMEZONE;
         }
 
         // Boolean types

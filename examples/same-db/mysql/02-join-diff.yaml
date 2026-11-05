@@ -1,0 +1,47 @@
+source:
+  type: mysql
+  name: source-mysql
+  connection:
+    url: jdbc:mysql://127.0.0.1:13306/mydb?useUnicode=true&characterEncoding=UTF-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+    username: ${env.MYSQL_USER}
+    password: ${env.MYSQL_PASSWORD}
+  resource:
+    type: table
+    name: orders
+
+target:
+  type: mysql
+  name: target-mysql
+  connection:
+    url: jdbc:mysql://127.0.0.1:13306/mydb?useUnicode=true&characterEncoding=UTF-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+    username: ${env.MYSQL_USER}
+    password: ${env.MYSQL_PASSWORD}
+  resource:
+    type: table
+    name: orders_backup
+
+comparison:
+  keys:
+    source: [order_id]
+    target: [order_id]
+  fields:
+    source: [customer_id, amount, status, created_at]
+    target: [customer_id, amount, status, created_at]
+
+strategy:
+  mode: join
+  algorithm: concat
+  # 显式计划偏好：与 mode=join 的默认推导一致（server-join 且禁止回退），
+  # 便于演示“只跑某条计划、失败就报错”的写法。
+  preferredPlans: [server-join]
+  allowFallback: false
+  bisectionFactor: 4
+  bisectionThreshold: 5000
+  batchSize: 500
+  localCompare:
+    mode: row-hash
+
+result:
+  sinks:
+    - format: console
+      type: result

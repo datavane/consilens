@@ -20,21 +20,32 @@ public class SinkRegistry {
     }
 
     public Sink create(String format, String type) {
-        String key = buildKey(format, type);
-        SinkProvider provider = providers.get(key);
-        if (provider == null) {
+        if (!supports(format, type)) {
             throw new IllegalArgumentException(
                     "No SinkProvider found for format=" + format + ", type=" + type
                             + ". Available: " + providers.keySet());
         }
-        return provider.create();
+        return providers.get(buildKey(format, type)).create();
     }
 
+    /**
+     * Whether a provider is registered for the given format/type pair.
+     */
     public boolean supports(String format, String type) {
+        if (format == null || type == null) {
+            return false;
+        }
         return providers.containsKey(buildKey(format, type));
     }
 
+    /**
+     * Registered {@code format:type} keys, useful for configuration diagnostics.
+     */
+    public String availableKeys() {
+        return providers.keySet().toString();
+    }
+
     private String buildKey(String format, String type) {
-        return format.toLowerCase() + ":" + type.toLowerCase();
+        return format.trim().toLowerCase() + ":" + type.trim().toLowerCase();
     }
 }

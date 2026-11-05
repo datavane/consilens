@@ -82,7 +82,7 @@ class CrossDatabaseDiffITest {
         TestDatabaseHelper.insertStandardData(mysqlAdapter, "cross_source");
         TestDatabaseHelper.insertStandardData(pgAdapter, "cross_target");
 
-        DifferConfig config = new DifferConfig(4, 100, false,
+        DifferConfig config = new DifferConfig(4, 100,
                 ChecksumAlgorithm.CONCAT);
 
         TableSegment seg1 = TableSegment.builder()
@@ -126,7 +126,7 @@ class CrossDatabaseDiffITest {
         // Insert row 11 on the PostgreSQL side
         TestDatabaseHelper.insertExtraRow(pgAdapter, "cross_diff_target", 11, "pg_extra", 111.11);
 
-        DifferConfig config = new DifferConfig(4, 100, false,
+        DifferConfig config = new DifferConfig(4, 100,
                 ChecksumAlgorithm.CONCAT);
 
         TableSegment seg1 = TableSegment.builder()
@@ -176,7 +176,7 @@ class CrossDatabaseDiffITest {
         // Insert an extra row on the source (MySQL) side
         TestDatabaseHelper.insertExtraRow(mysqlAdapter, "cross_target_miss_src", 11, "mysql_only", 222.22);
 
-        DifferConfig config = new DifferConfig(4, 100, false,
+        DifferConfig config = new DifferConfig(4, 100,
                 ChecksumAlgorithm.CONCAT);
 
         TableSegment seg1 = TableSegment.builder()
@@ -208,5 +208,13 @@ class CrossDatabaseDiffITest {
                     .collect(Collectors.toList());
             assertThat(targetMissing).hasSizeGreaterThanOrEqualTo(1);
         }
+    }
+
+    @Test
+    @DisplayName("MySQL 与 PostgreSQL 应对所有公共类型和四类结果给出精确结论")
+    void shouldVerifyPublicTypeFamiliesAndEveryDiffDirection() throws Exception {
+        CrossDatabaseAccuracyFixture.verify(
+                mysqlAdapter, TablePath.of("consilens_source", "placeholder"),
+                pgAdapter, TablePath.of("public", "placeholder"));
     }
 }

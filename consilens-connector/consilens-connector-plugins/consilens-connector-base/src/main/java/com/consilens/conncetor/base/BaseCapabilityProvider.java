@@ -35,32 +35,4 @@ public class BaseCapabilityProvider implements CapabilityProvider {
         return createDefaultFeatures();
     }
 
-    @Override
-    public char getWildcardEscapeChar() {
-        return '\\';
-    }
-
-    @Override
-    public String escapePattern(String pattern) {
-        if (pattern == null) {
-            return null;
-        }
-        return pattern.replace("'", "''");
-    }
-
-    @Override
-    public String getDefaultSchema() {
-        return "public";
-    }
-
-    @Override
-    public String getCatalogSeparator() {
-        return ".";
-    }
-
-    @Override
-    public String getPaginationHint(long offset, long limit) {
-        return ""; // No hint by default
-    }
-
 }

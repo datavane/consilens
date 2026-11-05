@@ -1,0 +1,719 @@
+// ===== 设计 token（与 common/theme.js 的 naive overrides 配合，对齐 Reafuture 风格） =====
+// 定义在 :root（含 :root.dark）上：naive-ui 弹层（抽屉/弹窗）teleport 到 body，
+// 脱离 .app-layout 的 .bright/.dark 作用域，必须让变量挂在根元素才能继承。
+// 全站颜色只允许引用这里的变量或 theme.js，不允许页面硬编码 hex。
+//
+// 布局骨架：40px 顶栏 + 220px 侧栏（外壳色）+ 12px 圆角浮动内容面板。
+// 亮色：浅灰外壳 + 纯白面板；暗色：板岩外壳 + 深蓝黑面板（面板比外壳更暗，形成浮层）。
+
+:root,
+.bright {
+  // 外壳（顶栏 + 侧栏）与面板
+  --shell-bg: #f3f4f6;
+  --panel-bg: #ffffff;
+  --card: #ffffff;
+  --bg-surface: #ffffff;
+  --bg-subtle: #f7f8fa;
+
+  // 描边与分隔线
+  --border: #e0e3e8;
+  --border-strong: #d2d7dd;
+  --shell-divider: #dfe2e7; // 顶栏/侧栏/内容区之间的分割线
+  --table-header-bg: #f7f8fa;
+  --row-hover-bg: #f5f7fb;
+
+  // 文字
+  --text: #1f2329;
+  --text-primary: #1f2329;
+  --text-secondary: #5a6169;
+  // muted 是 12px 说明文字的常用色，须满足 WCAG AA 4.5:1（白底实测 4.93）
+  --text-muted: #6b7178;
+  --text-disabled: #b9bdc2;
+
+  // 主色与语义色（Reafuture 靛蓝主色 + 亮绿成功色）
+  --primary: #3b77f1;
+  // 主色/成功色实底上的前景色（两者在两个主题下都保持白字可读）
+  --on-primary: #ffffff;
+  --primary-bg: #e3edf7;
+  --primary-border: rgba(59, 119, 241, 0.28);
+  // --link 是表格/卡片里的可点击文字，白底需 >=4.5:1，故比 --primary 深一档
+  --link: #3570e0;
+  --link-hover: #2f63d6;
+  --success: #1b8a4e;
+  --success-bg: #e8f6ee;
+  --warning: #a87c1f;
+  --warning-bg: #fbf3e2;
+  --danger: #c63f2c;
+  --error-bg: #fdece9;
+  --violet: #7b6fd0;
+  --accent-green: #22a45d;
+  --accent-amber: #d9a93b;
+
+  // 语义色作为正文/小字号文字用时的加深变体：--primary/--success 同时是实底按钮色，
+  // 直接压暗会改变全站按钮观感，故文字场景单独走这对令牌（白底实测均 >=4.5:1）
+  --primary-text: #3570e0;
+  --success-text: #17784a;
+
+  // 实底徽章（白字压色）用的加深变体：原色配白字仅 4.12/4.38，压暗后 >=4.6
+  --primary-solid: #3570e0;
+  --success-solid: #17784a;
+
+  // 侧栏菜单（对齐 EmonLens：不整块染色，选中态靠底色差 + 字重 + 图标主色表达）
+  --nav-hover-bg: #eceef1;
+  --nav-active-bg: #e2e5e9;
+  --nav-active-icon: #3b77f1;
+
+  // 圆角体系
+  --radius-badge: 6px;
+  --radius-ctl: 8px;
+  --radius-card: 10px;
+  --radius-pill: 999px;
+
+  // 代码块 / 编辑器（亮色主题用浅色代码面）
+  --code-bg: #fafbfc;
+  --code-chrome: #f1f3f5;
+  --code-border: #e3e6ea;
+  --code-text: #24292f;
+  --code-muted: #6b7178;
+
+  // 差异对比语义色（旧值/新值/行着色），暗色块中单独翻转
+  --diff-old-text: #c63f2c;
+  --diff-old-bg: rgba(232, 84, 63, 0.08);
+  --diff-new-text: #1b8a4e;
+  --diff-new-bg: rgba(34, 164, 93, 0.08);
+  --diff-updated-bg: rgba(217, 169, 59, 0.05);
+  --diff-added-bg: rgba(34, 164, 93, 0.05);
+  --diff-removed-bg: rgba(232, 84, 63, 0.05);
+  --diff-grid: rgba(128, 128, 140, 0.16);
+
+  // 滚动条
+  --scrollbar-thumb: rgba(0, 0, 0, 0.18);
+}
+
+:root.dark,
+.dark {
+  // 对齐 IntelliJ 新 UI 暗色三层：外壳（顶栏/侧栏）2B2D30，主内容区（编辑器层）1E1F22，
+  // 结构线 393B40，表头/悬停比内容区亮一档（2B2D30 系）
+  --shell-bg: #2b2d30;
+  --panel-bg: #1e1f22;
+  --card: #1e1f22;
+  --bg-surface: #1e1f22;
+  --bg-subtle: #2b2d30;
+
+  --border: #393b40;
+  --border-strong: #4a4d52;
+  --shell-divider: #1e1f22; // 与 IDE 一致：同为亮色区域之间用编辑区底色做凹槽线
+  --table-header-bg: #2b2d30;
+  --row-hover-bg: #2b2d30;
+
+  --text: #dfe1e5;
+  --text-primary: #dfe1e5;
+  --text-secondary: #bcbec4;
+  --text-muted: #9ea0a8;
+  --text-disabled: #6f737a;
+
+  --primary: #3b77f1;
+  --on-primary: #ffffff;
+  --primary-bg: #22305c;
+  --primary-border: rgba(96, 132, 222, 0.45);
+  --link: #8294da;
+  --link-hover: #9aa9e6;
+  --success: #34a853;
+  --success-bg: rgba(52, 168, 83, 0.16);
+  --warning: #d9a93b;
+  --warning-bg: rgba(217, 169, 59, 0.14);
+  --danger: #e8705c;
+  --error-bg: rgba(232, 84, 63, 0.16);
+  --violet: #7b6fd0;
+  --accent-green: #34a853;
+  --accent-amber: #d9a93b;
+
+  // 语义色的文字加深/提亮变体，取值需在 card 与 bg-subtle 两种底色上都 >=4.5:1
+  --primary-text: #6d9bf2;
+  --success-text: #3fbc63;
+
+  // 深色下实底徽章同样需要白字可读
+  --primary-solid: #3570e0;
+  --success-solid: #17784a;
+
+  --nav-hover-bg: #393b40;
+  --nav-active-bg: #43474e;
+  --nav-active-icon: #5a8df5;
+
+  --radius-badge: 6px;
+  --radius-ctl: 8px;
+  --radius-card: 10px;
+  --radius-pill: 999px;
+
+  // 代码块 / 编辑器（IDE 内联代码块实测色 #303236，比内容区亮一档）
+  --code-bg: #303236;
+  --code-chrome: #2b2d30;
+  --code-border: #393b40;
+  --code-text: #dfe1e5;
+  --code-muted: #8c9197;
+
+  // 差异对比语义色（暗色：提高 tint 透明度、文字换亮色阶）
+  --diff-old-text: #f08171;
+  --diff-old-bg: rgba(232, 84, 63, 0.18);
+  --diff-new-text: #4fd18b;
+  --diff-new-bg: rgba(52, 168, 83, 0.18);
+  --diff-updated-bg: rgba(217, 169, 59, 0.08);
+  --diff-added-bg: rgba(52, 168, 83, 0.09);
+  --diff-removed-bg: rgba(232, 84, 63, 0.1);
+  --diff-grid: rgba(128, 128, 140, 0.22);
+
+  --scrollbar-thumb: rgba(255, 255, 255, 0.16);
+}
+
+// ===== 全局基础 =====
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+// naive 配置容器撑满视口：否则 .app-shell 的 height:100% 会退化为 auto，整页溢出
+#app > .n-config-provider {
+  height: 100%;
+}
+
+body {
+  font:
+    13px/1.5 Inter,
+    "Geist",
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    "PingFang SC",
+    "Microsoft YaHei",
+    sans-serif;
+  font-feature-settings: "cv11";
+  -webkit-font-smoothing: antialiased;
+  color: var(--text-primary);
+  background: var(--shell-bg);
+}
+
+p {
+  margin: 0;
+  padding: 0;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+// ===== 布局工具类 =====
+
+.page-container {
+  display: flex;
+  flex-direction: column;
+  padding: 20px 24px 24px;
+  height: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 34px;
+  flex-shrink: 0;
+
+  .page-title {
+    font-size: 20px;
+    font-weight: 600;
+    line-height: 28px;
+    letter-spacing: -0.01em;
+    color: var(--text-primary);
+  }
+
+  .page-desc {
+    margin-top: 2px;
+    font-size: 13px;
+    line-height: 20px;
+    color: var(--text-muted);
+  }
+}
+
+// 页面级操作按钮：胶囊形（对齐参考设计 Refresh / + Add Catalog）
+.page-header .n-button,
+.head-actions .n-button {
+  border-radius: var(--radius-pill);
+}
+
+.head-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+// 工具栏/筛选卡片（page-head 与表格卡之间的过渡）
+.filter-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+// 加一级父选择器：压过 naive 运行时注入的 .n-input { width: 100% }
+.filter-bar .filter-item {
+  width: 180px;
+  flex: 0 0 auto;
+}
+
+// 列表页表格卡：撑满剩余空间，表格 flex-height 自适应
+// 注意：本项目的 naive 版本内容层类名是 n-card-content（单横线，非 BEM 的 __）
+.table-card {
+  flex: 1;
+  min-height: 260px;
+  display: flex;
+  flex-direction: column;
+}
+
+.table-card > .n-card-content {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.main-table {
+  flex: 1;
+  min-height: 220px;
+}
+
+// 首屏加载骨架撑满表格卡
+.table-card .skeleton-table {
+  flex: 1;
+  min-height: 220px;
+}
+
+.card-title {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+
+.text-secondary {
+  color: var(--text-secondary);
+}
+
+.text-muted {
+  color: var(--text-muted);
+}
+
+.flex {
+  display: flex;
+}
+
+.flex-ac {
+  display: flex;
+  align-items: center;
+}
+
+.flex-bc {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.flex-1 {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.mt-8 {
+  margin-top: 8px;
+}
+
+.mt-12 {
+  margin-top: 12px;
+}
+
+.mb-12 {
+  margin-bottom: 12px;
+}
+
+.mb-16 {
+  margin-bottom: 16px;
+}
+
+.ml-8 {
+  margin-left: 8px;
+}
+
+// 日志/ID/代码等宽字体
+.mono {
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    "Liberation Mono", monospace;
+  font-size: 12px;
+}
+
+// 一切数字单元格/统计值
+.num {
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+// ===== Naive 全局微调 =====
+
+.n-card {
+  border-radius: var(--radius-card);
+}
+
+.n-card > .n-card-content {
+  min-width: 0;
+}
+
+.n-card > .n-card-header .n-card-header__main {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.n-data-table {
+  min-width: 0;
+}
+
+.n-data-table .n-data-table-th,
+.n-data-table .n-data-table-td {
+  white-space: nowrap;
+}
+
+.n-data-table .n-data-table-th {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+
+.n-data-table .n-data-table-td {
+  font-size: 13px;
+}
+
+// 表格内字号统一 13px：.mono/.num 默认 12px 会让"实例 ID/序号/重试/耗时"整行显得比其它列表小一档
+.n-data-table .n-data-table-td .mono,
+.n-data-table .n-data-table-td .num {
+  font-size: 13px;
+}
+
+// 行高：表头 37px + 数据行 44px（参考图实测 36.5-38.5 / 44.5，行内含胶囊标签时取高值）
+.n-data-table .n-data-table-td,
+.n-data-table .n-data-table-th {
+  box-sizing: border-box;
+}
+
+.n-data-table .n-data-table-th {
+  height: 37px;
+}
+
+.n-data-table .n-data-table-td {
+  height: 44px;
+}
+
+
+// 固定列边界：1px 内阴影 + 外侧柔化投影，横向滚动时列与内容有明确分界，
+// 被固定列遮住的内容读起来是"压在下层"，而不是被硬裁切
+.n-data-table .n-data-table-td--fixed-left,
+.n-data-table .n-data-table-th--fixed-left {
+  box-shadow: inset -1px 0 0 var(--border), 6px 0 8px -6px rgba(0, 0, 0, 0.16);
+}
+
+.n-data-table .n-data-table-td--fixed-right,
+.n-data-table .n-data-table-th--fixed-right {
+  box-shadow: inset 1px 0 0 var(--border), -6px 0 8px -6px rgba(0, 0, 0, 0.16);
+}
+
+// 暗色下柔光阴影会糊成灰印，固定列只保留 1px 分界线
+.dark .n-data-table .n-data-table-td--fixed-left,
+.dark .n-data-table .n-data-table-th--fixed-left {
+  box-shadow: inset -1px 0 0 var(--border);
+}
+
+.dark .n-data-table .n-data-table-td--fixed-right,
+.dark .n-data-table .n-data-table-th--fixed-right {
+  box-shadow: inset 1px 0 0 var(--border);
+}
+
+// 横向滚动条常显：字段较多的表格默认看不到右侧列
+.n-data-table .n-scrollbar-rail--horizontal {
+  height: 8px !important;
+  opacity: 1 !important;
+}
+
+.n-data-table .n-scrollbar-rail--horizontal .n-scrollbar-rail__scrollbar {
+  height: 8px !important;
+  border-radius: 4px;
+  opacity: 1 !important;
+  background: var(--scrollbar-thumb) !important;
+}
+
+.n-empty__description {
+  font-size: 12.5px;
+}
+
+.n-modal-container .n-card {
+  max-width: calc(100vw - 32px);
+  border-radius: var(--radius-card);
+}
+
+.n-drawer-content .n-drawer-body-content-wrapper {
+  padding: 16px;
+}
+
+// 固定列防穿透：一次定义，各列表页不再重复 scoped hack
+.n-data-table .n-data-table-td--fixed-left,
+.n-data-table .n-data-table-td--fixed-right {
+  background-color: var(--card);
+}
+
+.n-data-table .n-data-table-th--fixed-left,
+.n-data-table .n-data-table-th--fixed-right {
+  background-color: var(--table-header-bg);
+}
+
+.n-data-table .n-data-table-tr:hover .n-data-table-td--fixed-left,
+.n-data-table .n-data-table-tr:hover .n-data-table-td--fixed-right {
+  background-color: var(--row-hover-bg);
+}
+
+.n-data-table .n-data-table-tr.n-data-table-tr--striped .n-data-table-td--fixed-left,
+.n-data-table .n-data-table-tr.n-data-table-tr--striped .n-data-table-td--fixed-right {
+  background-color: var(--card);
+}
+
+// ===== 页面切换过渡 =====
+
+.content-panel > .page-container {
+  animation: page-enter 0.2s ease;
+}
+
+@keyframes page-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .content-panel > .page-container {
+    animation: none;
+  }
+}
+
+// ===== 侧边栏菜单（对标 EmonLens：中文分组标题 + 34px 行高 + 中性实底选中块） =====
+// 行高 34px + 上下各 5px 外边距：相邻项的上下 margin 折叠，实际视觉空隙 5px（EmonLens 同值）
+
+.side-menu {
+  padding: 4px 0 8px;
+}
+
+// 分组标题：中文小字 + 极轻字距，只做分隔标签，不参与 hover/高亮
+// 只覆盖 naive 未声明的属性：它的 .n-menu .n-menu-item-group .n-menu-item-group-title
+// 权重更高（36px 行高 + 上下 6px 外边距），分组间距由那套几何决定，EmonLens 同样如此
+.side-menu .n-menu-item-group-title {
+  padding: 0 12px !important;
+  box-sizing: border-box;
+  // 中文没有大小写，12px 比拉丁大写 11px 更接近参考的字重观感（11px 汉字偏小、发虚）
+  font-size: 12px !important;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  color: var(--text-muted) !important;
+}
+
+.side-menu:not(.n-menu--collapsed) .n-menu-item {
+  height: 34px;
+  margin: 5px 10px;
+  border-radius: var(--radius-ctl);
+}
+
+.side-menu:not(.n-menu--collapsed) .n-menu-item-content {
+  border-radius: var(--radius-ctl);
+  padding-left: 12px !important;
+}
+
+.side-menu .n-menu-item-content .n-icon {
+  font-size: 16px;
+}
+
+// 中文标签在 13px 下的视觉体积与全站正文一致；选中靠字重加粗，不再靠放大字号
+.side-menu:not(.n-menu--collapsed) .n-menu-item-content-header {
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: normal;
+}
+
+// hover：低饱和中性底
+// naive 把 hover/选中底色画在 .n-menu-item-content::before 上（inset: 0 8px），
+// 元素自身的 background 遮不住它，所以这里直接覆盖 ::before，让两侧底色同源于 --nav-*
+.side-menu:not(.n-menu--collapsed) .n-menu-item-content:hover,
+.side-menu:not(.n-menu--collapsed) .n-menu-item-content:hover::before {
+  background: var(--nav-hover-bg) !important;
+  color: var(--text-primary) !important;
+}
+
+// 选中：中性实底圆角块 + 深色字（亮色浅灰 / 暗色板岩），主色只落在图标上
+.side-menu:not(.n-menu--collapsed) .n-menu-item-content--selected,
+.side-menu:not(.n-menu--collapsed) .n-menu-item-content--selected:hover,
+.side-menu:not(.n-menu--collapsed) .n-menu-item-content--selected::before,
+.side-menu:not(.n-menu--collapsed) .n-menu-item-content--selected:hover::before {
+  background: var(--nav-active-bg) !important;
+  color: var(--text-primary) !important;
+}
+
+.side-menu:not(.n-menu--collapsed) .n-menu-item-content--selected .n-menu-item-content-header {
+  color: var(--text-primary) !important;
+  font-weight: 600;
+}
+
+.side-menu:not(.n-menu--collapsed) .n-menu-item-content--selected .n-icon {
+  color: var(--nav-active-icon);
+}
+
+// ===== render 函数使用的类（h() 创建的元素不带 scoped 属性，必须全局定义）=====
+
+.app-name-link {
+  color: var(--link);
+  font-weight: 500;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+
+  &:hover {
+    color: var(--link-hover);
+  }
+}
+
+.row-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.row-action {
+  font-size: 13px;
+  color: var(--link);
+  cursor: pointer;
+
+  &:hover {
+    color: var(--link-hover);
+    text-decoration: underline;
+  }
+}
+
+.row-action-disabled {
+  font-size: 13px;
+  color: var(--text-disabled);
+  cursor: not-allowed;
+}
+
+.row-action-danger {
+  font-size: 13px;
+  color: var(--danger);
+  cursor: pointer;
+
+  &:hover {
+    text-decoration: underline;
+  }
+}
+
+.diff-link {
+  text-decoration: none;
+
+  &:hover {
+    text-decoration: underline;
+  }
+}
+
+.ds-icon {
+  color: var(--text-muted);
+}
+
+// 数据源名称链接：图标保持中性色，文字沿用链接色
+.ds-name-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tree-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.tree-icon {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.tree-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.col-tag {
+  padding: 1px 8px;
+  font-size: 12px;
+  line-height: 18px;
+  border-radius: var(--radius-badge);
+  background: var(--warning-bg);
+  color: var(--warning);
+  white-space: nowrap;
+}
+
+.pct-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pct-bar-wrap {
+  flex: 1;
+  max-width: 160px;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--border);
+  overflow: hidden;
+}
+
+.pct-bar {
+  height: 100%;
+  border-radius: 3px;
+}
+
+.pct-text {
+  min-width: 48px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+// ===== 滚动条 =====
+
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+
+::-webkit-scrollbar-thumb {
+  border-radius: 3px;
+  background: var(--scrollbar-thumb);
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}

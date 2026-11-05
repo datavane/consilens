@@ -140,7 +140,6 @@ strategy:
   bisectionFactor: 4
   bisectionThreshold: 10000
   batchSize: 1000
-  enableProfiling: false
 result:
   sinks:
     - format: console

@@ -40,6 +40,19 @@ public class ClickHouseDataTypeHandler extends BaseDataTypeHandler {
         super(capabilityProvider, normalizationConfig);
     }
 
+    /**
+     * 科学计数渲染：ClickHouse {@code printf('%.6e', v)}（C/Java 同形）。
+     *
+     * <p>必须包成 {@code Nullable(String)}：{@code if(cond, a, b)} 会统一两个分支的类型，
+     * 科学计数分支为 Nullable、定点分支为 String 时，遇 NULL 会报
+     * “Cannot convert NULL value to non-Nullable type”（列本身是 Nullable(Float64)）。
+     */
+    @Override
+    protected String scientificFloatExpression(String quotedCol) {
+        return "CAST(printf('%.6e', " + quotedCol + ") AS Nullable(String))";
+    }
+
+
     @Override
     public TypeDescriptor convertToTypeDescriptor(String originType) {
         if (originType == null || originType.isBlank()) {
@@ -243,30 +256,38 @@ public class ClickHouseDataTypeHandler extends BaseDataTypeHandler {
     /**
      * ClickHouse-specific string normalization.
      * Use trim to remove leading/trailing spaces for cross-database consistency.
+     *
+     * <p>必须先 CAST 成 String：FixedString 以 NUL 补齐（'S00001' 存成 'S00001\0\0'），
+     * 而 ClickHouse 的 trim 只去空格、不去 NUL，本地路径（Java String.trim 会去掉 ≤U+0020）
+     * 与校验和/join 两侧口径就会不一致——实测 join 把 FixedString 列的每一行都判成差异
+     * （typediff 200 MM，期望 1）。FixedString→String 的转换会去掉尾部 NUL 补齐。
      */
     @Override
     protected String normalizeString(String quotedCol) {
-        return "COALESCE(trim(" + quotedCol + "), '')";
+        return "COALESCE(trim(CAST(" + quotedCol + " AS Nullable(String))), " + stringNullReplacement() + ")";
     }
 
     /**
-     * ClickHouse-specific integer normalization: CAST to String.
-     * Use trim to ensure no leading/trailing spaces for cross-database consistency.
+     * ClickHouse-specific integer normalization.
+     * NOTE: ClickHouse is strict about type compatibility in WHERE clauses.
+     * When a SELECT alias matches a column name, ClickHouse may resolve WHERE
+     * references to the SELECT expression. If we CAST integers to String here,
+     * range comparisons like {@code order_id >= 1} fail with NO_COMMON_TYPE.
+     * To avoid this, return the original column and let the query generator
+     * apply toString() explicitly inside concat() for checksum calculation.
      */
     @Override
     protected String normalizeInteger(String quotedCol) {
-        return "COALESCE(trim(CAST(" + quotedCol + " AS String)), '0')";
+        // NULL 归一为 '0'，与 MySQL 端 COALESCE(TRIM(CAST(x AS CHAR)), '') 对齐；
+        // 裸列会让 Nullable 整数保持 NULL，本地取值路径渲染为 null 造成假差异。
+        return "COALESCE(trim(toString(" + quotedCol + ")), '')";
     }
 
     /**
      * ClickHouse-specific decimal normalization with configurable decimal places.
-     * Use formatDecimal to ensure specified decimal places with trailing zeros.
-     * This ensures consistent decimal representation across databases.
-     */
-    /**
-     * ClickHouse-specific decimal normalization with configurable decimal places.
-     * Use formatDecimal to ensure specified decimal places with trailing zeros.
-     * This ensures consistent decimal representation across databases.
+     * Manually formats decimal values to ensure trailing zeros for cross-database consistency.
+     * Note: ClickHouse 23.3 has neither printf (added in 23.7) nor formatDecimal (removed in 23.3).
+     * Uses trunc + lpad approach: split into integer and fractional parts, pad with trailing zeros.
      */
     @Override
     protected String normalizeDecimal(String quotedCol) {
@@ -278,114 +299,159 @@ public class ClickHouseDataTypeHandler extends BaseDataTypeHandler {
         // If precision is 0, return integer format without decimal point
         if (precision == 0) {
             if (rounding) {
-                return "COALESCE(trim(CAST(round(" + quotedCol + ", 0) AS String)), '0')";
+                return "COALESCE(trim(CAST(round(" + quotedCol + ", 0) AS String)), '')";
             } else {
-                return "COALESCE(trim(CAST(truncate(" + quotedCol + ", 0) AS String)), '0')";
+                return "COALESCE(trim(CAST(truncate(" + quotedCol + ", 0) AS String)), '')";
             }
         }
 
-        String defaultValue = "0." + "0".repeat(precision);
+        String roundedCol = rounding
+                ? "round(" + quotedCol + ", " + precision + ")"
+                : "truncate(" + quotedCol + ", " + precision + ")";
 
-        if (rounding) {
-            // Round half up: round first, then format
-            return "COALESCE(formatDecimal(round(" + quotedCol + ", " + precision + "), " + precision + "), '" + defaultValue + "')";
-        } else {
-            // Truncate: truncate first, then format
-            return "COALESCE(formatDecimal(truncate(" + quotedCol + ", " + precision + "), " + precision + "), '" + defaultValue + "')";
-        }
+        // Format: sign integer_part '.' fractional_part_padded_to_precision
+        // 符号取自舍入后的值：trunc() 对 (-1,0) 区间返回 -0，toString(-0) 丢符号
+        // （-0.5 渲染成 0.5000）；而 Float64 的 -0.0 又保留符号（-0.0000）。
+        // 以 round(x,p) < 0 判定符号与 MySQL FORMAT 一致，且舍入到 0 时自然无符号。
+        return "COALESCE(concat(if(" + roundedCol + " < 0, '-', ''), toString(abs(trunc(" + roundedCol
+                + "))), '.', lpad(toString(round(abs(" + roundedCol + " - trunc(" + roundedCol
+                + ")) * " + pow10(precision) + ", 0)), " + precision + ", '0')), '')";
     }
 
     /**
      * ClickHouse-specific float normalization with configurable decimal places.
      * CRITICAL: FLOAT is single-precision and may have precision issues.
      * Cast to Float64 (DOUBLE) first to ensure consistent formatting.
+     * Uses trunc + lpad approach for ClickHouse 23.3 compatibility.
      */
     @Override
     protected String normalizeFloat(String quotedCol) {
-        // Get precision from config, default to 4
-        int precision = getPrecision("float", 4);
+        return "CAST(" + normalizeFloatRaw(quotedCol) + " AS Nullable(String))";
+    }
+
+    /** 定点 6 位小数渲染（未做 Nullable 包装）。 */
+    protected String normalizeFloatRaw(String quotedCol) {
+        // Get precision from config, default to 6
+        int precision = getPrecision("float", 6);
         // Get rounding config, default to true (round half up)
         boolean rounding = getRounding("float", true);
 
         // If precision is 0, return integer format without decimal point
         if (precision == 0) {
             if (rounding) {
-                return "COALESCE(trim(CAST(round(CAST(" + quotedCol + " AS Float64), 0) AS String)), '0')";
+                return "COALESCE(trim(CAST(round(CAST(" + quotedCol + " AS Nullable(Float64)), 0) AS String)), '')";
             } else {
-                return "COALESCE(trim(CAST(truncate(CAST(" + quotedCol + " AS Float64), 0) AS String)), '0')";
+                return "COALESCE(trim(CAST(truncate(CAST(" + quotedCol + " AS Nullable(Float64)), 0) AS String)), '')";
             }
         }
 
-        String defaultValue = "0." + "0".repeat(precision);
+        String roundedCol = rounding
+                ? "round(CAST(" + quotedCol + " AS Nullable(Float64)), " + precision + ")"
+                : "truncate(CAST(" + quotedCol + " AS Nullable(Float64)), " + precision + ")";
 
-        if (rounding) {
-            // Round half up: round first, then format
-            return "COALESCE(formatDecimal(round(CAST(" + quotedCol + " AS Float64), " + precision + "), " + precision + "), '" + defaultValue + "')";
-        } else {
-            // Truncate: truncate first, then format
-            return "COALESCE(formatDecimal(truncate(CAST(" + quotedCol + " AS Float64), " + precision + "), " + precision + "), '" + defaultValue + "')";
-        }
+        // Same sign rule as normalizeDecimal: sign of the ROUNDED value, so
+        // -0.0 renders '0.0000' matching MySQL FORMAT.
+        return "COALESCE(concat(if(" + roundedCol + " < 0, '-', ''), toString(abs(trunc(" + roundedCol
+                + "))), '.', lpad(toString(round(abs(" + roundedCol + " - trunc(" + roundedCol
+                + ")) * " + pow10(precision) + ", 0)), " + precision + ", '0')), '')";
     }
 
     /**
-     * ClickHouse-specific date normalization: YYYY-MM-DD format.
+     * Returns 10^n as a string for use in SQL.
+     * Used to multiply fractional part by 10^precision to get integer representation.
+     */
+    private String pow10(int n) {
+        StringBuilder sb = new StringBuilder("1");
+        for (int i = 0; i < n; i++) {
+            sb.append("0");
+        }
+        return sb.toString();
+    }
+
+    /**
+     * ClickHouse-specific date normalization.
+     * NOTE: Returns original column to avoid type mismatch in WHERE clauses.
+     * Formatting is applied in the query generator's checksum SQL.
      */
     @Override
     protected String normalizeDate(String quotedCol) {
-        return "COALESCE(formatDateTime(" + quotedCol + ", '" + resolveClickHouseTemporalFormat("date",
-                "%Y-%m-%d", "%Y-%m-%d") + "'), '')";
+        // 必须渲染成字符串并 COALESCE：直接返回原列时 NULL 会在 checksum 的 concat/MD5 中传播，
+        // 与其它方言的 NULL → '' 不一致（实测跨源全 NULL 行的 c_date 误报）。
+        // 委托 checksum 格式化，保证 join/local 路径与 checksum 路径构造上同形。
+        return formatDateForChecksum(quotedCol);
     }
 
     /**
-     * ClickHouse-specific time normalization: HH:MM:SS format.
+     * ClickHouse-specific time normalization.
+     * NOTE: Returns original column to avoid type mismatch in WHERE clauses.
      */
     @Override
     protected String normalizeTime(String quotedCol) {
-        return "COALESCE(formatDateTime(" + quotedCol + ", '" + resolveClickHouseTemporalFormat("time",
-                "%H:%M:%S", "%H:%M:%S") + "'), '')";
+        // 与 formatDateTimeForChecksum 的 time 分支同口径（构造上委托，防止两路漂移）。
+        return formatDateTimeForChecksum(quotedCol, "time");
     }
 
     @Override
     protected String normalizeTimeWithTimezone(String quotedCol) {
-        return "COALESCE(formatDateTime(" + quotedCol + ", '" + resolveClickHouseTemporalFormat("time_with_timezone",
-                "%H:%M:%S", "%H:%M:%S") + "'), '')";
+        return formatDateTimeForChecksum(quotedCol, "time_with_timezone");
     }
 
     /**
-     * ClickHouse-specific datetime normalization: YYYY-MM-DD HH:MM:SS format.
-     * For DATETIME type (no timezone information):
-     * - No timezone conversion needed, just format directly
+     * ClickHouse-specific datetime normalization.
+     * Converts to UTC and formats as string to stay consistent with MySQL's
+     * CONVERT_TZ-based normalization and the checksum SQL path.
      */
     @Override
     protected String normalizeDateTime(String quotedCol) {
-        return "COALESCE(formatDateTime(" + quotedCol + ", '" + resolveClickHouseTemporalFormat("datetime",
-                "%Y-%m-%d %H:%M:%S", "%Y-%m-%d") + "'), '')";
+        return "COALESCE(formatDateTime(toTimeZone(" + quotedCol + ", '"
+                + resolveClickHouseTimezone("datetime", "UTC") + "'), '"
+                + resolveClickHouseTemporalFormat("datetime", "%Y-%m-%d %H:%i:%S", "%Y-%m-%d") + "'), '')";
     }
 
     /**
-     * ClickHouse-specific timestamp normalization: YYYY-MM-DD HH:MM:SS format.
-     * CRITICAL: Convert to UTC timezone to ensure cross-database consistency.
-     * 
-     * For TIMESTAMP type (ClickHouse DateTime):
-     * - Convert to UTC timezone before formatting
-     * - This matches MySQL and PostgreSQL behavior
+     * ClickHouse-specific timestamp normalization.
+     * Converts to UTC and formats as string to stay consistent with MySQL's
+     * CONVERT_TZ-based normalization and the checksum SQL path.
      */
     @Override
     protected String normalizeTimestamp(String quotedCol) {
         return "COALESCE(formatDateTime(toTimeZone(" + quotedCol + ", '"
-                + resolveClickHouseTimezone("timestamp", "UTC") + "'), '" + resolveClickHouseTemporalFormat("timestamp",
-                "%Y-%m-%d %H:%M:%S", "%Y-%m-%d") + "'), '')";
+                + resolveClickHouseTimezone("timestamp", "UTC") + "'), '"
+                + resolveClickHouseTemporalFormat("timestamp", "%Y-%m-%d %H:%i:%S", "%Y-%m-%d") + "'), '')";
     }
 
     /**
-     * ClickHouse-specific timestamp with timezone normalization: YYYY-MM-DD HH:MM:SS format.
-     * CRITICAL: Convert to UTC timezone to ensure cross-database consistency.
+     * ClickHouse-specific timestamp with timezone normalization.
+     * Converts to UTC and formats as string to stay consistent with MySQL's
+     * CONVERT_TZ-based normalization and the checksum SQL path.
      */
     @Override
     protected String normalizeTimestampWithTimezone(String quotedCol) {
         return "COALESCE(formatDateTime(toTimeZone(" + quotedCol + ", '"
-                + resolveClickHouseTimezone("timestamp_with_timezone", "UTC") + "'), '" + resolveClickHouseTemporalFormat("timestamp_with_timezone",
-                "%Y-%m-%d %H:%M:%S", "%Y-%m-%d") + "'), '')";
+                + resolveClickHouseTimezone("timestamp_with_timezone", "UTC") + "'), '"
+                + resolveClickHouseTemporalFormat("timestamp_with_timezone", "%Y-%m-%d %H:%i:%S", "%Y-%m-%d") + "'), '')";
+    }
+
+    /**
+     * Returns the formatted SQL expression for date columns in checksum calculation.
+     * Called by ClickHouseSqlQueryGenerator to format Date columns for concat().
+     */
+    public String formatDateForChecksum(String quotedCol) {
+        return "COALESCE(toString(" + quotedCol + "), '')";
+    }
+
+    /**
+     * Returns the formatted SQL expression for datetime/timestamp columns in checksum calculation.
+     * Applies timezone conversion and formatting.
+     */
+    public String formatDateTimeForChecksum(String quotedCol, String dataType) {
+        if ("timestamp".equals(dataType) || "timestamp_with_timezone".equals(dataType)) {
+            return "COALESCE(formatDateTime(toTimeZone(" + quotedCol + ", '"
+                    + resolveClickHouseTimezone(dataType, "UTC") + "'), '" + resolveClickHouseTemporalFormat(dataType,
+                    "%Y-%m-%d %H:%i:%S", "%Y-%m-%d") + "'), '')";
+        }
+        return "COALESCE(formatDateTime(" + quotedCol + ", '" + resolveClickHouseTemporalFormat(dataType,
+                "%Y-%m-%d %H:%i:%S", "%Y-%m-%d") + "'), '')";
     }
 
     private String resolveClickHouseTimezone(String dataTypeName, String defaultTimezone) {
@@ -399,7 +465,7 @@ public class ClickHouseDataTypeHandler extends BaseDataTypeHandler {
 
     private Set<String> clickHouseTemporalTokens(String dataTypeName) {
         Set<String> dateTokens = temporalTokens("%Y", "%y", "%m", "%d", "%e", "%F");
-        Set<String> timeTokens = temporalTokens("%H", "%I", "%M", "%S", "%f", "%p", "%R", "%T");
+        Set<String> timeTokens = temporalTokens("%H", "%I", "%i", "%S", "%f", "%p", "%R", "%T");
         if ("date".equals(dataTypeName)) {
             return dateTokens;
         }
@@ -415,7 +481,7 @@ public class ClickHouseDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeBoolean(String quotedCol) {
-        return "CASE WHEN " + quotedCol + " = 1 THEN '1' ELSE '0' END";
+        return "CASE WHEN " + quotedCol + " IS NULL THEN '' WHEN " + quotedCol + " = 1 THEN '1' ELSE '0' END";
     }
 
     /**
@@ -431,7 +497,10 @@ public class ClickHouseDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeJson(String quotedCol) {
-        return "COALESCE(CAST(" + quotedCol + " AS String), '')";
+        // 规范 JSON 形：ClickHouse 的 String 列保留原文（键序、空格），需经 JSON 类型
+        // 规范化后再紧凑输出——`toJSONString(CAST(s AS JSON))` 会按键排序并紧凑渲染
+        // （实测 `{"b":2,"a":1}` → `{"a":1,"b":2}`），与 MySQL/PG 的规范形一致。
+        return "COALESCE(toJSONString(CAST(" + quotedCol + " AS Nullable(JSON))), '')";
     }
 
     /**
@@ -439,7 +508,7 @@ public class ClickHouseDataTypeHandler extends BaseDataTypeHandler {
      */
     @Override
     protected String normalizeDefault(String quotedCol) {
-        return "COALESCE(trim(CAST(" + quotedCol + " AS String)), '0')";
+        return "COALESCE(trim(CAST(" + quotedCol + " AS String)), '')";
     }
 
     @Override
@@ -447,7 +516,10 @@ public class ClickHouseDataTypeHandler extends BaseDataTypeHandler {
         if (sourceType == null) {
             return DataType.UNKNOWN;
         }
-        String type = sourceType.toLowerCase();
+        String type = sourceType.trim().toLowerCase();
+        if ((type.startsWith("nullable(") || type.startsWith("lowcardinality(")) && type.endsWith(")")) {
+            return convertToDataType(type.substring(type.indexOf('(') + 1, type.length() - 1));
+        }
 
         switch (type) {
             case "int8":
@@ -462,6 +534,14 @@ public class ClickHouseDataTypeHandler extends BaseDataTypeHandler {
                 return DataType.INTEGER;
             case "int64":
             case "bigint":
+                return DataType.BIGINT;
+            case "uint8":
+                return DataType.TINYINT;
+            case "uint16":
+                return DataType.SMALLINT;
+            case "uint32":
+                return DataType.INTEGER;
+            case "uint64":
                 return DataType.BIGINT;
             case "decimal":
             case "numeric":

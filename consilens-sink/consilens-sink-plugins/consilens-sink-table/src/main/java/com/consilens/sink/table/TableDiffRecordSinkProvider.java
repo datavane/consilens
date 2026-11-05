@@ -2,6 +2,7 @@ package com.consilens.sink.table;
 
 import com.consilens.sink.api.Sink;
 import com.consilens.sink.api.SinkProvider;
+import com.consilens.sink.api.SinkTypes;
 
 public class TableDiffRecordSinkProvider implements SinkProvider {
 
@@ -12,7 +13,7 @@ public class TableDiffRecordSinkProvider implements SinkProvider {
 
     @Override
     public String getType() {
-        return "diff-record";
+        return SinkTypes.DIFF_RECORD;
     }
 
     @Override

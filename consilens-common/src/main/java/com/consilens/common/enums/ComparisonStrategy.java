@@ -31,6 +31,6 @@ public enum ComparisonStrategy {
         
         throw new IllegalArgumentException(
             "Unknown comparison strategy: " + code + 
-            ". Valid values: checksum, join, local");
+            ". Valid values: checksum, join");
     }
 }

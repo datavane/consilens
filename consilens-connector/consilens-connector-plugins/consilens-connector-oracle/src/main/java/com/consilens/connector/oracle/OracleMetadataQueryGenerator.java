@@ -37,7 +37,10 @@ public class OracleMetadataQueryGenerator extends BaseMetadataQueryGenerator {
     public String getPrimaryKeysSQL(String schemaName, String tableName) {
         return "SELECT cols.COLUMN_NAME, cols.POSITION " +
                 "FROM ALL_CONSTRAINTS cons " +
+                // 约束名只在 owner 内唯一；只按名字 join，跨 schema 的同名主键会把两边的列混进同一份主键
                 "JOIN ALL_CONS_COLUMNS cols ON cons.CONSTRAINT_NAME = cols.CONSTRAINT_NAME " +
+                "AND cons.OWNER = cols.OWNER " +
+                "AND cons.TABLE_NAME = cols.TABLE_NAME " +
                 "WHERE cons.CONSTRAINT_TYPE = 'P' " +
                 "AND cons.OWNER = '" + escapeString(schemaName) + "' " +
                 "AND cons.TABLE_NAME = '" + escapeString(tableName) + "' " +

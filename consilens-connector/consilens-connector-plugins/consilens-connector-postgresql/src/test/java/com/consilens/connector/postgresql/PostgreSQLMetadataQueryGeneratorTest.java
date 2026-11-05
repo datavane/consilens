@@ -43,6 +43,10 @@ class PostgreSQLMetadataQueryGeneratorTest {
 
         assertTrue(sql.contains("information_schema"));
         assertTrue(sql.contains("PRIMARY KEY"));
+        // 约束名只在 schema 内唯一，join 必须带上 schema/table 限定，否则跨 schema 同名主键会串列
+        assertTrue(sql.contains("kcu.constraint_schema = tc.constraint_schema"), sql);
+        assertTrue(sql.contains("kcu.table_schema = tc.table_schema"), sql);
+        assertTrue(sql.contains("kcu.table_name = tc.table_name"), sql);
     }
 
     @Test
@@ -60,6 +64,16 @@ class PostgreSQLMetadataQueryGeneratorTest {
 
         assertTrue(sql.contains("information_schema.schemata"));
         assertTrue(sql.contains("schema_name"));
+    }
+
+    @Test
+    void testGetDatabaseListSQL() {
+        String sql = generator.getDatabaseListSQL();
+
+        assertTrue(sql.contains("pg_database"));
+        assertTrue(sql.contains("datname"));
+        assertTrue(sql.contains("datistemplate = false"));
+        assertTrue(sql.contains("has_database_privilege"));
     }
 
     @Test
@@ -99,6 +113,13 @@ class PostgreSQLMetadataQueryGeneratorTest {
         String sql = generator.getTableExistsSQL("test'; DROP TABLE users; --", "table");
 
         assertTrue(sql.contains("''") || sql.contains("\\'"));
+    }
+
+    @Test
+    void testBackslashInNameIsNotDoubled() {
+        String sql = generator.getTablesSQL("odd\\schema");
+
+        assertTrue(sql.contains("'odd\\schema'"), sql);
     }
 
     @Test

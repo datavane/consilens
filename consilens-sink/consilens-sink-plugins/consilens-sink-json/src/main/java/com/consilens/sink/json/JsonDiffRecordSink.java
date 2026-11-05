@@ -1,8 +1,8 @@
 package com.consilens.sink.json;
 
+import com.consilens.common.io.PathSupport;
 import com.consilens.core.diff.DiffRow;
 import com.consilens.core.lifecycle.DiffContext;
-import com.consilens.core.lifecycle.SegmentResult;
 import com.consilens.sink.api.ColumnValueInterpolator;
 import com.consilens.sink.api.Sink;
 import com.consilens.sink.api.model.ColumnMapping;
@@ -13,10 +13,10 @@ import lombok.extern.slf4j.Slf4j;
 
 import java.io.BufferedWriter;
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -41,10 +41,12 @@ public class JsonDiffRecordSink implements Sink {
             "operation", "primaryKey", "sourceValues", "targetValues",
             "columnNames1", "columnNames2", "changedColumns1", "changedColumns2");
 
-    private final List<Object> buffer = new ArrayList<>();
     private ObjectMapper objectMapper;
     private JsonSinkConfig sinkConfig;
     private String resolvedPath;
+    private BufferedWriter writer;
+    private boolean firstRecord = true;
+    private long recordCount;
 
     @Override
     public void open(SinkConfig config, DiffContext context) throws IOException {
@@ -57,29 +59,49 @@ public class JsonDiffRecordSink implements Sink {
         String path = sinkConfig.getPath();
         resolvedPath = ColumnValueInterpolator.resolvePath(
                 path != null ? path : "diff-record-${taskId}.json", context);
+        Path target = Paths.get(resolvedPath);
+        PathSupport.ensureParent(target);
+        writer = Files.newBufferedWriter(target);
+        writer.write("[");
     }
 
     @Override
     public void onDiffRecords(List<DiffRow> rows, DiffContext context) {
-        if (sinkConfig.isMergeMode()) {
-            Map<String, ColumnMapping> overrideMap = buildOverrideMap();
-            for (DiffRow row : rows) {
-                buffer.add(buildMergeRecord(row, context, overrideMap));
-            }
-        } else if (sinkConfig.hasCustomColumns()) {
-            List<ColumnMapping> fields = sinkConfig.getColumns();
-            for (DiffRow row : rows) {
-                LinkedHashMap<String, String> record = new LinkedHashMap<>();
-                for (ColumnMapping f : fields) {
-                    record.put(f.getName(), ColumnValueInterpolator.resolveField(f, context, row));
+        try {
+            if (sinkConfig.isMergeMode()) {
+                Map<String, ColumnMapping> overrideMap = buildOverrideMap();
+                for (DiffRow row : rows) {
+                    writeRecord(buildMergeRecord(row, context, overrideMap));
                 }
-                buffer.add(record);
+            } else if (sinkConfig.hasCustomColumns()) {
+                List<ColumnMapping> fields = sinkConfig.getColumns();
+                for (DiffRow row : rows) {
+                    LinkedHashMap<String, String> record = new LinkedHashMap<>();
+                    for (ColumnMapping f : fields) {
+                        record.put(f.getName(), ColumnValueInterpolator.resolveField(f, context, row));
+                    }
+                    writeRecord(record);
+                }
+            } else {
+                for (DiffRow row : rows) {
+                    writeRecord(buildDefaultRecord(row));
+                }
             }
-        } else {
-            for (DiffRow row : rows) {
-                buffer.add(buildDefaultRecord(row));
-            }
+        } catch (IOException e) {
+            throw new UncheckedIOException("Failed to write diff record to " + resolvedPath, e);
         }
+    }
+
+    private void writeRecord(Object record) throws IOException {
+        if (!firstRecord) {
+            writer.write(",");
+        }
+        if (sinkConfig.isPretty()) {
+            writer.write("\n  ");
+        }
+        writer.write(objectMapper.writeValueAsString(record));
+        firstRecord = false;
+        recordCount++;
     }
 
     private LinkedHashMap<String, Object> buildDefaultRecord(DiffRow row) {
@@ -138,21 +160,30 @@ public class JsonDiffRecordSink implements Sink {
     }
 
     @Override
-    public void onSegmentComplete(SegmentResult segmentResult) {}
+    public void onError(DiffContext context, Throwable error) {
+        log.warn("Closing JSON diff record sink after error: {}", error.getMessage());
+        try {
+            close();
+        } catch (IOException e) {
+            log.warn("Failed to finalize JSON diff record file after error", e);
+        }
+    }
 
     @Override
     public void close() throws IOException {
-        if (resolvedPath == null) {
+        if (writer == null) {
             return;
         }
-        Path path = Paths.get(resolvedPath);
-        if (path.getParent() != null) {
-            Files.createDirectories(path.getParent());
+        try {
+            if (sinkConfig.isPretty()) {
+                writer.write("\n");
+            }
+            writer.write("]");
+        } finally {
+            writer.close();
+            writer = null;
         }
-        try (BufferedWriter writer = Files.newBufferedWriter(path)) {
-            objectMapper.writeValue(writer, buffer);
-        }
-        log.info("JsonDiffRecordSink wrote {} records to {}", buffer.size(), resolvedPath);
+        log.info("JsonDiffRecordSink wrote {} records to {}", recordCount, resolvedPath);
     }
 
     private JsonSinkConfig parseConfig(String properties) throws IOException {

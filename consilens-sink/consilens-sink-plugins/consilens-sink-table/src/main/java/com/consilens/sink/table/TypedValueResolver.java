@@ -5,6 +5,8 @@ import com.consilens.core.diff.DiffRow;
 import com.consilens.core.lifecycle.DiffContext;
 import com.consilens.sink.api.ColumnValueInterpolator;
 import com.consilens.sink.api.model.ColumnMapping;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.time.Instant;
 import java.util.Locale;
@@ -14,6 +16,7 @@ import java.util.regex.Pattern;
 final class TypedValueResolver {
 
     private static final Pattern SINGLE_PLACEHOLDER = Pattern.compile("^\\$\\{([^}]+)}$");
+    private static final ObjectMapper JSON_MAPPER = new ObjectMapper();
 
     private TypedValueResolver() {
     }
@@ -216,15 +219,11 @@ final class TypedValueResolver {
         if (list == null || list.isEmpty()) {
             return "[]";
         }
-        StringBuilder sb = new StringBuilder("[");
-        for (int i = 0; i < list.size(); i++) {
-            if (i > 0) {
-                sb.append(",");
-            }
-            sb.append("\"").append(list.get(i).replace("\\", "\\\\").replace("\"", "\\\"")).append("\"");
+        try {
+            return JSON_MAPPER.writeValueAsString(list);
+        } catch (JsonProcessingException e) {
+            throw new IllegalStateException("Failed to serialize changed columns", e);
         }
-        sb.append("]");
-        return sb.toString();
     }
 
     @FunctionalInterface

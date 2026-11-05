@@ -1,0 +1,535 @@
+{
+  "description": "Consilens 示例配置回归基线。每个 mysql-* 对目录下的 0X yaml 执行 diff 后，统计三类差异数量并与本文件比对。total=精确总差异；totalMin=至少应达到的差异数；sourceMissing/targetMissing/mismatch 为可选的精确分项断言。数据来源：各 load-<target>.sql 中的刻意差异设计（REC0000000001 amount、REC0000000002 status、REC_EXTRA_001、跳过 REC0000000005、users email、orders_backup amount 与额外订单）。",
+  "baselines": {
+    "cross-db/mysql-pg/01-custom-sql-checksum.yaml": {
+      "total": 4,
+      "sourceMissing": 1,
+      "targetMissing": 1,
+      "mismatch": 2
+    },
+    "cross-db/mysql-pg/02-detail-to-aggregate.yaml": {
+      "totalMin": 1
+    },
+    "cross-db/mysql-pg/03-large-table.yaml": {
+      "total": 4,
+      "sourceMissing": 1,
+      "targetMissing": 1,
+      "mismatch": 2
+    },
+    "cross-db/mysql-pg/04-mapped-checksum.yaml": {
+      "total": 1,
+      "mismatch": 1
+    },
+    "cross-db/mysql-pg/05-same-db-join.yaml": {
+      "total": 2,
+      "mismatch": 1,
+      "targetMissing": 1
+    },
+    "cross-db/mysql-clickhouse/01-custom-sql-checksum.yaml": {
+      "total": 4,
+      "sourceMissing": 1,
+      "targetMissing": 1,
+      "mismatch": 2
+    },
+    "cross-db/mysql-clickhouse/02-detail-to-aggregate.yaml": {
+      "totalMin": 1
+    },
+    "cross-db/mysql-clickhouse/03-large-table.yaml": {
+      "total": 4,
+      "sourceMissing": 1,
+      "targetMissing": 1,
+      "mismatch": 2
+    },
+    "cross-db/mysql-clickhouse/04-mapped-checksum.yaml": {
+      "total": 1,
+      "mismatch": 1
+    },
+    "cross-db/mysql-clickhouse/05-same-db-join.yaml": {
+      "total": 2,
+      "mismatch": 1,
+      "targetMissing": 1
+    },
+    "cross-db/mysql-tidb/01-custom-sql-checksum.yaml": {
+      "total": 4,
+      "sourceMissing": 1,
+      "targetMissing": 1,
+      "mismatch": 2
+    },
+    "cross-db/mysql-tidb/02-detail-to-aggregate.yaml": {
+      "totalMin": 1
+    },
+    "cross-db/mysql-tidb/03-large-table.yaml": {
+      "total": 4,
+      "sourceMissing": 1,
+      "targetMissing": 1,
+      "mismatch": 2
+    },
+    "cross-db/mysql-tidb/04-mapped-checksum.yaml": {
+      "total": 1,
+      "mismatch": 1
+    },
+    "cross-db/mysql-tidb/05-same-db-join.yaml": {
+      "total": 2,
+      "mismatch": 1,
+      "targetMissing": 1
+    },
+    "cross-db/mysql-starrocks/01-custom-sql-checksum.yaml": {
+      "total": 4,
+      "sourceMissing": 1,
+      "targetMissing": 1,
+      "mismatch": 2
+    },
+    "cross-db/mysql-starrocks/02-detail-to-aggregate.yaml": {
+      "totalMin": 1
+    },
+    "cross-db/mysql-starrocks/03-large-table.yaml": {
+      "total": 4,
+      "sourceMissing": 1,
+      "targetMissing": 1,
+      "mismatch": 2
+    },
+    "cross-db/mysql-starrocks/04-mapped-checksum.yaml": {
+      "total": 1,
+      "mismatch": 1
+    },
+    "cross-db/mysql-starrocks/05-same-db-join.yaml": {
+      "total": 2,
+      "mismatch": 1,
+      "targetMissing": 1
+    },
+    "cross-db/mysql-doris/01-custom-sql-checksum.yaml": {
+      "total": 4,
+      "sourceMissing": 1,
+      "targetMissing": 1,
+      "mismatch": 2
+    },
+    "cross-db/mysql-doris/02-detail-to-aggregate.yaml": {
+      "totalMin": 1
+    },
+    "cross-db/mysql-doris/03-large-table.yaml": {
+      "total": 4,
+      "sourceMissing": 1,
+      "targetMissing": 1,
+      "mismatch": 2
+    },
+    "cross-db/mysql-doris/04-mapped-checksum.yaml": {
+      "total": 1,
+      "mismatch": 1
+    },
+    "cross-db/mysql-doris/05-same-db-join.yaml": {
+      "total": 2,
+      "mismatch": 1,
+      "targetMissing": 1
+    },
+    "cross-db/mysql-trino/01-custom-sql-checksum.yaml": {
+      "total": 4,
+      "sourceMissing": 1,
+      "targetMissing": 1,
+      "mismatch": 2
+    },
+    "cross-db/mysql-trino/02-detail-to-aggregate.yaml": {
+      "totalMin": 1
+    },
+    "cross-db/mysql-trino/03-large-table.yaml": {
+      "total": 4,
+      "sourceMissing": 1,
+      "targetMissing": 1,
+      "mismatch": 2
+    },
+    "cross-db/mysql-trino/04-mapped-checksum.yaml": {
+      "total": 1,
+      "mismatch": 1
+    },
+    "cross-db/mysql-trino/05-same-db-join.yaml": {
+      "total": 2,
+      "mismatch": 1,
+      "targetMissing": 1
+    },
+    "cross-db/mysql-presto/01-custom-sql-checksum.yaml": {
+      "total": 4,
+      "sourceMissing": 1,
+      "targetMissing": 1,
+      "mismatch": 2
+    },
+    "cross-db/mysql-presto/02-detail-to-aggregate.yaml": {
+      "totalMin": 1
+    },
+    "cross-db/mysql-presto/03-large-table.yaml": {
+      "total": 4,
+      "sourceMissing": 1,
+      "targetMissing": 1,
+      "mismatch": 2
+    },
+    "cross-db/mysql-presto/04-mapped-checksum.yaml": {
+      "total": 1,
+      "mismatch": 1
+    },
+    "cross-db/mysql-presto/05-same-db-join.yaml": {
+      "total": 2,
+      "mismatch": 1,
+      "targetMissing": 1
+    },
+    "cross-db/mysql-oceanbase/01-custom-sql-checksum.yaml": {
+      "total": 4,
+      "sourceMissing": 1,
+      "targetMissing": 1,
+      "mismatch": 2
+    },
+    "cross-db/mysql-oceanbase/02-detail-to-aggregate.yaml": {
+      "totalMin": 1
+    },
+    "cross-db/mysql-oceanbase/03-large-table.yaml": {
+      "total": 4,
+      "sourceMissing": 1,
+      "targetMissing": 1,
+      "mismatch": 2
+    },
+    "cross-db/mysql-oceanbase/04-mapped-checksum.yaml": {
+      "total": 1,
+      "mismatch": 1
+    },
+    "cross-db/mysql-oceanbase/05-same-db-join.yaml": {
+      "total": 2,
+      "mismatch": 1,
+      "targetMissing": 1
+    },
+    "cross-db/mysql-oracle/01-custom-sql-checksum.yaml": {
+      "total": 4,
+      "sourceMissing": 1,
+      "targetMissing": 1,
+      "mismatch": 2
+    },
+    "cross-db/mysql-oracle/02-detail-to-aggregate.yaml": {
+      "totalMin": 1
+    },
+    "cross-db/mysql-oracle/03-large-table.yaml": {
+      "total": 4,
+      "sourceMissing": 1,
+      "targetMissing": 1,
+      "mismatch": 2
+    },
+    "cross-db/mysql-oracle/04-mapped-checksum.yaml": {
+      "total": 1,
+      "mismatch": 1
+    },
+    "cross-db/mysql-oracle/05-same-db-join.yaml": {
+      "total": 2,
+      "mismatch": 1,
+      "targetMissing": 1
+    },
+    "cross-db/mysql-sqlserver/01-custom-sql-checksum.yaml": {
+      "total": 4,
+      "sourceMissing": 1,
+      "targetMissing": 1,
+      "mismatch": 2
+    },
+    "cross-db/mysql-sqlserver/02-detail-to-aggregate.yaml": {
+      "totalMin": 1
+    },
+    "cross-db/mysql-sqlserver/03-large-table.yaml": {
+      "total": 4,
+      "sourceMissing": 1,
+      "targetMissing": 1,
+      "mismatch": 2
+    },
+    "cross-db/mysql-sqlserver/04-mapped-checksum.yaml": {
+      "total": 1,
+      "mismatch": 1
+    },
+    "cross-db/mysql-sqlserver/05-same-db-join.yaml": {
+      "total": 2,
+      "mismatch": 1,
+      "targetMissing": 1
+    },
+    "cross-db/mysql-pg/06-performance-full-fields.yaml": {
+      "totalMin": 4
+    },
+    "cross-db/mysql-pg/07-exclude-fields.yaml": {
+      "total": 4,
+      "sourceMissing": 1,
+      "targetMissing": 1,
+      "mismatch": 2
+    },
+    "cross-db/mysql-pg/09-json-format.json": {
+      "total": 4,
+      "sourceMissing": 1,
+      "targetMissing": 1,
+      "mismatch": 2
+    },
+    "cross-db/mysql-pg/11-identical.yaml": {
+      "total": 0
+    },
+    "cross-db/mysql-clickhouse/06-performance-full-fields.yaml": {
+      "totalMin": 4
+    },
+    "cross-db/mysql-clickhouse/07-exclude-fields.yaml": {
+      "total": 4,
+      "sourceMissing": 1,
+      "targetMissing": 1,
+      "mismatch": 2
+    },
+    "cross-db/mysql-clickhouse/09-json-format.json": {
+      "total": 4,
+      "sourceMissing": 1,
+      "targetMissing": 1,
+      "mismatch": 2
+    },
+    "cross-db/mysql-clickhouse/11-identical.yaml": {
+      "total": 0
+    },
+    "cross-db/mysql-tidb/06-performance-full-fields.yaml": {
+      "totalMin": 4
+    },
+    "cross-db/mysql-tidb/07-exclude-fields.yaml": {
+      "total": 4,
+      "sourceMissing": 1,
+      "targetMissing": 1,
+      "mismatch": 2
+    },
+    "cross-db/mysql-tidb/09-json-format.json": {
+      "total": 4,
+      "sourceMissing": 1,
+      "targetMissing": 1,
+      "mismatch": 2
+    },
+    "cross-db/mysql-tidb/11-identical.yaml": {
+      "total": 0
+    },
+    "cross-db/mysql-starrocks/06-performance-full-fields.yaml": {
+      "totalMin": 4
+    },
+    "cross-db/mysql-starrocks/07-exclude-fields.yaml": {
+      "total": 4,
+      "sourceMissing": 1,
+      "targetMissing": 1,
+      "mismatch": 2
+    },
+    "cross-db/mysql-starrocks/09-json-format.json": {
+      "total": 4,
+      "sourceMissing": 1,
+      "targetMissing": 1,
+      "mismatch": 2
+    },
+    "cross-db/mysql-starrocks/11-identical.yaml": {
+      "total": 0
+    },
+    "cross-db/mysql-doris/06-performance-full-fields.yaml": {
+      "totalMin": 4
+    },
+    "cross-db/mysql-doris/07-exclude-fields.yaml": {
+      "total": 4,
+      "sourceMissing": 1,
+      "targetMissing": 1,
+      "mismatch": 2
+    },
+    "cross-db/mysql-doris/09-json-format.json": {
+      "total": 4,
+      "sourceMissing": 1,
+      "targetMissing": 1,
+      "mismatch": 2
+    },
+    "cross-db/mysql-doris/11-identical.yaml": {
+      "total": 0
+    },
+    "cross-db/mysql-trino/06-performance-full-fields.yaml": {
+      "totalMin": 4
+    },
+    "cross-db/mysql-trino/07-exclude-fields.yaml": {
+      "total": 4,
+      "sourceMissing": 1,
+      "targetMissing": 1,
+      "mismatch": 2
+    },
+    "cross-db/mysql-trino/09-json-format.json": {
+      "total": 4,
+      "sourceMissing": 1,
+      "targetMissing": 1,
+      "mismatch": 2
+    },
+    "cross-db/mysql-trino/11-identical.yaml": {
+      "total": 0
+    },
+    "cross-db/mysql-presto/06-performance-full-fields.yaml": {
+      "totalMin": 4
+    },
+    "cross-db/mysql-presto/07-exclude-fields.yaml": {
+      "total": 4,
+      "sourceMissing": 1,
+      "targetMissing": 1,
+      "mismatch": 2
+    },
+    "cross-db/mysql-presto/09-json-format.json": {
+      "total": 4,
+      "sourceMissing": 1,
+      "targetMissing": 1,
+      "mismatch": 2
+    },
+    "cross-db/mysql-presto/11-identical.yaml": {
+      "total": 0
+    },
+    "cross-db/mysql-oceanbase/06-performance-full-fields.yaml": {
+      "totalMin": 4
+    },
+    "cross-db/mysql-oceanbase/07-exclude-fields.yaml": {
+      "total": 4,
+      "sourceMissing": 1,
+      "targetMissing": 1,
+      "mismatch": 2
+    },
+    "cross-db/mysql-oceanbase/09-json-format.json": {
+      "total": 4,
+      "sourceMissing": 1,
+      "targetMissing": 1,
+      "mismatch": 2
+    },
+    "cross-db/mysql-oceanbase/11-identical.yaml": {
+      "total": 0
+    },
+    "cross-db/mysql-oracle/06-performance-full-fields.yaml": {
+      "totalMin": 4
+    },
+    "cross-db/mysql-oracle/07-exclude-fields.yaml": {
+      "total": 4,
+      "sourceMissing": 1,
+      "targetMissing": 1,
+      "mismatch": 2
+    },
+    "cross-db/mysql-oracle/09-json-format.json": {
+      "total": 4,
+      "sourceMissing": 1,
+      "targetMissing": 1,
+      "mismatch": 2
+    },
+    "cross-db/mysql-oracle/11-identical.yaml": {
+      "total": 0
+    },
+    "cross-db/mysql-sqlserver/06-performance-full-fields.yaml": {
+      "totalMin": 4
+    },
+    "cross-db/mysql-sqlserver/07-exclude-fields.yaml": {
+      "total": 4,
+      "sourceMissing": 1,
+      "targetMissing": 1,
+      "mismatch": 2
+    },
+    "cross-db/mysql-sqlserver/09-json-format.json": {
+      "total": 4,
+      "sourceMissing": 1,
+      "targetMissing": 1,
+      "mismatch": 2
+    },
+    "cross-db/mysql-sqlserver/11-identical.yaml": {
+      "total": 0
+    },
+    "cross-db/mysql-pg/08-output-postgres.yaml": {
+      "totalMin": 4
+    },
+    "cross-db/mysql-doris/10-partition-filter.yaml": {
+      "total": 4,
+      "sourceMissing": 1,
+      "targetMissing": 1,
+      "mismatch": 2
+    },
+    "same-db/mysql/01-identical.yaml": {
+      "total": 0
+    },
+    "same-db/mysql/02-join-diff.yaml": {
+      "total": 2,
+      "targetMissing": 1,
+      "mismatch": 1
+    },
+    "same-db/postgresql/01-identical.yaml": {
+      "total": 0
+    },
+    "same-db/postgresql/02-join-diff.yaml": {
+      "total": 2,
+      "targetMissing": 1,
+      "mismatch": 1
+    },
+    "same-db/oracle/01-identical.yaml": {
+      "total": 0
+    },
+    "same-db/oracle/02-join-diff.yaml": {
+      "total": 2,
+      "targetMissing": 1,
+      "mismatch": 1
+    },
+    "same-db/sqlserver/01-identical.yaml": {
+      "total": 0
+    },
+    "same-db/sqlserver/02-join-diff.yaml": {
+      "total": 2,
+      "targetMissing": 1,
+      "mismatch": 1
+    },
+    "same-db/clickhouse/01-identical.yaml": {
+      "total": 0
+    },
+    "same-db/clickhouse/02-join-diff.yaml": {
+      "total": 2,
+      "targetMissing": 1,
+      "mismatch": 1
+    },
+    "same-db/tidb/01-identical.yaml": {
+      "total": 0
+    },
+    "same-db/tidb/02-join-diff.yaml": {
+      "total": 2,
+      "targetMissing": 1,
+      "mismatch": 1
+    },
+    "same-db/starrocks/01-identical.yaml": {
+      "total": 0
+    },
+    "same-db/starrocks/02-join-diff.yaml": {
+      "total": 2,
+      "targetMissing": 1,
+      "mismatch": 1
+    },
+    "same-db/doris/01-identical.yaml": {
+      "total": 0
+    },
+    "same-db/doris/02-join-diff.yaml": {
+      "total": 2,
+      "targetMissing": 1,
+      "mismatch": 1
+    },
+    "same-db/oceanbase/01-identical.yaml": {
+      "total": 0
+    },
+    "same-db/oceanbase/02-join-diff.yaml": {
+      "total": 2,
+      "targetMissing": 1,
+      "mismatch": 1
+    },
+    "same-db/trino/01-identical.yaml": {
+      "total": 0
+    },
+    "same-db/trino/02-join-diff.yaml": {
+      "total": 2,
+      "targetMissing": 1,
+      "mismatch": 1
+    },
+    "same-db/presto/01-identical.yaml": {
+      "total": 0
+    },
+    "same-db/presto/02-join-diff.yaml": {
+      "total": 2,
+      "targetMissing": 1,
+      "mismatch": 1
+    },
+    "same-db/mysql/03-normalization.yaml": {
+      "total": 2,
+      "targetMissing": 1,
+      "mismatch": 1
+    },
+    "files/csv-to-csv.yaml": {
+      "total": 1,
+      "mismatch": 1
+    },
+    "files/s3-to-csv.yaml": {
+      "requiresExternalStorage": true,
+      "note": "需要 S3/MinIO 环境，本地不参与自动回归；S3 下载/前缀/glob 用 scripts/s3-smoke.sh 验证"
+    }
+  }
+}

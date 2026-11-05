@@ -3,8 +3,10 @@ package com.consilens.core.database.dialect;
 import com.consilens.connector.api.DatabaseDialect;
 import com.consilens.connector.api.DatabaseDialectProvider;
 import com.consilens.spi.PluginManager;
+import com.consilens.spi.ServiceLoaderUtils;
 
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
@@ -14,6 +16,7 @@ import java.util.Set;
 public final class DialectFactory {
 
     private static volatile PluginManager<String, DatabaseDialectProvider, DatabaseDialect> manager;
+    private static volatile List<DatabaseDialectProvider> urlProviders;
 
     private DialectFactory() {
     }
@@ -83,49 +86,77 @@ public final class DialectFactory {
      * Detect connector type from a JDBC URL. Returns lowercase connector type string
      * (e.g. "mysql", "postgresql") or "unknown" if not recognized.
      */
+    /**
+     * URL schemes for connector types that have no dialect provider in this
+     * build. Priorities preserve the legacy branch order; the resulting
+     * connector type identifiers are unchanged.
+     */
+    private static final List<LegacyUrlMatcher> LEGACY_URL_MATCHERS = List.of(
+            new LegacyUrlMatcher(80, "sqlite", "sqlite"),
+            new LegacyUrlMatcher(90, "h2", "h2"),
+            new LegacyUrlMatcher(100, "snowflake", "snowflake"),
+            new LegacyUrlMatcher(110, "bigquery", "bigquery", "googleapis.com/bigquery"),
+            new LegacyUrlMatcher(120, "redshift", "redshift", "redshift.amazonaws.com"),
+            new LegacyUrlMatcher(130, "databricks", "databricks"),
+            new LegacyUrlMatcher(170, "vertica", "vertica"),
+            new LegacyUrlMatcher(180, "duckdb", "duckdb"));
+
     public static String connectorTypeFromJdbcUrl(String jdbcUrl) {
         if (jdbcUrl == null) {
             return "unknown";
         }
-        String lower = jdbcUrl.toLowerCase();
-        if (lower.contains("tidb") || (lower.contains("mysql") && lower.contains(":4000"))) {
-            return "tidb";
-        } else if (lower.contains("doris")) {
-            return "doris";
-        } else if (lower.contains("starrocks") || (lower.contains("mysql") && lower.contains(":9030"))) {
-            return "starrocks";
-        } else if (lower.contains("mysql")) {
-            return "mysql";
-        } else if (lower.contains("postgresql") || lower.contains("postgres")) {
-            return "postgresql";
-        } else if (lower.contains("oracle")) {
-            return "oracle";
-        } else if (lower.contains("sqlserver")) {
-            return "sqlserver";
-        } else if (lower.contains("sqlite")) {
-            return "sqlite";
-        } else if (lower.contains("h2")) {
-            return "h2";
-        } else if (lower.contains("snowflake")) {
-            return "snowflake";
-        } else if (lower.contains("bigquery") || lower.contains("googleapis.com/bigquery")) {
-            return "bigquery";
-        } else if (lower.contains("redshift") || lower.contains("redshift.amazonaws.com")) {
-            return "redshift";
-        } else if (lower.contains("databricks")) {
-            return "databricks";
-        } else if (lower.contains("clickhouse")) {
-            return "clickhouse";
-        } else if (lower.contains("presto")) {
-            return "presto";
-        } else if (lower.contains("trino")) {
-            return "trino";
-        } else if (lower.contains("vertica")) {
-            return "vertica";
-        } else if (lower.contains("duckdb")) {
-            return "duckdb";
+        String lower = jdbcUrl.toLowerCase(Locale.ROOT);
+        int bestPriority = Integer.MAX_VALUE;
+        String connectorType = "unknown";
+        for (DatabaseDialectProvider provider : urlProviders()) {
+            int priority = provider.getJdbcUrlMatchPriority();
+            if (priority < bestPriority && provider.supportsJdbcUrl(lower)) {
+                bestPriority = priority;
+                connectorType = provider.getConnectorType();
+            }
         }
-        return "unknown";
+        for (LegacyUrlMatcher matcher : LEGACY_URL_MATCHERS) {
+            if (matcher.priority < bestPriority && matcher.matches(lower)) {
+                bestPriority = matcher.priority;
+                connectorType = matcher.connectorType;
+            }
+        }
+        return connectorType;
+    }
+
+    private static List<DatabaseDialectProvider> urlProviders() {
+        List<DatabaseDialectProvider> providers = urlProviders;
+        if (providers == null) {
+            synchronized (DialectFactory.class) {
+                providers = urlProviders;
+                if (providers == null) {
+                    providers = ServiceLoaderUtils.loadAll(DatabaseDialectProvider.class);
+                    urlProviders = providers;
+                }
+            }
+        }
+        return providers;
+    }
+
+    private static final class LegacyUrlMatcher {
+        private final int priority;
+        private final String connectorType;
+        private final String[] tokens;
+
+        private LegacyUrlMatcher(int priority, String connectorType, String... tokens) {
+            this.priority = priority;
+            this.connectorType = connectorType;
+            this.tokens = tokens;
+        }
+
+        private boolean matches(String lowerJdbcUrl) {
+            for (String token : tokens) {
+                if (lowerJdbcUrl.contains(token)) {
+                    return true;
+                }
+            }
+            return false;
+        }
     }
 
     static void setManagerForTest(PluginManager<String, DatabaseDialectProvider, DatabaseDialect> testManager) {
@@ -134,5 +165,6 @@ public final class DialectFactory {
 
     static void reset() {
         manager = null;
+        urlProviders = null;
     }
 }

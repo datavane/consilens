@@ -40,6 +40,12 @@ public class SQLServerConnectionPoolOptimizer implements ConnectionPoolOptimizer
         // Network optimization
         props.setProperty("packetSize", "32767");
 
+        // 校验和/归一化表达式会把文本转成 UTF-8 排序规则的 varchar 再取字节
+        // （见 SQLServerSqlQueryGenerator#utf8Text），驱动必须按 UTF-8 解码 varchar，
+        // 否则非 ASCII 值会被按库默认代码页解码成乱码（实测 mysql↔sqlserver 的 c_unicode）。
+        props.setProperty("characterEncoding", "UTF-8");
+        props.setProperty("sendStringParametersAsUnicode", "true");
+
         return props;
     }
 

@@ -61,15 +61,6 @@ class PrestoSqlQueryGeneratorTest {
         String sql = generator.getChecksumSQL("default", "users", columns, Arrays.asList("id"), types, null);
         assertTrue(sql.toLowerCase().contains("md5"));
     }
-
-    @Test
-    void testGetFullOuterJoinSQL() {
-        List<String> joinColumns = Arrays.asList("id");
-        String sql = generator.getFullOuterJoinSQL("table1", "table2", joinColumns, null);
-
-        assertTrue(sql.contains("FULL OUTER JOIN"));
-    }
-
     @Test
     void testGetBatchInsertSQL() {
         List<String> columns = Arrays.asList("id", "name", "email");

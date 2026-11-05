@@ -1,0 +1,37 @@
+source:
+  type: mysql
+  connection:
+    url: jdbc:mysql://127.0.0.1:13306/consilens_demo?useUnicode=true&characterEncoding=UTF-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+    username: ${env.MYSQL_USER}
+    password: ${env.MYSQL_PASSWORD}
+  resource:
+    type: sql
+    path: |
+      SELECT record_id, col_tinyint, col_int, col_decimal, amount, status, updated_at
+      FROM consilens_performance_demo_table
+target:
+  type: oceanbase
+  connection:
+    url: jdbc:mysql://127.0.0.1:2881/consilens_demo?useUnicode=true&characterEncoding=UTF-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+    driverClassName: com.mysql.cj.jdbc.Driver
+    username: ${env.OCEANBASE_USER}
+    password: ${env.OCEANBASE_PASSWORD}
+  resource:
+    type: sql
+    path: |
+      SELECT record_id, col_tinyint, col_int, col_decimal, amount, status, updated_at
+      FROM consilens_performance_demo_table
+comparison:
+  keys:
+    source: [record_id]
+    target: [record_id]
+strategy:
+  mode: checksum
+  algorithm: xor
+  bisectionFactor: 8
+  bisectionThreshold: 8000
+  batchSize: 1000
+result:
+  sinks:
+    - format: console
+      type: result

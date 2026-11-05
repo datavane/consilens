@@ -96,6 +96,10 @@ class JdbcDatasetHandleTest {
                     if ("getConnectorType".equals(method.getName())) {
                         return "mysql";
                     }
+                    // 代理不执行接口的 default 方法：布尔返回值必须给 false，null 会在拆箱时 NPE
+                    if (method.getReturnType() == boolean.class) {
+                        return false;
+                    }
                     return null;
                 });
     }

@@ -10,15 +10,14 @@ import java.util.Map;
 
 /**
  * Normalization configuration
- * Supports global and database-level configuration
- * Note: Column-level configuration is not supported in current version
+ * Supports global, database-level and column-level configuration
  */
 @Data
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
 public class NormalizationConfig {
-    
+
     /**
      * Global configuration (applies to all databases)
      * key: Data type name (decimal, float, date, etc.)
@@ -26,19 +25,33 @@ public class NormalizationConfig {
      */
     @JsonProperty("global")
     private Map<String, TypeNormalizationRule> global;
-    
+
     /**
      * Source specific configuration (overrides global)
      */
     @JsonProperty("source")
     private Map<String, TypeNormalizationRule> source;
-    
+
     /**
      * Target specific configuration (overrides global)
      */
     @JsonProperty("target")
     private Map<String, TypeNormalizationRule> target;
-    
+
+    /**
+     * Column-level configuration (overrides type rules; applies to both sides
+     * by column name). key: column name, value: normalization rule.
+     */
+    @JsonProperty("columns")
+    private Map<String, TypeNormalizationRule> columns;
+
+    /**
+     * 容差内差异的处置策略（ignore|report）。与具体类型规则分开：它不是一个归一化操作，
+     * 而是"判定后怎么记"的口径。
+     */
+    @JsonProperty("tolerance")
+    private TolerancePolicyConfig tolerance;
+
     /**
      * Validate configuration validity
      */
@@ -46,6 +59,9 @@ public class NormalizationConfig {
         validatePrecision("global", global);
         validatePrecision("source", source);
         validatePrecision("target", target);
+        if (tolerance != null) {
+            tolerance.validate();
+        }
     }
     
     private void validatePrecision(String configName, Map<String, TypeNormalizationRule> rules) {

@@ -113,10 +113,14 @@ public class InfoTreeRecorder {
         if (record == null) {
             return;
         }
-        record.diffCount += diffCount;
-        record.sourceMissing += sourceMissing;
-        record.targetMissing += targetMissing;
-        record.mismatch += mismatch;
+        // 同一段的统计查询与明细查询可能在不同 IO 线程上并发写同一个 NodeRecord，
+        // 普通 long 的自增会丢更新；totalDifferences 用原子变量，节点内计数也需串行化。
+        synchronized (record) {
+            record.diffCount += diffCount;
+            record.sourceMissing += sourceMissing;
+            record.targetMissing += targetMissing;
+            record.mismatch += mismatch;
+        }
         totalDifferences.addAndGet(diffCount);
     }
 
@@ -125,7 +129,9 @@ public class InfoTreeRecorder {
         if (record == null) {
             return;
         }
-        record.queryCount += delta;
+        synchronized (record) {
+            record.queryCount += delta;
+        }
     }
 
     public void addRowsFetched(String nodeId, long delta) {
@@ -133,7 +139,9 @@ public class InfoTreeRecorder {
         if (record == null) {
             return;
         }
-        record.rowsFetched += delta;
+        synchronized (record) {
+            record.rowsFetched += delta;
+        }
     }
 
     public void addBytesFetched(String nodeId, long delta) {
@@ -141,7 +149,9 @@ public class InfoTreeRecorder {
         if (record == null) {
             return;
         }
-        record.bytesFetched += delta;
+        synchronized (record) {
+            record.bytesFetched += delta;
+        }
     }
 
     public void markSkippedSegment() {
@@ -191,6 +201,10 @@ public class InfoTreeRecorder {
 
     public void recordGlobalMetric(String key, Object value) {
         metrics.put(key, value);
+    }
+
+    public void markFirstDifference() {
+        metrics.putIfAbsent("firstDifferenceAt", System.currentTimeMillis());
     }
 
     public DiffResult.InfoTree snapshot() {

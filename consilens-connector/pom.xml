@@ -6,7 +6,7 @@
     <parent>
         <groupId>com.consilens</groupId>
         <artifactId>consilens</artifactId>
-        <version>0.2.0</version>
+        <version>0.1-SNAPSHOT</version>
     </parent>
 
     <artifactId>consilens-connector</artifactId>
@@ -21,6 +21,7 @@
     
     <modules>
         <module>consilens-connector-api</module>
+        <module>consilens-connector-testkit</module>
         <module>consilens-connector-plugins</module>
     </modules>
 </project>

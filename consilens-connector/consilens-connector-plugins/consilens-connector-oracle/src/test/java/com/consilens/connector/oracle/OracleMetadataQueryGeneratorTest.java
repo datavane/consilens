@@ -40,6 +40,9 @@ class OracleMetadataQueryGeneratorTest {
 
         assertTrue(sql.contains("ALL_CONSTRAINTS"));
         assertTrue(sql.contains("CONSTRAINT_TYPE = 'P'"));
+        // 约束名只在 owner 内唯一：join 必须带 owner/table 限定，否则同名主键跨 schema 串列
+        assertTrue(sql.contains("cons.OWNER = cols.OWNER"), sql);
+        assertTrue(sql.contains("cons.TABLE_NAME = cols.TABLE_NAME"), sql);
     }
 
     @Test

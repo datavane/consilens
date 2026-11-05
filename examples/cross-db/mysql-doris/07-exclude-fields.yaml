@@ -1,0 +1,60 @@
+# 字段排除比对配置 - MySQL vs doris
+# 目标：覆盖 comparison.exclude.source/target，验证排除列不参与比对。
+# 基线：total=4（amount/status MISMATCH + REC_EXTRA_001 + 跳过 REC0000000005）。
+
+source:
+  type: mysql
+  name: source-mysql
+  connection:
+    url: jdbc:mysql://127.0.0.1:13306/consilens_demo?useUnicode=true&characterEncoding=UTF-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+    username: ${env.MYSQL_USER}
+    password: ${env.MYSQL_PASSWORD}
+  resource:
+    type: table
+    name: consilens_performance_demo_table
+
+target:
+  type: doris
+  name: target-doris
+  connection:
+    url: jdbc:mysql://127.0.0.1:9030/consilens_demo?useUnicode=true&characterEncoding=UTF-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+    username: ${env.DORIS_USER}
+    password: ${env.DORIS_PASSWORD}
+  resource:
+    type: table
+    name: consilens_performance_demo_table
+
+comparison:
+  keys:
+    source: [record_id]
+    target: [record_id]
+  fields:
+    source:
+      - col_tinyint
+      - col_int
+      - col_decimal
+      - amount
+      - status
+      - updated_at
+    target:
+      - col_tinyint
+      - col_int
+      - col_decimal
+      - amount
+      - status
+      - updated_at
+  exclude:
+    source: [col_decimal]
+    target: [col_decimal]
+
+strategy:
+  mode: checksum
+  algorithm: xor
+  bisectionFactor: 8
+  bisectionThreshold: 8000
+  batchSize: 1000
+
+result:
+  sinks:
+    - format: console
+      type: result

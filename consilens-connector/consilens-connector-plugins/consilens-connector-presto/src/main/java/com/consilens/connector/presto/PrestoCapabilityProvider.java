@@ -40,18 +40,4 @@ public class PrestoCapabilityProvider extends BaseCapabilityProvider {
         return EnumSet.copyOf(PRESTO_FEATURES);
     }
 
-    @Override
-    public String getDefaultSchema() {
-        return "default";
-    }
-
-    @Override
-    public char getWildcardEscapeChar() {
-        return '\\';
-    }
-
-    @Override
-    public String getPaginationHint(long offset, long limit) {
-        return "";
-    }
 }

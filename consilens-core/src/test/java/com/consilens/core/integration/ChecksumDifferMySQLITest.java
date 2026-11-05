@@ -75,7 +75,7 @@ class ChecksumDifferMySQLITest {
         TestDatabaseHelper.insertStandardData(sourceAdapter, "source_identical");
         TestDatabaseHelper.insertStandardData(targetAdapter, "target_identical");
 
-        DifferConfig config = new DifferConfig(4, 100, false,
+        DifferConfig config = new DifferConfig(4, 100,
                 ChecksumAlgorithm.CONCAT);
 
         TableSegment seg1 = TableSegment.builder()
@@ -116,7 +116,7 @@ class ChecksumDifferMySQLITest {
         TestDatabaseHelper.insertStandardData(targetAdapter, "target_added");
         TestDatabaseHelper.insertExtraRow(targetAdapter, "target_added", 11, "extra_item", 999.99);
 
-        DifferConfig config = new DifferConfig(4, 100, false,
+        DifferConfig config = new DifferConfig(4, 100,
                 ChecksumAlgorithm.CONCAT);
 
         TableSegment seg1 = TableSegment.builder()
@@ -160,7 +160,7 @@ class ChecksumDifferMySQLITest {
         TestDatabaseHelper.insertStandardData(targetAdapter, "target_removed");
         TestDatabaseHelper.deleteRow(targetAdapter, "target_removed", 5);
 
-        DifferConfig config = new DifferConfig(4, 100, false,
+        DifferConfig config = new DifferConfig(4, 100,
                 ChecksumAlgorithm.CONCAT);
 
         TableSegment seg1 = TableSegment.builder()
@@ -205,7 +205,7 @@ class ChecksumDifferMySQLITest {
         TestDatabaseHelper.updateRow(targetAdapter, "target_modified", 3, "modified_item", 999.99);
         TestDatabaseHelper.updateRow(targetAdapter, "target_modified", 7, "another_modified", 888.88);
 
-        DifferConfig config = new DifferConfig(4, 100, false,
+        DifferConfig config = new DifferConfig(4, 100,
                 ChecksumAlgorithm.CONCAT);
 
         TableSegment seg1 = TableSegment.builder()
@@ -259,7 +259,7 @@ class ChecksumDifferMySQLITest {
         // Insert row 11 into target table
         TestDatabaseHelper.insertExtraRow(targetAdapter, "target_mixed", 11, "new_item", 110.00);
 
-        DifferConfig config = new DifferConfig(4, 100, false,
+        DifferConfig config = new DifferConfig(4, 100,
                 ChecksumAlgorithm.CONCAT);
 
         TableSegment seg1 = TableSegment.builder()
@@ -299,7 +299,7 @@ class ChecksumDifferMySQLITest {
         TestDatabaseHelper.createTestTable(sourceAdapter, "source_empty");
         TestDatabaseHelper.createTestTable(targetAdapter, "target_empty");
 
-        DifferConfig config = new DifferConfig(4, 100, false,
+        DifferConfig config = new DifferConfig(4, 100,
                 ChecksumAlgorithm.CONCAT);
 
         TableSegment seg1 = TableSegment.builder()

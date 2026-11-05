@@ -22,6 +22,15 @@ import java.util.Properties;
 @Slf4j
 public class OracleConnectionPoolOptimizer implements ConnectionPoolOptimizer {
 
+    /**
+     * 固定 NLS 时间格式：TO_CHAR(datetime) 的 ORDER BY 必须与 Java 侧归一化后的
+     * ISO 文本同序，否则跨引擎 streaming merge 会错位（默认 DD-MON-RR 按月份名排序）。
+     */
+    public static final String DEFAULT_CONNECTION_INIT_SQL =
+            "ALTER SESSION SET NLS_DATE_FORMAT='YYYY-MM-DD HH24:MI:SS' "
+                    + "NLS_TIMESTAMP_FORMAT='YYYY-MM-DD HH24:MI:SS.FF9' "
+                    + "NLS_TIMESTAMP_TZ_FORMAT='YYYY-MM-DD HH24:MI:SS.FF9 TZH:TZM'";
+
     @Override
     public Properties getOptimizationProperties(boolean useSSL) {
         log.debug("Generating Oracle-specific connection pool optimization properties");
@@ -46,6 +55,10 @@ public class OracleConnectionPoolOptimizer implements ConnectionPoolOptimizer {
         log.debug("Generating Oracle default connection pool configuration");
         
         PoolConfiguration config = new PoolConfiguration();
+        // The session timezone must be configured per datasource (e.g. via an explicit
+        // connectionInitSql override on PoolConfiguration): Oracle SQL normalization
+        // interprets the stored wall clock in the *session* timezone, so it has to match
+        // the source data's zone -- an environment fact that must not be hardcoded here.
         config.setMaxPoolSize(15);
         config.setMinIdle(3);
         config.setMaxLifetime(3600000); // 60 minutes
@@ -53,6 +66,7 @@ public class OracleConnectionPoolOptimizer implements ConnectionPoolOptimizer {
         config.setConnectionTimeout(60000); // 60 seconds
         config.setLeakDetectionThreshold(120000); // 2 minutes
         config.setValidationQuery("SELECT 1 FROM DUAL");
+        config.setConnectionInitSql(DEFAULT_CONNECTION_INIT_SQL);
         
         return config;
     }

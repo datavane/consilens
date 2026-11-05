@@ -2,7 +2,6 @@ package com.consilens.core.segmentation;
 
 import lombok.extern.slf4j.Slf4j;
 
-import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -25,10 +24,6 @@ public class CheckpointSelector {
     /**
      * Choose optimal checkpoints for the given key range.
      */
-    public List<KeyVector> chooseCheckpoints(KeyVector minKey, KeyVector maxKey, int preferredCount) {
-        return chooseCheckpoints(minKey, maxKey, preferredCount, false);
-    }
-
     public List<KeyVector> chooseCheckpoints(KeyVector minKey,
                                              KeyVector maxKey,
                                              int preferredCount,
@@ -75,45 +70,6 @@ public class CheckpointSelector {
     }
 
     /**
-     * Choose checkpoints with adaptive strategy based on data distribution.
-     */
-    public List<KeyVector> chooseAdaptiveCheckpoints(KeyVector minKey,
-                                                     KeyVector maxKey,
-                                                     int preferredCount,
-                                                     long estimatedRows,
-                                                     SamplingResult samplingResult) {
-        // Start with basic uniform distribution
-        List<KeyVector> basicCheckpoints = chooseCheckpoints(minKey, maxKey, preferredCount, true);
-
-        // If we have sampling information, adjust checkpoints
-        if (samplingResult != null && samplingResult.hasDistributionInfo()) {
-            return adjustCheckpointsBasedOnDistribution(basicCheckpoints, samplingResult);
-        }
-
-        return basicCheckpoints;
-    }
-
-    /**
-     * Adjust checkpoints based on actual data distribution from sampling.
-     */
-    private List<KeyVector> adjustCheckpointsBasedOnDistribution(List<KeyVector> basicCheckpoints,
-                                                                SamplingResult samplingResult) {
-        // This is a simplified version - in practice, you would:
-        // 1. Analyze the distribution of data in each segment
-        // 2. Add more checkpoints where data is dense
-        // 3. Remove checkpoints where data is sparse
-        // 4. Ensure uniform row count per segment where possible
-
-        List<KeyVector> adjustedCheckpoints = new ArrayList<>(basicCheckpoints);
-
-        // For now, return basic checkpoints
-        // In a full implementation, this would use the sampling data to optimize
-        log.debug("Adjusting {} checkpoints based on distribution data", basicCheckpoints.size());
-
-        return adjustedCheckpoints;
-    }
-
-    /**
      * Validate checkpoint selection.
      */
     public boolean validateCheckpoints(List<KeyVector> checkpoints, KeyVector minKey, KeyVector maxKey) {
@@ -145,39 +101,9 @@ public class CheckpointSelector {
     }
 
     /**
-     * Estimate segment sizes for the given checkpoints.
-     */
-    public List<Long> estimateSegmentSizes(List<KeyVector> checkpoints) {
-        List<Long> sizes = new ArrayList<>();
-
-        for (int i = 0; i < checkpoints.size() - 1; i++) {
-            KeyVector start = checkpoints.get(i);
-            KeyVector end = checkpoints.get(i + 1);
-            long size = space.calculateSpaceSize(start, end);
-            sizes.add(size);
-        }
-
-        return sizes;
-    }
-
-    /**
      * Get default checkpoint selector configuration.
      */
     public static CheckpointSelector defaultSelector() {
         return new CheckpointSelector(32, 16384);
-    }
-
-    /**
-     * Get high-performance checkpoint selector configuration.
-     */
-    public static CheckpointSelector highPerformanceSelector() {
-        return new CheckpointSelector(64, 8192);
-    }
-
-    /**
-     * Get memory-efficient checkpoint selector configuration.
-     */
-    public static CheckpointSelector memoryEfficientSelector() {
-        return new CheckpointSelector(16, 32768);
     }
 }

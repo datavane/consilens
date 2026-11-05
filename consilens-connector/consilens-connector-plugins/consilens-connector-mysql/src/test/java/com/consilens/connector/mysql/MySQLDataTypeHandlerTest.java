@@ -28,15 +28,13 @@ class MySQLDataTypeHandlerTest {
     @Test
     void testNormalizeColumn_Int() {
         String result = handler.normalizeColumn("age", DataType.INTEGER);
-        assertEquals("COALESCE(TRIM(CAST(`age` AS CHAR)), '0')", result);
+        assertEquals("COALESCE(TRIM(CAST(`age` AS CHAR)), '')", result);
     }
 
     @Test
     void testNormalizeColumn_Timestamp() {
         String result = handler.normalizeColumn("created_at", DataType.TIMESTAMP);
-        assertEquals(
-                "COALESCE(DATE_FORMAT(CONVERT_TZ(`created_at`, @@session.time_zone, '+00:00'), '%Y-%m-%d %H:%i:%s'), '')",
-                result);
+        assertEquals(expectedTemporal("created_at", "+00:00", "%Y-%m-%d %H:%i:%s"), result);
     }
 
     @Test
@@ -47,9 +45,7 @@ class MySQLDataTypeHandlerTest {
 
         String result = handler.normalizeColumn("created_at", DataType.TIMESTAMP);
 
-        assertEquals(
-                "COALESCE(DATE_FORMAT(CONVERT_TZ(`created_at`, @@session.time_zone, '+00:00'), '%Y-%m-%d'), '')",
-                result);
+        assertEquals(expectedTemporal("created_at", "+00:00", "%Y-%m-%d"), result);
     }
 
     @Test
@@ -61,9 +57,7 @@ class MySQLDataTypeHandlerTest {
 
         String result = handler.normalizeColumn("created_at", DataType.TIMESTAMP);
 
-        assertEquals(
-                "COALESCE(DATE_FORMAT(CONVERT_TZ(`created_at`, @@session.time_zone, 'Asia/Shanghai'), '%Y/%m/%d %H:%i:%s'), '')",
-                result);
+        assertEquals(expectedTemporal("created_at", "Asia/Shanghai", "%Y/%m/%d %H:%i:%s"), result);
     }
 
     @Test
@@ -80,9 +74,7 @@ class MySQLDataTypeHandlerTest {
 
         String result = handler.normalizeColumn("created_at", DataType.TIMESTAMP_WITH_TIMEZONE);
 
-        assertEquals(
-                "COALESCE(DATE_FORMAT(CONVERT_TZ(`created_at`, @@session.time_zone, 'Asia/Shanghai'), '%Y/%m/%d %H:%i:%s'), '')",
-                result);
+        assertEquals(expectedTemporal("created_at", "Asia/Shanghai", "%Y/%m/%d %H:%i:%s"), result);
     }
 
     @Test
@@ -94,9 +86,18 @@ class MySQLDataTypeHandlerTest {
 
         String result = handler.normalizeColumn("created_at", DataType.TIMESTAMP_WITH_TIMEZONE);
 
-        assertEquals(
-                "COALESCE(DATE_FORMAT(CONVERT_TZ(`created_at`, @@session.time_zone, 'Asia/Shanghai'), '%Y/%m/%d %H:%i:%s'), '')",
-                result);
+        assertEquals(expectedTemporal("created_at", "Asia/Shanghai", "%Y/%m/%d %H:%i:%s"), result);
+    }
+
+    /**
+     * 期望的时间归一化表达式：以固定锚点求"会话时区 → 目标时区"的秒偏移，再整体平移列值。
+     * 不用 CONVERT_TZ(col, @@session.time_zone, 'Asia/Shanghai') 直转：命名时区依赖
+     * mysql.time_zone 表，未导入时返回 NULL；锚点法只需偏移量。
+     */
+    private static String expectedTemporal(String column, String targetTimezone, String format) {
+        return "COALESCE(DATE_FORMAT(DATE_ADD(`" + column + "`, INTERVAL -TIMESTAMPDIFF(SECOND, "
+                + "CONVERT_TZ('2020-06-01 12:00:00', @@session.time_zone, '" + targetTimezone + "'), "
+                + "'2020-06-01 12:00:00') SECOND), '" + format + "'), '')";
     }
 
     @Test

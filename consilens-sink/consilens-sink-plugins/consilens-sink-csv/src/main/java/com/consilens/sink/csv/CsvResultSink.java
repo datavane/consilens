@@ -1,5 +1,6 @@
 package com.consilens.sink.csv;
 
+import com.consilens.common.io.PathSupport;
 import com.consilens.core.diff.DiffResult;
 import com.consilens.core.lifecycle.DiffContext;
 import com.consilens.sink.api.ColumnValueInterpolator;
@@ -50,9 +51,7 @@ public class CsvResultSink implements Sink {
             return;
         }
         Path path = Paths.get(resolvedPath);
-        if (path.getParent() != null) {
-            Files.createDirectories(path.getParent());
-        }
+        PathSupport.ensureParent(path);
         String delim = sinkConfig.getDelimiter();
         try (BufferedWriter writer = Files.newBufferedWriter(path)) {
             if (sinkConfig.hasCustomColumns()) {
@@ -70,7 +69,7 @@ public class CsvResultSink implements Sink {
             StringBuilder header = new StringBuilder();
             for (int i = 0; i < cols.size(); i++) {
                 if (i > 0) header.append(delim);
-                header.append(cols.get(i).getName());
+                header.append(escapeCSV(cols.get(i).getName(), delim));
             }
             writer.write(header.toString());
             writer.newLine();
@@ -103,9 +102,37 @@ public class CsvResultSink implements Sink {
         writer.newLine();
     }
 
+
+    /**
+     * 防止 CSV 注入：以 = + @ 或（非数字的）- 开头的单元格会被 Excel/Sheets 当作公式执行。
+     * 这类值统一加一个前导单引号，让表格软件按文本显示；纯数字（含负数）保持原样，
+     * 否则会把 -12.5 这类合法数值改坏。
+     */
+    private static String defuseFormula(String value) {
+        if (value == null || value.isEmpty()) {
+            return value;
+        }
+        char first = value.charAt(0);
+        boolean risky;
+        if (first == '=' || first == '+' || first == '@') {
+            risky = true;
+        } else if (first == '-') {
+            risky = !NUMERIC.matcher(value).matches();
+        } else {
+            risky = first == '\t' || first == '\r';
+        }
+        return risky ? "'" + value : value;
+    }
+
+    private static final java.util.regex.Pattern NUMERIC =
+            java.util.regex.Pattern.compile("-?\\d+(\\.\\d+)?([eE][-+]?\\d+)?");
+
     private String escapeCSV(String value, String delim) {
         if (value == null) return "";
-        if (value.contains(delim) || value.contains("\"") || value.contains("\n")) {
+        value = defuseFormula(value);
+        // 孤立 \r 也要引号包住：RFC4180 读取器（含 Excel）会把 CR 当记录结束，后续列全部错位
+        if (value.contains(delim) || value.contains("\"") || value.contains("\n")
+                || value.contains("\r")) {
             return "\"" + value.replace("\"", "\"\"") + "\"";
         }
         return value;

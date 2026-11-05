@@ -15,6 +15,46 @@ import java.util.Map;
  */
 public interface SqlQueryGenerator {
 
+    /**
+     * 重复键探针 SQL：按**比对口径**的键表达式（归一化 + 二进制安全）分组，取 count>1 的键。
+     * 严格档（validateUniqueKeys=true）在比对开始前用它做唯一性校验——键不唯一时
+     * "按键比对"不成立（join 会 N×M 倍增、checksum 归因会退化成全行 SM/TM）。
+     *
+     * <p>是否可用由 {@link #supportsKeyMultiplicityFilter()} 声明。
+     */
+    String getDuplicateKeyProbeSQL(String schemaName, String tableName, java.util.List<String> keyColumns,
+            java.util.Map<String, DataType> keyTypes, String whereClause);
+
+    /**
+     * 键多重性过滤器（开放档 join 用）：按比对口径的键表达式（归一化 + 二进制安全）判断
+     * "本行所属键在本侧是否重复/唯一"。
+     *
+     * <p>join 的 FULL OUTER JOIN 对重复键会 N×M 倍增。开放档的处理：键在任一侧重复的行
+     * 交给多重集配对引擎（与 checksum/streaming 同一实现），join 的 SQL 只跑"两侧键都唯一"
+     * 的子集（此时 1:1 无倍增）。过滤器即用同一键表达式表达这一划分，无需键字面量，
+     * 因此不存在跨方言的字面量编码/转义问题。
+     *
+     * <p>是否可用由 {@link #supportsKeyMultiplicityFilter()} 声明。
+     *
+     * @param duplicates true 取"重复键"集合（HAVING COUNT(*) &gt; 1）；false 取"唯一键"集合（= 1）
+     * @param outerQualifier 外层（被判定行）所在表的限定名（表名，可为 null）——子查询内必须
+     *                       限定外层引用，否则非限定列会绑定到子查询自己的别名（退化成自比较）
+     * @return 形如 {@code EXISTS (SELECT 1 FROM <rel> d WHERE <where> AND d.k = <keyExpr> ... GROUP BY ... HAVING ...)}
+     *         的谓词（无论单键还是复合键，实现都使用相关 EXISTS 子查询，不退化为 IN）
+     */
+    String getKeyMultiplicityFilterSQL(String schemaName, String tableName,
+            java.util.List<String> keyColumns, java.util.Map<String, DataType> keyTypes,
+            String whereClause, boolean duplicates, String outerQualifier);
+
+    /**
+     * 该方言能否表达键多重性过滤器（相关子查询 + 聚合）。
+     * Doris 目前报 "Unsupported correlated EXISTS subquery with a HAVING clause"，
+     * 此时 join 的开放档退化为**整表本地多重集配对**（结果仍与 checksum/streaming 一致）。
+     */
+    default boolean supportsKeyMultiplicityFilter() {
+        return true;
+    }
+
         /**
          * Generate a LIMIT clause for pagination.
          *
@@ -218,42 +258,6 @@ public interface SqlQueryGenerator {
         }
 
         /**
-         * Generate SQL for a full outer join between two tables.
-         *
-         * @param table1      the first table
-         * @param table2      the second table
-         * @param joinColumns the columns to join on
-         * @param whereClause optional WHERE clause
-         * @return SQL FULL OUTER JOIN query
-         */
-        String getFullOuterJoinSQL(String table1, String table2,
-                        List<String> joinColumns, String whereClause);
-
-        /**
-         * Generate SQL for a left outer join.
-         *
-         * @param table1      the first table
-         * @param table2      the second table
-         * @param joinColumns the columns to join on
-         * @param whereClause optional WHERE clause
-         * @return SQL LEFT OUTER JOIN query
-         */
-        String getLeftOuterJoinSQL(String table1, String table2,
-                        List<String> joinColumns, String whereClause);
-
-        /**
-         * Generate SQL for a right outer join.
-         *
-         * @param table1      the first table
-         * @param table2      the second table
-         * @param joinColumns the columns to join on
-         * @param whereClause optional WHERE clause
-         * @return SQL RIGHT OUTER JOIN query
-         */
-        String getRightOuterJoinSQL(String table1, String table2,
-                        List<String> joinColumns, String whereClause);
-
-        /**
          * Generate SQL for inserting data into a table.
          *
          * @param tableName the table name
@@ -383,11 +387,55 @@ public interface SqlQueryGenerator {
         /**
          * Generate SQL for join diff detail rows with diff type and diff column lists.
          */
+        /**
+         * 带列类型的 join diff 明细 SQL：比较列须按各方言归一化口径比较
+         * （TRIM / NULL→'' / %.4f / %.6f / 截断到秒 / hex 等），否则会出现
+         * "窗口内差异被报出、库内排序规则差异被吸收"的双向偏差。
+         *
+         * <p>默认实现退化为不带类型的老接口，保持既有实现兼容。
+         */
+        default String getJoinDiffDetailSQL(
+                        String schema1, String table1, String alias1,
+                        List<String> keyColumns1, List<String> compareColumns1,
+                        List<String> outputColumns1, String where1,
+                        Map<String, DataType> columnTypes1,
+                        String schema2, String table2, String alias2,
+                        List<String> keyColumns2, List<String> compareColumns2,
+                        List<String> outputColumns2, String where2,
+                        Map<String, DataType> columnTypes2) {
+                return getJoinDiffDetailSQL(schema1, table1, alias1, keyColumns1, compareColumns1,
+                                outputColumns1, where1, schema2, table2, alias2, keyColumns2,
+                                compareColumns2, outputColumns2, where2);
+        }
+
+        /**
+         * 带列类型的 join diff 统计 SQL，语义同 {@link #getJoinDiffDetailSQL}。
+         */
+        default String getJoinDiffStatsSQL(
+                        String schema1, String table1, String alias1,
+                        List<String> keyColumns1, List<String> compareColumns1, String where1,
+                        Map<String, DataType> columnTypes1,
+                        String schema2, String table2, String alias2,
+                        List<String> keyColumns2, List<String> compareColumns2, String where2,
+                        Map<String, DataType> columnTypes2) {
+                return getJoinDiffStatsSQL(schema1, table1, alias1, keyColumns1, compareColumns1, where1,
+                                schema2, table2, alias2, keyColumns2, compareColumns2, where2);
+        }
+
         String getJoinDiffDetailSQL(
                         String schema1, String table1, String alias1,
                         List<String> keyColumns1, List<String> compareColumns1, List<String> outputColumns1, String where1,
                         String schema2, String table2, String alias2,
                         List<String> keyColumns2, List<String> compareColumns2, List<String> outputColumns2, String where2);
+
+        /**
+         * Whether the dialect treats backslash as an escape character inside string
+         * literals (MySQL family, ClickHouse). When true, {@link #formatValue}
+         * doubles backslashes so a value ending in '\' cannot escape the closing quote.
+         */
+        default boolean backslashEscapesStringLiterals() {
+            return false;
+        }
 
         /**
          * Format a value for SQL literal usage.
@@ -400,8 +448,11 @@ public interface SqlQueryGenerator {
                 return "NULL";
             }
             if (value instanceof String) {
-                String str = value.toString().replace("'", "''");
-                return "'" + str + "'";
+                String str = value.toString();
+                if (backslashEscapesStringLiterals()) {
+                    str = str.replace("\\", "\\\\");
+                }
+                return "'" + str.replace("'", "''") + "'";
             }
             if (value instanceof Number) {
                 return value.toString();
@@ -409,7 +460,10 @@ public interface SqlQueryGenerator {
             if (value instanceof java.sql.Date || value instanceof java.sql.Timestamp) {
                 return "'" + value.toString() + "'";
             }
-            String str = value.toString().replace("'", "''");
-            return "'" + str + "'";
+            String str = value.toString();
+            if (backslashEscapesStringLiterals()) {
+                str = str.replace("\\", "\\\\");
+            }
+            return "'" + str.replace("'", "''") + "'";
         }
 }
